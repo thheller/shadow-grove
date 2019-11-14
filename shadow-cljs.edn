@@ -1,0 +1,38 @@
+;; shadow-cljs configuration
+{:source-paths
+ ["src/dev"
+  "src/main"
+  "src/test"]
+
+ :jvm-opts
+ ["-XX:-OmitStackTraceInFastThrow"]
+
+ :dependencies
+ []
+
+ :dev-http
+ {3005 "public"
+  3006 "examples/todomvc"}
+
+ :builds
+ {:test-dom
+  {:target :browser
+   :compiler-options {:infer-externs :auto
+                      :fn-invoke-direct false}
+   :modules {:main {:init-fn shadow.experiments.grove.test-app.dom/init}}}
+
+  :todomvc
+  {:target :browser
+   :output-dir "examples/todomvc/js"
+   :compiler-options {:infer-externs :auto}
+   :modules {:main {:init-fn shadow.experiments.grove.test-app.todomvc/init
+                    :preloads [shadow.experiments.grove.dev-support
+                               shadow.remote.runtime.cljs.browser]}}}
+
+  :bench-db
+  {:target :node-script
+   :compiler-options {:fn-invoke-direct true}
+   :output-to "out/bench-db.js"
+   :main shadow.experiments.grove.bench-db/main
+   :devtools {:enabled false}}
+  }}

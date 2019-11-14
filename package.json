@@ -1,0 +1,12 @@
+{
+  "name": "shadow-experiments",
+  "version": "0.0.1",
+  "private": true,
+  "devDependencies": {
+    "shadow-cljs": "^2.8.69"
+  },
+  "dependencies": {
+    "benchmark": "^2.1.4",
+    "microtime": "^3.0.0"
+  }
+}
