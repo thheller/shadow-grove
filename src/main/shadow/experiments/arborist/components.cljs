@@ -581,15 +581,13 @@
   {:pre [(fn? callback)]}
   (EventHook. ev-id nil nil callback))
 
-(deftype SimpleVal [^:mutable val component idx]
+(deftype SimpleVal [^:mutable val]
   p/IHook
   (hook-init! [this])
   (hook-ready? [this] true)
   (hook-value [this] val)
-  (hook-update! [this]
-    (throw (ex-info "simple val can't update itself?" {})))
+  (hook-update! [this])
   (hook-deps-update! [this new-val]
-    ;; FIXME: maybe should remove this comparison, might be big values
     (let [updated? (not= new-val val)]
       (set! val new-val)
       updated?))
@@ -597,8 +595,8 @@
 
 (extend-protocol p/IBuildHook
   default
-  (hook-build [val c i]
-    (SimpleVal. val c i)))
+  (hook-build [val component idx]
+    (SimpleVal. val)))
 
 (deftype SlotHook
   [slot-id ^ManagedComponent component idx node]

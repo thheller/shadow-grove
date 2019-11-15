@@ -79,33 +79,6 @@
   (<< [:ul.filters
        (sa/render-seq filter-options :value filter-row)]))
 
-(defonce bad-global-atom (atom {:foo 0}))
-
-(defc dummy-global [props]
-  [data
-   (sa/watch bad-global-atom)
-
-   ::atom-inc!
-   (fn [env e]
-     (swap! bad-global-atom update :foo inc))]
-
-  (<< [:div {:on-click [::atom-inc!]}
-       (pr-str data)]))
-
-(defc dummy-local [props]
-  [local-atom
-   (atom {:foo 0})
-
-   data
-   (sa/watch local-atom)
-
-   ::atom-inc!
-   (fn [env e]
-     (swap! local-atom update :foo inc))]
-
-  (<< [:div {:on-click [::atom-inc!]}
-       (pr-str data)]))
-
 (defc ui-root
   {::create-new!
    (fn [env ^js e]
@@ -134,12 +107,7 @@
    (fn [todo]
      (todo-item {:todo todo}))]
 
-  (<< [dummy-global]
-      [dummy-global]
-      [dummy-local]
-      [dummy-local]
-
-      [:header.header
+  (<< [:header.header
        [:h1 "todos"]
        [:input.new-todo {:on-keydown [::create-new!]
                          :placeholder "What needs to be done?"

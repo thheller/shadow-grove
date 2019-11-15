@@ -1,4 +1,4 @@
-(ns shadow.experiments.grove.html
+(ns shadow.experiments.grove.others.html
   (:refer-clojure :exclude (str))
   (:require
     [shadow.experiments.grove.builder :as build]

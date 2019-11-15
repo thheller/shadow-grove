@@ -172,7 +172,8 @@
   (hook-update! [this]
     ;; time to actually deref, any change after this will invalidate and trigger
     ;; an update again. this doesn't mean the value will actually get to render.
-    (set! val @the-atom))
+    (set! val @the-atom)
+    true)
   (hook-deps-update! [this new-val]
     (throw (ex-info "shouldn't have changing deps?" {})))
   (hook-destroy! [this]

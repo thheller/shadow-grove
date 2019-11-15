@@ -1,4 +1,4 @@
-(ns shadow.experiments.grove.protocols)
+(ns shadow.experiments.grove.others.protocols)
 
 ;; protocol is used in both CLJ and CLJS variants
 ;; just moved this in to this .cljc file to avoid repeating it

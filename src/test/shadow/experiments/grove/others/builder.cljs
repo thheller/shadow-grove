@@ -1,4 +1,4 @@
-(ns shadow.experiments.grove.builder
+(ns shadow.experiments.grove.others.builder
   (:require-macros [shadow.experiments.grove.builder])
   (:require
     [shadow.experiments.grove.protocols :as p]))

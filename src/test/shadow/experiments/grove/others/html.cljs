@@ -1,4 +1,4 @@
-(ns shadow.experiments.grove.html
+(ns shadow.experiments.grove.others.html
   (:require-macros [shadow.experiments.grove.html])
   (:refer-clojure :exclude (str))
   (:require

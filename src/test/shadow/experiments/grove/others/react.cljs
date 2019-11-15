@@ -1,4 +1,4 @@
-(ns shadow.experiments.grove.react
+(ns shadow.experiments.grove.others.react
   (:require-macros [shadow.experiments.grove.react])
   (:require
     ["react" :as react]

@@ -1,4 +1,4 @@
-(ns shadow.experiments.grove.react
+(ns shadow.experiments.grove.others.react
   (:require [shadow.experiments.grove.builder :as build])
   (:import [cljs.tagged_literals JSValue]))
 
