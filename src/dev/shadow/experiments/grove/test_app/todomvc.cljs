@@ -41,6 +41,7 @@
    (fn [env e todo]
      (test-fx #(sg/run-tx env ::delete! todo)))]
 
+  (js/console.log "render todo-item" todo-text completed?)
   (<< [:li {::sfx/effect test-fx
             :class {:completed completed?
                     :editing editing?}}
@@ -256,9 +257,9 @@
     {:db
      (reduce
        (fn [db ident]
-         (update db ident assoc ::completed? completed?))
+         (assoc-in db [ident ::completed?] completed?))
        db
-       (db/all-of db ::todo))}))
+       (db/all-idents-of db ::todo))}))
 
 (defn ^:dev/after-load start []
   (sg/start app-env root-el ui-root {}))
