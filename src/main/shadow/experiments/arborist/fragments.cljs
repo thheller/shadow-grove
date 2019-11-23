@@ -12,11 +12,6 @@
   [s]
   s)
 
-(defonce fragment-cache-ref (atom {}))
-
-(defn ^:dev/before-load clear-fragments! []
-  (reset! fragment-cache-ref {}))
-
 (defn array-equiv [a b]
   (let [al (alength a)
         bl (alength b)]
@@ -36,7 +31,7 @@
     (when-not (neg? idx)
       (aset a idx swap))))
 
-(deftype FragmentController [frag-id create-fn update-fn]
+(deftype FragmentCode [frag-id ^function create-fn ^function update-fn]
   p/IControlFragment
   (fragment-build [this env vals]
     (create-fn env vals))
@@ -48,7 +43,7 @@
 
 (deftype ManagedFragment
   [env
-   ^:mutable ^not-native control
+   ^not-native code
    ^:mutable vals
    marker
    roots
@@ -79,12 +74,14 @@
   p/IUpdatable
   (supports? [this ^FragmentNode next]
     (and (fragment-node? next)
-         (identical? control (.-control next))))
+         ;; FIXME: teach compiler inference some new tricks so
+         ;; (.. next -code -frag-id) doesn't complain
+         (identical? (.-frag-id code) (. ^FragmentCode (. next -code) -frag-id))))
 
   (dom-sync! [this ^FragmentNode next]
     (let [nvals (.-vals next)]
       ;; impl decides what to update, no need to compare
-      (p/fragment-update control env roots nodes vals nvals)
+      (p/fragment-update code env roots nodes vals nvals)
       (set! vals nvals))
     :synced)
 
@@ -107,17 +104,16 @@
     (set! (.-length roots) 0)
     (set! (.-length nodes) 0)))
 
-(deftype FragmentNode [frag-id vals control]
+(deftype FragmentNode [vals ^FragmentCode code]
   p/IConstruct
   (as-managed [_ env]
-    (let [state (p/fragment-build control env vals)]
-      (ManagedFragment. env control vals (common/marker env) (aget state 0) (aget state 1))))
+    (let [state (p/fragment-build code env vals)]
+      (ManagedFragment. env code vals (common/marker env) (aget state 0) (aget state 1))))
 
   IEquiv
   (-equiv [this ^FragmentNode other]
     (and (instance? FragmentNode other)
-         (identical? frag-id (.-frag-id other))
-         (identical? control (.-control other))
+         (identical? (.-frag-id code) (. ^FragmentCode (. other -code) -frag-id))
          (array-equiv vals (.-vals other)))))
 
 (defn fragment-node? [thing]
@@ -127,20 +123,18 @@
 ;; called from macro
 ;;
 
-(defn fragment-get [frag-id vals]
-  (when-let [control (get @fragment-cache-ref frag-id)]
-    (FragmentNode. frag-id vals control)))
+;; optimized variant
+;; allocates fragment-code once, uses it multiple times
+(defn fragment-create [frag-id create-fn update-fn]
+  (FragmentCode. frag-id create-fn update-fn))
 
-(defn fragment-create ^not-native [frag-id create-fn update-fn]
-  (FragmentController. frag-id create-fn update-fn))
+(defn fragment-node [^FragmentCode code vals]
+  (FragmentNode. vals code))
 
-(defn fragment-node [^FragmentController control vals]
-  (FragmentNode. (.-frag-id control) vals control))
-
-(defn fragment-reg [frag-id vals create-fn update-fn]
-  (let [control (FragmentController. frag-id create-fn update-fn)]
-    (swap! fragment-cache-ref assoc frag-id control)
-    (FragmentNode. frag-id vals control)))
+;; fallback, re-allocating the functions each time
+(defn fragment-new [frag-id vals create-fn update-fn]
+  (FragmentNode. vals
+    (FragmentCode. frag-id create-fn update-fn)))
 
 ;; FIXME: should maybe take ::document from env
 ;; not sure under which circumstance this would ever need a different document instance though
