@@ -18,7 +18,7 @@
           (and (symbol? key)
                (keyword? val))
           (-> state
-              (update-in [:hook-bindings] conj key `(cljs.core/-lookup ~ref-name ~val ~(get defaults key)))
+              (update-in [:hook-bindings] conj key `(~val ~ref-name ~(get defaults key)))
               (recur more))
 
           ;; {:keys [bar] ::keys [foo]}
@@ -30,7 +30,7 @@
                   (fn [state sym]
                     (assert (simple-symbol? sym) "don't support keywords in destructure yet")
                     (let [kw (keyword ns (name sym))]
-                      (update-in state [:hook-bindings] conj sym `(cljs.core/-lookup ~ref-name ~kw ~(get defaults sym)))
+                      (update-in state [:hook-bindings] conj sym `(~kw ~ref-name ~(get defaults sym)))
                       ))
                   val)
                 (recur more)))

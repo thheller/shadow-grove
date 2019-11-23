@@ -1,6 +1,6 @@
 (ns shadow.experiments.grove.test-app.todomvc
   (:require
-    [shadow.experiments.arborist :as sa :refer (<< defc)]
+    [shadow.experiments.arborist :as sa :refer (<> defc)]
     [shadow.experiments.grove :as sg]
     [shadow.experiments.grove.db :as db]
     [shadow.experiments.arborist.effects :as sfx]))
@@ -41,8 +41,7 @@
    (fn [env e todo]
      (test-fx #(sg/run-tx env ::delete! todo)))]
 
-  (js/console.log "render todo-item" todo-text completed?)
-  (<< [:li {::sfx/effect test-fx
+  (<> [:li {::sfx/effect test-fx
             :class {:completed completed?
                     :editing editing?}}
        [:div.view
@@ -53,7 +52,7 @@
         [:button.destroy {:on-click [delete! todo]}]]
 
        (when editing?
-         (<< [:input#edit.edit {:autofocus true
+         (<> [:input#edit.edit {:autofocus true
                                 :on-keydown [::edit-update! todo]
                                 :on-blur [::edit-complete! todo]
                                 :value todo-text}]))]))
@@ -71,13 +70,13 @@
 
    filter-row
    (fn [{:keys [label value]}]
-     (<< [:li [:a
+     (<> [:li [:a
                {:class {:selected (= current-filter value)}
                 :href "#"
                 :on-click [::set-filter! value]}
                label]]))]
 
-  (<< [:ul.filters
+  (<> [:ul.filters
        (sa/render-seq filter-options :value filter-row)]))
 
 (defc ui-root
@@ -108,14 +107,14 @@
    (fn [todo]
      (todo-item {:todo todo}))]
 
-  (<< [:header.header
+  (<> [:header.header
        [:h1 "todos"]
        [:input.new-todo {:on-keydown [::create-new!]
                          :placeholder "What needs to be done?"
                          :autofocus true}]]
 
       (when (pos? num-total)
-        (<< [:section.main
+        (<> [:section.main
              [:input#toggle-all.toggle-all
               {:type "checkbox"
                :on-change [::toggle-all!]
@@ -129,10 +128,10 @@
               [:span.todo-count
                [:strong num-active] (if (= num-active 1) " item" " items") " left"]
 
-              [ui-filter-select]
+              (ui-filter-select)
 
               (when (pos? num-completed)
-                (<< [:button.clear-completed {:on-click [::clear-completed!]} "Clear completed"]))]]))
+                (<> [:button.clear-completed {:on-click [::clear-completed!]} "Clear completed"]))]]))
       ))
 
 (defonce root-el (js/document.getElementById "app"))
@@ -153,7 +152,10 @@
       (db/merge-seq ::todo init-todos)
       (atom)))
 
-(defonce app-env (sg/env {} ::todomvc data-ref))
+(defonce app-env
+  (-> {}
+      (sa/init)
+      (sg/env ::todomvc data-ref)))
 
 (defmethod db/query-calc ::num-active
   [env db current _ params]
@@ -180,7 +182,7 @@
   (let [filter-fn
         (case current-filter
           :all
-          (constantly true)
+          (fn [x] true)
           :active
           #(not (::completed? %))
           :completed
@@ -265,5 +267,4 @@
   (sg/start app-env root-el ui-root {}))
 
 (defn init []
-  (tap> app-env)
   (start))

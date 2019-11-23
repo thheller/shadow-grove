@@ -6,6 +6,7 @@
     [shadow.experiments.arborist.components :as comp]
     [shadow.remote.runtime.api :as rapi]
     [shadow.experiments.grove :as sg]
+    [shadow.experiments.grove.protocols :as sp]
     [shadow.experiments.arborist :as sa]))
 
 ;; sketch of some of the development support might work
@@ -124,3 +125,18 @@
     {:container (.-container this)
      :env (.-env this)
      :root (.-root this)}))
+
+(extend-type sp/Ident
+  cp/Datafiable
+  (datafy [this]
+    [(.-entity-type this)
+     (.-id this)])
+
+  IPrintWithWriter
+  (-pr-writer [this writer opts]
+    (-write writer "#db-ident ")
+    (-pr-writer
+      [(.-entity-type this)
+       (.-id this)]
+      writer
+      opts)))

@@ -236,6 +236,9 @@
            target-path
            (update-in target-path conj ident))))))
 
+(defn update-entity [data entity-type id update-fn & args]
+  ;; FIXME: validate that both entity-type is defined and id matches type
+  (update data (make-ident entity-type id) #(apply update-fn % args)))
 
 (declare
   ^{:arglists '([env db query-data] [env db current query-data])}

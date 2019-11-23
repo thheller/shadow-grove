@@ -210,9 +210,10 @@
   (perf-start! [this])
   (perf-destroy! [this])
 
+  ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
   ;; can't do this in the ComponentNode.as-managed since we need the this pointer
-  (component-init! [^ComponentInstance this]
+  (^clj component-init! [^ComponentInstance this]
     (let [child-env
           (-> parent-env
               (update ::depth safe-inc)
@@ -235,10 +236,10 @@
       (while (p/work-pending? this)
         (p/work! this))))
 
-  (get-hook-value [this idx]
+  (^clj get-hook-value [this idx]
     (p/hook-value (aget hooks idx)))
 
-  (invalidate-hook! [this idx]
+  (^clj invalidate-hook! [this idx]
     ;; (js/console.log "invalidate-hook!" idx (:component-name config) this)
 
     (set! dirty-hooks (bit-set dirty-hooks idx))
@@ -247,9 +248,9 @@
 
     (p/schedule-update! (::scheduler component-env) this))
 
-  (run-next! [this]
+  (^clj run-next! [^not-native this]
     ;; (js/console.log "Component:run-next!" (:component-name config) current-idx)
-    (if (= current-idx (alength (.-hooks config)))
+    (if (identical? current-idx (alength (.-hooks config)))
       ;; all hooks done
       (.component-render! this)
 
@@ -260,7 +261,7 @@
         (cond
           ;; doesn't exist, create it
           (not hook)
-          (let [run-fn (-> (.-hooks config) (aget current-idx) (.-run))
+          (let [^function run-fn (-> (.-hooks config) (aget current-idx) (.-run))
                 val (run-fn this)
                 hook (p/hook-build val this current-idx)]
 
@@ -293,7 +294,7 @@
                     (and (not (identical? props rendered-props))
                          (bit-test (.-props-affects config) current-idx)))
 
-                run (.-run hook-config)
+                ^function run (.-run hook-config)
 
                 did-update? ;; checks if hook deps changed as well, calling init again
                 (if deps-updated?
@@ -331,7 +332,7 @@
           :else
           (set! current-idx (inc current-idx))))))
 
-  (component-render! [^ComponentInstance this]
+  (^clj component-render! [^ComponentInstance this]
     (assert (zero? dirty-hooks) "Got to render while hooks are dirty")
     ;; (js/console.log "Component:render!" (:component-name config) updated-hooks)
     (set! updated-hooks 0)
@@ -353,19 +354,19 @@
         ;; FIXME: run dom after effects
         )))
 
-  (register-event! [this event-id callback]
+  (^clj register-event! [this event-id callback]
     (set! events (assoc events event-id callback)))
 
-  (unregister-event! [this event-id callback]
+  (^clj unregister-event! [this event-id callback]
     (set! events (dissoc events event-id)))
 
-  (get-slot [this slot-id]
+  (^clj get-slot [this slot-id]
     (get slots slot-id))
 
-  (set-slot! [this slot-id slot]
+  (^clj set-slot! [this slot-id slot]
     (set! slots (assoc slots slot-id slot)))
 
-  (swap-state! [this update-fn]
+  (^clj swap-state! [this update-fn]
     (let [next-state (update-fn state)]
       (when-not (identical? state next-state)
         (set! state next-state)
@@ -516,10 +517,10 @@
 
     cfg))
 
-(defn get-props [^ManagedComponent comp]
+(defn get-props ^not-native [^ManagedComponent comp]
   (.-props comp))
 
-(defn get-state [^ManagedComponent comp]
+(defn get-state ^not-native [^ManagedComponent comp]
   (.-state comp))
 
 (defn get-dom-ref [{::keys [dom-refs] :as env} ref-id]

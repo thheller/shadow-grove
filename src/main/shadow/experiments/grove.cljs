@@ -20,7 +20,7 @@
     ::app-id app-id
     ::data-ref data-ref
     ::active-queries-ref (atom #{})
-    ::events-ref (atom {})))
+    ::config-ref (atom {:events {}})))
 
 (defn start [env root-el ui-root root-props]
   (let [active (get @active-roots-ref root-el)]
@@ -284,14 +284,14 @@
     active-queries))
 
 (defn tx*
-  [{::keys [events-ref data-ref active-queries-ref]
+  [{::keys [config-ref data-ref active-queries-ref]
     ::comp/keys [ev-id]
     :as env}
    params]
   ;; (js/console.log ::db-tx env tx-id params)
 
   (let [{:keys [interceptors handler-fn] :as event}
-        (get @events-ref ev-id)]
+        (get-in @config-ref [:events ev-id])]
 
     (if-not event
       (js/console.warn "no event handler for" ev-id params)
@@ -304,6 +304,16 @@
             (handler-fn (assoc env :db tx-db) params)]
 
         ;; FIXME: move all of this out to interceptor chain
+
+        (let [config @config-ref]
+          (reduce-kv
+            (fn [_ key value]
+              (let [fx-fn (get-in config [:fx key])]
+                (if-not fx-fn
+                  (js/console.warn "invalid fx" key value)
+                  (fx-fn env value))))
+            nil
+            (dissoc result :db)))
 
         (when (seq interceptors)
           (js/console.warn "TBD, ignored interceptors for event" ev-id))
@@ -333,6 +343,10 @@
 (defn run-tx [env other params]
   (tx* (assoc env ::comp/ev-id other) params))
 
-(defn reg-event-fx [{::keys [events-ref] :as env} ev-id interceptors handler-fn]
-  (swap! events-ref assoc ev-id {:handler-fn handler-fn
-                                 :interceptors interceptors}))
+(defn reg-event-fx [{::keys [config-ref] :as env} ev-id interceptors handler-fn]
+  (swap! config-ref assoc-in [:events ev-id]
+    {:handler-fn handler-fn
+     :interceptors interceptors}))
+
+(defn reg-fx [{::keys [config-ref] :as env} fx-id handler-fn]
+  (swap! config-ref assoc-in [:fx fx-id] handler-fn))

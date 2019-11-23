@@ -382,7 +382,7 @@
              (into []))
 
         code-sym
-        (gensym)
+        (gensym "fragment__")
 
         ;; FIXME: use something that is guaranteed unique but shorter
         ;; can't use gensym because of caching (might cause conflicts when re-used)
@@ -390,13 +390,27 @@
         ;; in production build and just make everything bigger (not much but still)
         frag-id (str (-> macro-env :ns :name) "@" (:line macro-env) ":" (:column macro-env))]
 
-    `(let [~code-sym (cljs.core/array ~@code-snippets)
-           frag-id# (fragment-id ~frag-id)]
+    ;; compiler hack variant that can declare a fragment properly at the top level so we can
+    ;; save checking every time it is accessed. also makes hot-reload simpler.
+    ;; FIXME: need to determine this is actually better though since it moves all fragment initialization to the load phase.
+    ;; instead of first access which might be better overall?
+    ;; FIXME: also need to check DCE
 
-       ;; I'm going to regret this, only doing it because (or ...) emits the cljs.core.truth_ check
-       ;; but fragment-get doesn't return a boolean, so dunno how to get rid of it
-       (~'js* "(~{} || ~{})"
-         (fragment-get frag-id# ~code-sym)
-         (fragment-reg frag-id# ~code-sym ~(make-build-impl ast) ~(make-update-impl ast)))
-       )))
+    (let [analyze-top (:shadow.build.compiler/analyze-top macro-env)]
+      (when-not analyze-top
+        (throw (ex-info "shadow-cljs is currently required to build this!" {})))
+      (analyze-top `(def ~code-sym (fragment-create (fragment-id ~frag-id) ~(make-build-impl ast) ~(make-update-impl ast)))))
+
+    `(fragment-node ~code-sym (cljs.core/array ~@code-snippets))
+
+    ;; inline variant that has to check each time if a fragment is already defined or not
+    #_`(let [~code-sym (cljs.core/array ~@code-snippets)
+             frag-id# (fragment-id ~frag-id)]
+
+         ;; I'm going to regret this, only doing it because (or ...) emits the cljs.core.truth_ check
+         ;; but fragment-get doesn't return a boolean, so dunno how to get rid of it
+         (~'js* "(~{} || ~{})"
+           (fragment-get frag-id# ~code-sym)
+           (fragment-reg frag-id# ~code-sym ~(make-build-impl ast) ~(make-update-impl ast)))
+         )))
 

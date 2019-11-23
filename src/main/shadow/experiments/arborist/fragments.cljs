@@ -131,6 +131,12 @@
   (when-let [control (get @fragment-cache-ref frag-id)]
     (FragmentNode. frag-id vals control)))
 
+(defn fragment-create ^not-native [frag-id create-fn update-fn]
+  (FragmentController. frag-id create-fn update-fn))
+
+(defn fragment-node [^FragmentController control vals]
+  (FragmentNode. (.-frag-id control) vals control))
+
 (defn fragment-reg [frag-id vals create-fn update-fn]
   (let [control (FragmentController. frag-id create-fn update-fn)]
     (swap! fragment-cache-ref assoc frag-id control)

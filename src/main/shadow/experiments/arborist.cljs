@@ -59,7 +59,7 @@
     (.add t (DummyCompare. 100 5 "some.event"))
     (.inOrderTraverse t prn)))
 
-(deftype TreeScheduler [root ^AvlTree work-tree ^:mutable update-pending?]
+(deftype TreeScheduler [^AvlTree work-tree ^:mutable update-pending?]
   p/IScheduleUpdates
   (schedule-update! [this component]
     (.add work-tree component)
@@ -122,11 +122,13 @@
     (when root
       (p/destroy! root))))
 
+(defn init [env]
+  (assoc env ::comp/scheduler (TreeScheduler. (AvlTree. work-comparator) false)))
+
 (defn dom-root
   ([container env]
    (let [root (TreeRoot. container nil nil)
-         scheduler (TreeScheduler. root (AvlTree. work-comparator) false)
-         root-env (assoc env ::root root ::comp/scheduler scheduler)]
+         root-env (assoc env ::root root)]
      (set! (.-env root) root-env)
      root))
   ([container env init]

@@ -11,6 +11,38 @@
     [fulcro.client.dom :as fulcro-dom]
     [clojure.string :as str]))
 
+
+(defn card [{:keys [title body]}]
+  (<> [:div.card
+       [:div.card-title title]
+       [:div.card-body body]
+       [:div.card-footer
+        [:div.card-actions
+         [:button "ok"]
+         [:button "cancel"]]]]))
+
+(defn card [{:keys [title body]}]
+  (fragment-create "dummy-id" [title body]
+    (fn create-fn [state] ...)
+    (fn update-fn [state] ...)))
+
+(def fragment-123
+  (fragment-create
+    (fn create-fn [state] ...)
+    (fn update-fn [state] ...)))
+
+(defn card [{:keys [title body]}]
+  (fragment-use fragment-123 [title body]))
+
+
+(defn card [{:keys [title body]}]
+  (do (def fragment-123
+        (fragment-create
+          (fn create-fn [state] ...)
+          (fn update-fn [state] ...)))
+      (fragment-use fragment-123 [title body])))
+
+
 (defn reagent-render [{:keys [title body items]}]
   (rdom/renderToString
     (reagent/as-element
