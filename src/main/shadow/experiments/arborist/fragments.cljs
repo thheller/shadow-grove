@@ -32,12 +32,11 @@
       (aset a idx swap))))
 
 (deftype FragmentCode [frag-id ^function create-fn ^function update-fn]
-  p/IControlFragment
-  (fragment-build [this env vals]
+  Object
+  (^array create [this env vals]
     (create-fn env vals))
-
-  (fragment-update [this env roots nodes ovals nvals]
-    (update-fn env roots nodes ovals nvals)))
+  (^array update [this env roots nodes vals nvals]
+    (update-fn env roots nodes vals nvals)))
 
 (declare fragment-node?)
 
@@ -80,8 +79,9 @@
 
   (dom-sync! [this ^FragmentNode next]
     (let [nvals (.-vals next)]
-      ;; impl decides what to update, no need to compare
-      (p/fragment-update code env roots nodes vals nvals)
+      (.update code env roots nodes vals nvals)
+
+
       (set! vals nvals))
     :synced)
 
@@ -107,7 +107,7 @@
 (deftype FragmentNode [vals ^FragmentCode code]
   p/IConstruct
   (as-managed [_ env]
-    (let [state (p/fragment-build code env vals)]
+    (let [state (.create code env vals)]
       (ManagedFragment. env code vals (common/marker env) (aget state 0) (aget state 1))))
 
   IEquiv

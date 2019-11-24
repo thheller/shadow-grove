@@ -1,10 +1,6 @@
 (ns shadow.experiments.arborist.protocols
   (:refer-clojure :exclude #{swap!}))
 
-(defprotocol IControlFragment
-  (fragment-build [this env vals] "returns fragment state, required for update")
-  (fragment-update [this env root nodes ovals nvals]))
-
 (defprotocol IConstruct
   (as-managed [this env]))
 
