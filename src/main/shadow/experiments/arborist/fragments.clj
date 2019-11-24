@@ -381,17 +381,28 @@
                     snippet))
              (into []))
 
+        ;; for ns vars only, must not be used as string id
+        code-id
+        (gensym "fragment__")
+
+        ;; this needs to be unique enough to not have collisions when using caching
+        ;; just code-id isn't unique enough since multiple namespaces may end up with
+        ;; fragment__123 when using incremental compiles and caching. adding the ns
+        ;; ensures that can't happen because when a ns is changed all its ids will as well
+
+        ;; closure will shorten this in :advanced by using the fragment-id generator
+        ;; so length does not matter
         frag-id
-        (gensym "fragment__")]
+        `(fragment-id ~(str *ns* "/" code-id))]
 
     (if-let [analyze-top (:shadow.build.compiler/analyze-top macro-env)]
       ;; optimal variant, best performance, requires special support from compiler
-      (do (analyze-top `(def ~frag-id (fragment-create (fragment-id ~(str frag-id)) ~(make-build-impl ast) ~(make-update-impl ast))))
-          `(fragment-node ~frag-id (cljs.core/array ~@code-snippets)))
+      (do (analyze-top `(def ~code-id (fragment-create ~frag-id ~(make-build-impl ast) ~(make-update-impl ast))))
+          `(fragment-node ~code-id (cljs.core/array ~@code-snippets)))
       ;; fallback, probably good enough
       ;; allocates both functions each time but runtime can check identical? on frag-id
       `(fragment-new
-         (fragment-id ~(str frag-id))
+         ~frag-id
          (cljs.core/array ~@code-snippets)
          ~(make-build-impl ast)
          ~(make-update-impl ast)
