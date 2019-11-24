@@ -14,7 +14,8 @@
 
  :dev-http
  {3005 "public"
-  3006 "examples/todomvc"}
+  3006 "examples/todomvc"
+  3007 "examples/conduit"}
 
  :builds
  {:test-dom
@@ -29,6 +30,15 @@
    :compiler-options {:infer-externs :auto
                       :shadow-keywords true}
    :modules {:main {:init-fn shadow.experiments.grove.test-app.todomvc/init
+                    :preloads [shadow.experiments.grove.dev-support
+                               shadow.remote.runtime.cljs.browser]}}}
+
+  :conduit
+  {:target :browser
+   :output-dir "examples/conduit/js"
+   :compiler-options {:infer-externs :auto
+                      :shadow-keywords true}
+   :modules {:main {:init-fn conduit.frontend/init
                     :preloads [shadow.experiments.grove.dev-support
                                shadow.remote.runtime.cljs.browser]}}}
 

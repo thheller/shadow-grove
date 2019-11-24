@@ -97,6 +97,11 @@
         form
         (with-meta form m)))))
 
+(defn maybe-css-join [{:keys [class] :as attrs} html-class]
+  (if-not class
+    (assoc attrs :class html-class)
+    (assoc attrs :class `(css-join ~html-class ~class))))
+
 (defn analyze-dom-element [env [tag-kw attrs :as el]]
   (let [[attrs children]
         (if (and attrs (map? attrs))
@@ -118,12 +123,6 @@
                         :tag-kw tag-kw
                         :attrs attrs}))))
 
-        _ (when (and html-class (:class attrs))
-            (throw (ex-info "cannot have :class attribute AND el.class"
-                     (merge (meta el)
-                       {:type ::input-error
-                        :tag-kw tag-kw :attrs attrs}))))
-
         attrs
         (-> attrs
             (cond->
@@ -131,7 +130,7 @@
               (assoc :id html-id)
 
               html-class
-              (assoc :class html-class)))
+              (maybe-css-join html-class)))
 
         tag (keyword (namespace tag-kw) tag)
 

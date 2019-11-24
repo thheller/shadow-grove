@@ -91,7 +91,7 @@
   (datafy [this]
     {:val (.-val this)}))
 
-(extend-type sg/QueryNode
+(extend-type sg/QueryHook
   cp/Datafiable
   (datafy [this]
     {:ident (.-ident this)
@@ -106,7 +106,7 @@
   IPrintWithWriter
   (-pr-writer [this writer opts]
     (-pr-writer
-      [::sg/QueryNode
+      [::sg/QueryHook
        (.-ident this)
        (.-query this)]
       writer

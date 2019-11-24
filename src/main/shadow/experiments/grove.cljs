@@ -72,7 +72,7 @@
 (defn observed [data]
   (ObservedData. (transient #{}) data))
 
-(deftype QueryNode
+(deftype QueryHook
   [ident
    query
    component
@@ -83,7 +83,7 @@
 
   p/IBuildHook
   (hook-build [this c i]
-    (QueryNode. ident query c i (comp/get-env c) nil nil))
+    (QueryHook. ident query c i (comp/get-env c) nil nil))
 
   p/IHook
   (hook-init! [this]
@@ -95,7 +95,7 @@
 
   ;; node deps changed, node may have too
   (hook-deps-update! [this val]
-    (js/console.log "QueryNode:node-deps-update!" idx this val)
+    (js/console.log "QueryHook:node-deps-update!" idx this val)
     false)
 
   ;; node was invalidated and needs update, but its dependencies didn't change
@@ -135,9 +135,12 @@
 
 (defn query
   ([query]
-   (QueryNode. nil query nil nil nil nil nil))
+   {:pre [(vector? query)]}
+   (QueryHook. nil query nil nil nil nil nil))
   ([ident query]
-   (QueryNode. ident query nil nil nil nil nil)))
+   {:pre [(db/ident? ident)
+          (vector? query)]}
+   (QueryHook. ident query nil nil nil nil nil)))
 
 (deftype TransactedData
   [^not-native data
@@ -275,7 +278,7 @@
 ;; FIXME: very inefficient, maybe worth maintaining an index
 (defn invalidate-queries! [active-queries keys-to-invalidate]
   (run!
-    (fn [^QueryNode query]
+    (fn [^QueryHook query]
       (run!
         (fn [key]
           (when (.affected-by-key? query key)
@@ -350,3 +353,9 @@
 
 (defn reg-fx [{::keys [config-ref] :as env} fx-id handler-fn]
   (swap! config-ref assoc-in [:fx fx-id] handler-fn))
+
+(defn form [defaults])
+
+(defn form-values [form])
+
+(defn form-reset! [form])

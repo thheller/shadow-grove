@@ -384,8 +384,11 @@
 (set! *warn-on-infer* true)
 
 (defn component-create [env config props]
-  (when-not (instance? p/ComponentConfig config)
-    (throw (ex-info "not a component definition" {:config config :props props})))
+  (when ^boolean js/goog.DEBUG
+    (when-not (instance? p/ComponentConfig config)
+      (throw (ex-info "not a component definition" {:config config :props props})))
+    (when-not (map? props)
+      (throw (ex-info "components can only receive a map as props" {:props props}))))
 
   (doto (ManagedComponent. env nil props nil props nil config {} nil {} 0 nil 0 0 true false)
     (.component-init!)))

@@ -125,6 +125,9 @@
 (defn init [env]
   (assoc env ::comp/scheduler (TreeScheduler. (AvlTree. work-comparator) false)))
 
+(defn run-now! [env callback]
+  (p/run-now! (::comp/scheduler env) callback))
+
 (defn dom-root
   ([container env]
    (let [root (TreeRoot. container nil nil)

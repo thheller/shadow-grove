@@ -216,3 +216,5 @@
       (.insertBefore (.-parentNode slot) child slot)
       (p/dom-insert child (.-parentNode slot) slot))))
 
+(defn css-join [from-el from-attrs]
+  [from-el from-attrs])

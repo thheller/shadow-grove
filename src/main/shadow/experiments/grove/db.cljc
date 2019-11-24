@@ -49,7 +49,7 @@
     spec))
 
 (defn make-ident [type id]
-  (p/Ident. type id))
+  (p/Ident. type id nil))
 
 (defn ident? [thing]
   (instance? p/Ident thing))
@@ -288,37 +288,42 @@
                     (query-calc env db current join-key {}))]
 
               (cond
-                (map? join-val)
-                (assoc! result join-key (query env db join-val join-attrs))
+                ;; {:some-prop [:some-other-ident 123]}
+                (ident? join-val)
+                (assoc! result join-key (query env db (get db join-val) join-attrs))
 
+                ;; {:some-prop [[:some-other-ident 123] [:some-other-ident 456]]}
                 (coll? join-val)
                 (assoc! result join-key
-                  (->> join-val
-                       (map (fn [join-item]
-                              (cond
-                                (ident? join-item)
-                                (query env db (get db join-item) join-attrs)
+                  (mapv
+                    (fn [join-item]
+                      (cond
+                        (ident? join-item)
+                        (query env db (get db join-item) join-attrs)
 
-                                (map? join-item)
-                                (query env db join-item join-attrs)
+                        (map? join-item)
+                        (query env db join-item join-attrs)
 
-                                :else
-                                (throw (ex-info "join-value contained unknown thing"
-                                         {:join-key join-key
-                                          :join-val join-val
-                                          :join-item join-item
-                                          :current current}))
+                        :else
+                        (throw (ex-info "join-value contained unknown thing"
+                                 {:join-key join-key
+                                  :join-val join-val
+                                  :join-item join-item
+                                  :current current}))))
+                    join-val))
 
-                                )))
-                       (vec)))
+                ;; non-normalized nested-map
+                (map? join-val)
+                (assoc! result join-key (query env db join-val join-attrs))
 
                 :else
                 (throw (ex-info "don't know how to join" {:query-part query-part :join-val join-val :join-key join-key}))))
 
             ;; from root
             (ident? join-key)
-            (let [join-val (get db join-key)]
-              (assoc! result join-key (query env db join-val join-attrs)))
+            (if-some [join-val (get db join-key)]
+              (assoc! result join-key (query env db join-val join-attrs))
+              result)
 
             :else
             (throw (ex-info "failed to join" {:query-part query-part})))))
