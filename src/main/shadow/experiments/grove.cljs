@@ -162,26 +162,22 @@
      :keys-removed (persistent! keys-removed)})
 
   ILookup
-  (-lookup [_ key]
-    (when @completed-ref
-      (throw (ex-info "transaction concluded. never hold onto transacted db instance" {})))
+  (-lookup [this key]
+    (.check-completed! this)
     (-lookup data key))
 
-  (-lookup [_ key default]
-    (when @completed-ref
-      (throw (ex-info "transaction concluded. never hold onto transacted db instance" {})))
+  (-lookup [this key default]
+    (.check-completed! this)
     (-lookup data key default))
 
   ICounted
-  (-count [_]
-    (when @completed-ref
-      (throw (ex-info "transaction concluded. never hold onto transacted db instance" {})))
+  (-count [this]
+    (.check-completed! this)
     (-count data))
 
   IMap
-  (-dissoc [_ key]
-    (when @completed-ref
-      (throw (ex-info "transaction concluded. never hold onto transacted db instance" {})))
+  (-dissoc [this key]
+    (.check-completed! this)
 
     (let [key-is-ident?
           (db/ident? key)
@@ -209,8 +205,8 @@
 
   IAssociative
   (-assoc [this key value]
-    (when @completed-ref
-      (throw (ex-info "transaction concluded, you need a different vault" {})))
+    (.check-completed! this)
+
     (when (nil? key)
       (throw (ex-info "nil key not allowed" {:value value})))
 
@@ -265,7 +261,13 @@
                   (conj! (db/coll-key key)))
               keys-removed
               completed-ref))
-          )))))
+          ))))
+
+  Object
+  (^clj check-completed! [this]
+    (when @completed-ref
+      (throw (ex-info "transaction concluded, don't hold on to db while in tx" {})))
+    ))
 
 (defn transacted [data]
   (TransactedData.
