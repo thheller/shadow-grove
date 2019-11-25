@@ -4,9 +4,6 @@
 (defprotocol IConstruct
   (as-managed [this env]))
 
-(defprotocol ITreeNode
-  (sync! [this]))
-
 (defprotocol IWork
   (work-priority [this] "number, higher number = higher priority")
   (work-depth [this] "number, tree depth, higher = lower priority")
@@ -17,9 +14,6 @@
 (defprotocol IManageNodes
   (dom-insert [this parent anchor])
   (dom-first [this]))
-
-(defprotocol ITraverseNodes
-  (managed-nodes [this]))
 
 (defprotocol IUpdatable
   (supports? [this next])
@@ -60,7 +54,6 @@
   ;; (node-did-mount [node] "do stuff after the initial mount only")
   ;; (node-did-update [node] "do stuff after dom update")
   (hook-destroy! [node]))
-
 
 ;; just here so that working on components file doesn't cause hot-reload issues
 ;; with already constructed components

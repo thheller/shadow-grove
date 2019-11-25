@@ -54,17 +54,6 @@
           (p/dom-insert root parent anchor)
           (.insertBefore parent root anchor)))))
 
-  p/ITraverseNodes
-  (managed-nodes [this]
-    (into [] (filter #(satisfies? p/IManageNodes %)) nodes))
-
-  p/ITreeNode
-  (sync! [this]
-    (dotimes [idx (alength nodes)]
-      (let [node (aget nodes idx)]
-        (when (satisfies? p/ITreeNode node)
-          (p/sync! node)))))
-
   p/IUpdatable
   (supports? [this ^FragmentNode next]
     (and (fragment-node? next)

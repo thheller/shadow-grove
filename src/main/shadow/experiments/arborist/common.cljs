@@ -30,16 +30,6 @@
 
     (p/dom-insert node parent anchor))
 
-  p/ITreeNode
-  (sync! [this]
-    (p/sync! node))
-
-  p/ITraverseNodes
-  (managed-nodes [this]
-    (if-not node
-      []
-      [node]))
-
   p/IDirectUpdate
   (update! [this next]
     (when (not= next val)
@@ -67,9 +57,6 @@
 
   (dom-insert [this parent anchor]
     (.insertBefore parent node anchor))
-
-  p/ITraverseNodes
-  (managed-nodes [this] [])
 
   p/IUpdatable
   (supports? [this next]

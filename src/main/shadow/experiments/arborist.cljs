@@ -99,10 +99,6 @@
     ))
 
 (deftype TreeRoot [container ^:mutable env ^:mutable root]
-  p/ITraverseNodes
-  (managed-nodes [this]
-    (p/managed-nodes root))
-
   p/IDirectUpdate
   (update! [this next]
     (if root
@@ -112,10 +108,6 @@
         (p/update! root next)
         (p/dom-insert root container nil)
         )))
-
-  p/ITreeNode
-  (sync! [this]
-    (p/sync! root))
 
   p/IDestructible
   (destroy! [this]

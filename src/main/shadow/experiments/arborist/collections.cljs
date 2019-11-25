@@ -28,18 +28,6 @@
     (run! #(p/dom-insert (get items %) parent anchor) item-keys)
     (.insertBefore parent marker-after anchor))
 
-  p/ITraverseNodes
-  (managed-nodes [this]
-    (mapv #(get items %) item-keys))
-
-  p/ITreeNode
-  (sync! [this]
-    (run!
-      (fn [key]
-        (let [item (get items key)]
-          (p/sync! item)))
-      item-keys))
-
   p/IUpdatable
   (supports? [this next]
     (instance? CollectionNode next))

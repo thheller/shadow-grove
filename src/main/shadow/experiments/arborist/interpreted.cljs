@@ -17,16 +17,12 @@
     (run! #(p/dom-insert % node nil) children)
     (.insertBefore parent node anchor))
 
-  p/ITraverseNodes
-  (managed-nodes [this] children)
-
   p/IUpdatable
   (supports? [this next]
     (and (vector? next)
          (keyword-identical? tag-kw (get next 0))))
 
   (dom-sync! [this [_ next-attrs :as next]]
-
     ;; FIXME: could be optimized
     (let [[next-attrs next-nodes]
           (if (map? next-attrs)

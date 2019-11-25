@@ -111,11 +111,6 @@
   (dom-insert [this parent anchor]
     (p/dom-insert root parent anchor))
 
-  ;; FIXME: this could just delegate to the root?
-  p/ITraverseNodes
-  (managed-nodes [this]
-    [root])
-
   p/IUpdatable
   (supports? [this next]
     (and (component-node? next)
@@ -620,9 +615,6 @@
       (throw (ex-info "slot already in document" {})))
 
     (.insertBefore parent node anchor))
-
-  p/ITraverseNodes
-  (managed-nodes [this] [])
 
   p/IUpdatable
   (supports? [this ^SlotHook other]

@@ -73,12 +73,6 @@
 
 (defonce root-ref (atom nil))
 
-(defn current-tree
-  ([]
-   (current-tree @root-ref))
-  ([root]
-   (into [root] (map #(current-tree %)) (p/managed-nodes root))))
-
 (defn ^:dev/after-load start []
   (let [container
         (js/document.getElementById "app")
