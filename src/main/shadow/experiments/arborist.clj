@@ -14,5 +14,9 @@
 (defmacro fragment [& body]
   (fragments/make-fragment &env body))
 
+;; only here for bench-fragment, do not use directly.
+(defmacro fragment-fallback [& body]
+  (fragments/make-fragment (dissoc &env :shadow.build.compiler/analyze-top) body))
+
 (defmacro defc [& args]
   `(comp/defc ~@args))

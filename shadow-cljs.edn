@@ -15,7 +15,8 @@
  :dev-http
  {3005 "public"
   3006 "examples/todomvc"
-  3007 "examples/conduit"}
+  3007 "examples/conduit"
+  3008 "examples/bench-fragment"}
 
  :builds
  {:test-dom
@@ -47,5 +48,23 @@
    :compiler-options {:fn-invoke-direct true}
    :output-to "out/bench-db.js"
    :main shadow.experiments.grove.bench-db/main
+   :devtools {:enabled false}}
+
+  :bench-fragment
+  {:target :node-script
+   :compiler-options {:fn-invoke-direct true
+                      :optimizations :simple}
+   :output-to "out/bench-fragment.js"
+   :main shadow.experiments.grove.bench-fragment/main
+   :devtools {:enabled false}}
+
+  :bench-fragment-browser
+  {:target :browser
+   :compiler-options {:fn-invoke-direct true
+                      ;; FIXME: can't use :advanced because it is too smart
+                      ;; and removes the code we actually want to test :P
+                      :optimizations :simple}
+   :output-dir "examples/bench-fragment/js"
+   :modules {:main {:init-fn shadow.experiments.grove.bench-fragment/init}}
    :devtools {:enabled false}}
   }}
