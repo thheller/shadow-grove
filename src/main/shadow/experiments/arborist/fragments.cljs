@@ -31,18 +31,13 @@
     (when-not (neg? idx)
       (aset a idx swap))))
 
-(deftype FragmentCode [frag-id ^function create-fn ^function update-fn]
-  Object
-  (^array create [this env vals]
-    (create-fn env vals))
-  (^array update [this env roots nodes vals nvals]
-    (update-fn env roots nodes vals nvals)))
+(deftype FragmentCode [^function create-fn ^function update-fn])
 
-(declare fragment-node?)
+(declare ^{:arglists '([thing])} fragment-node?)
 
 (deftype ManagedFragment
   [env
-   ^not-native code
+   ^FragmentCode code
    ^:mutable vals
    marker
    roots
@@ -73,15 +68,11 @@
   p/IUpdatable
   (supports? [this ^FragmentNode next]
     (and (fragment-node? next)
-         ;; FIXME: teach compiler inference some new tricks so
-         ;; (.. next -code -frag-id) doesn't complain
-         (identical? (.-frag-id code) (. ^FragmentCode (. next -code) -frag-id))))
+         (identical? code (.-code next))))
 
   (dom-sync! [this ^FragmentNode next]
     (let [nvals (.-vals next)]
-      (.update code env roots nodes vals nvals)
-
-
+      (.. code (update-fn env roots nodes vals nvals))
       (set! vals nvals))
     :synced)
 
@@ -107,34 +98,20 @@
 (deftype FragmentNode [vals ^FragmentCode code]
   p/IConstruct
   (as-managed [_ env]
-    (let [state (.create code env vals)]
+    (let [state (.. code (create-fn env vals))]
       (ManagedFragment. env code vals (common/marker env) (aget state 0) (aget state 1))))
 
   IEquiv
   (-equiv [this ^FragmentNode other]
     (and (instance? FragmentNode other)
-         (identical? (.-frag-id code) (. ^FragmentCode (. other -code) -frag-id))
+         (identical? code (. other -code))
          (array-equiv vals (.-vals other)))))
 
 (defn fragment-node? [thing]
   (instance? FragmentNode thing))
 
-;;
-;; called from macro
-;;
-
-;; optimized variant
-;; allocates fragment-code once, uses it multiple times
-(defn fragment-create [frag-id create-fn update-fn]
-  (FragmentCode. frag-id create-fn update-fn))
-
-(defn fragment-node [^FragmentCode code vals]
-  (FragmentNode. vals code))
-
-;; fallback, re-allocating the functions each time
-(defn fragment-new [frag-id vals create-fn update-fn]
-  (FragmentNode. vals
-    (FragmentCode. frag-id create-fn update-fn)))
+;; for fallback code, relying on registry
+(def ^{:jsdoc ["@dict"]} known-fragments #js {})
 
 ;; FIXME: should maybe take ::document from env
 ;; not sure under which circumstance this would ever need a different document instance though

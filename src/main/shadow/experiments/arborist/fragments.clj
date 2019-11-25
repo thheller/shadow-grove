@@ -396,13 +396,14 @@
 
     (if-let [analyze-top (:shadow.build.compiler/analyze-top macro-env)]
       ;; optimal variant, best performance, requires special support from compiler
-      (do (analyze-top `(def ~code-id (fragment-create ~frag-id ~(make-build-impl ast) ~(make-update-impl ast))))
-          `(fragment-node ~code-id (cljs.core/array ~@code-snippets)))
-      ;; fallback, probably good enough
-      ;; allocates both functions each time but runtime can check identical? on frag-id
-      `(fragment-new
-         ~frag-id
+      (do (analyze-top `(def ~code-id (->FragmentCode ~(make-build-impl ast) ~(make-update-impl ast))))
+          `(->FragmentNode (cljs.core/array ~@code-snippets) ~code-id))
+      ;; fallback, probably good enough, registers fragments to maintain identity
+      `(->FragmentNode
          (cljs.core/array ~@code-snippets)
-         ~(make-build-impl ast)
-         ~(make-update-impl ast)
-         ))))
+         (~'js* "(~{} || ~{})"
+           (cljs.core/unchecked-get known-fragments ~frag-id)
+           (cljs.core/unchecked-set known-fragments ~frag-id
+             (->FragmentCode
+               ~(make-build-impl ast)
+               ~(make-update-impl ast))))))))
