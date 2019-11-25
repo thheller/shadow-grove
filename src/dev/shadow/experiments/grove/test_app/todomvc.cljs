@@ -264,7 +264,7 @@
        (db/all-idents-of db ::todo))}))
 
 (defn ^:dev/after-load start []
-  (sg/start app-env root-el ui-root {}))
+  (sg/start app-env root-el (ui-root)))
 
 (defn init []
   (start))

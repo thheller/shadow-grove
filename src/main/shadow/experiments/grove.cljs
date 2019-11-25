@@ -22,17 +22,17 @@
     ::active-queries-ref (atom #{})
     ::config-ref (atom {:events {}})))
 
-(defn start [env root-el ui-root root-props]
+(defn start [env root-el root-node]
   (let [active (get @active-roots-ref root-el)]
     (if-not active
       (let [root (sa/dom-root root-el env)]
-        (sa/update! root (ui-root root-props))
+        (sa/update! root root-node)
         (swap! active-roots-ref assoc root-el {:env env :root root :root-el root-el})
         ::started)
 
       (let [{:keys [root]} active]
         (assert (identical? env (:env active)) "can't change env between restarts")
-        (sa/update! root (ui-root root-props))
+        (sa/update! root root-node)
         ::updated
         ))))
 
@@ -293,7 +293,7 @@
    params]
   ;; (js/console.log ::db-tx env tx-id params)
 
-  (let [{:keys [interceptors handler-fn] :as event}
+  (let [{:keys [interceptors ^function handler-fn] :as event}
         (get-in @config-ref [:events ev-id])]
 
     (if-not event
@@ -347,6 +347,10 @@
   (tx* (assoc env ::comp/ev-id other) params))
 
 (defn reg-event-fx [{::keys [config-ref] :as env} ev-id interceptors handler-fn]
+  {:pre [(map? env)
+         (keyword? ev-id)
+         (vector? interceptors)
+         (fn? handler-fn)]}
   (swap! config-ref assoc-in [:events ev-id]
     {:handler-fn handler-fn
      :interceptors interceptors}))

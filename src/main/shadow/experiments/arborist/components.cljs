@@ -27,6 +27,9 @@
     ([this props]
      (make-component-node this props))))
 
+(defn component-config? [x]
+  (instance? p/ComponentConfig x))
+
 (defn safe-inc [x]
   (if (nil? x)
     0

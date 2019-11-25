@@ -77,7 +77,7 @@
 
 
 (defn ^:dev/after-load start []
-  (sg/start env/app root-el views/ui-root {}))
+  (sg/start env/app root-el (views/ui-root)))
 
 (defn init []
   (let [history

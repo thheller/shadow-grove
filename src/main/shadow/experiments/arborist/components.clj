@@ -323,7 +323,7 @@
 
     ;; FIXME: put docstring somewhere
     ;; FIXME: figure out how to cheat compiler to it doesn't emit a check when calling these IFn impls
-    `(def ~(vary-meta comp-name assoc :arglists (quote (quote ([] [props]))))
+    `(def ~(vary-meta comp-name assoc :tag 'not-native)
        (make-component-config
          ~(str *ns* "/" comp-name)
          (cljs.core/array
