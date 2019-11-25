@@ -34,10 +34,20 @@
        [:button "ok"]
        [:button "cancel"]]]]))
 
+(defn hiccup []
+  [:div.card
+   [:div.card-title "title"]
+   [:div.card-body "body"]
+   [:div.card-footer
+    [:div.card-actions
+     [:button "ok"]
+     [:button "cancel"]]]])
+
 (defn start []
   (-> (b/Suite.)
       (.add "fragment-optimized" fragment-optimized)
       (.add "fragment-fallback" fragment-fallback)
+      (.add "hiccup" hiccup) ;; not actually fair to compare this
       (.on "cycle" log-cycle)
       (.run)))
 
