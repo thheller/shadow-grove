@@ -179,8 +179,19 @@
   (assert (pos? (count el)))
 
   (let [tag-kw (nth el 0)]
-    (if-not (keyword? tag-kw)
+    (cond
+      (not (keyword? tag-kw))
       (analyze-component env el)
+
+      ;; automatic switch to svg by turning
+      ;; [:svg ...] into (svg [:svg ...])
+      (and (str/starts-with? (name tag-kw) "svg")
+           (not (::svg env)))
+      (make-code env `(shadow.experiments.arborist/svg ~el) {:element-id (next-el-id env)})
+
+      ;; FIXME: could analyze completely static elements and emit actual HTML strings and use DocumentFragment at runtime
+      ;; that could potentially be faster with lots of completely static elements but that probably won't be too common
+      :else
       (analyze-dom-element env el))))
 
 (defn analyze-text [env node]
@@ -210,6 +221,7 @@
   (let [this-sym (gensym "this")
         env-sym (with-meta (gensym "env") {:tag 'not-native})
         vals-sym (with-meta (gensym "vals") {:tag 'not-native})
+        element-ns-sym (gensym "element-ns")
 
         {:keys [bindings mutations return nodes] :as result}
         (reduce
@@ -218,7 +230,7 @@
               (case op
                 :element
                 (-> env
-                    (update :bindings conj sym (with-loc ast `(create-element ~env-sym ~(:tag ast))))
+                    (update :bindings conj sym (with-loc ast `(create-element ~env-sym ~element-ns-sym ~(:tag ast))))
                     (update :return conj sym)
                     (cond->
                       (and parent-sym (= parent-type :element))
@@ -282,7 +294,7 @@
                     (update :mutations conj (with-loc ast `(set-attr ~env-sym ~(:el ast) ~(:attr ast) nil (aget ~vals-sym ~(-> ast :value :ref-id))))
                       ))))
             )
-          {:bindings []
+          {:bindings [element-ns-sym `(::element-ns ~env-sym)]
            :mutations []
            :return []
            :nodes []}
@@ -363,12 +375,18 @@
     `(fn [~env-sym ~roots-sym ~nodes-sym ~oldv-sym ~newv-sym]
        ~@mutations)))
 
+(def shadow-analyze-top
+  (try
+    (find-var 'shadow.build.compiler/*analyze-top*)
+    (catch Exception e
+      nil)))
+
 (defn make-fragment [macro-env body]
   (let [env
         {:code-ref (atom {})
          :el-seq-ref (atom -1) ;; want 0 to be first id
          ;; :parent (gensym "root")
-         }
+         ::svg (::svg macro-env)}
 
         ast
         (mapv #(analyze-node env %) body)
@@ -384,6 +402,22 @@
         code-id
         (gensym "fragment__")
 
+        ;; if [:svg...] is encountered it'll be turned to (svg [:svg...])
+        ;; ns-hint tells the FragmentNode to modify the env in as-managed
+        ;; it sets ::element-ns if not nil
+        ;; once inside svg it'll stay svg so that conditionals don't accidentally start emitting html again
+        ;; [:svg
+        ;;  (when some-thing
+        ;;    (<> [:g ...]))]
+        ;; this would be a mistake otherwise and require (svg [:g ...]) but we can be smart
+        ;; about this without too much additional cost so that the user doesn't need to worry about this
+        ;; FIXME: need foreignObject support to actually switch back to HTML inside an svg
+        ;; can't use nil for that since the logic will keep the current for nil
+        ;; FIXME: mathml? still don't know what that is ... but seems to be a standard?
+        ns-hint
+        (when (::svg macro-env)
+          `svg-ns)
+
         ;; this needs to be unique enough to not have collisions when using caching
         ;; just code-id isn't unique enough since multiple namespaces may end up with
         ;; fragment__123 when using incremental compiles and caching. adding the ns
@@ -394,13 +428,15 @@
         frag-id
         `(fragment-id ~(str *ns* "/" code-id))]
 
-    (if-let [analyze-top (:shadow.build.compiler/analyze-top macro-env)]
+    (if-let [analyze-top (and shadow-analyze-top @shadow-analyze-top)]
       ;; optimal variant, best performance, requires special support from compiler
       (do (analyze-top `(def ~code-id (->FragmentCode ~(make-build-impl ast) ~(make-update-impl ast))))
-          `(->FragmentNode (cljs.core/array ~@code-snippets) ~code-id))
+          `(->FragmentNode (cljs.core/array ~@code-snippets) ~ns-hint ~code-id))
+
       ;; fallback, probably good enough, registers fragments to maintain identity
       `(->FragmentNode
          (cljs.core/array ~@code-snippets)
+         ~ns-hint
          (~'js* "(~{} || ~{})"
            (cljs.core/unchecked-get known-fragments ~frag-id)
            (cljs.core/unchecked-set known-fragments ~frag-id

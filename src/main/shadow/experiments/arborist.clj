@@ -14,6 +14,12 @@
 (defmacro fragment [& body]
   (fragments/make-fragment &env body))
 
+(defmacro html [& body]
+  (fragments/make-fragment &env body))
+
+(defmacro svg [& body]
+  (fragments/make-fragment (assoc &env ::fragments/svg true) body))
+
 ;; only here for bench-fragment, do not use directly.
 (defmacro fragment-fallback [& body]
   (fragments/make-fragment (dissoc &env :shadow.build.compiler/analyze-top) body))

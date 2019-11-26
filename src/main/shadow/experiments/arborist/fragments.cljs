@@ -84,10 +84,11 @@
     (set! (.-length roots) 0)
     (set! (.-length nodes) 0)))
 
-(deftype FragmentNode [vals ^FragmentCode code]
+(deftype FragmentNode [vals element-ns ^FragmentCode code]
   p/IConstruct
   (as-managed [_ env]
-    (let [state (.. code (create-fn env vals))]
+    (let [env (cond-> env element-ns (assoc ::element-ns element-ns))
+          state (.. code (create-fn env vals))]
       (ManagedFragment. env code vals (common/marker env) (aget state 0) (aget state 1))))
 
   IEquiv
@@ -102,13 +103,21 @@
 ;; for fallback code, relying on registry
 (def ^{:jsdoc ["@dict"]} known-fragments #js {})
 
+;; accessed by macro, do not remove
+;; FIXME: what about mathml?
+(def svg-ns "http://www.w3.org/2000/svg")
+
 ;; FIXME: should maybe take ::document from env
 ;; not sure under which circumstance this would ever need a different document instance though
 (defn create-element
   ;; inlined version is longer than the none inline version
   ;; {:jsdoc ["@noinline"]}
-  [env ^Keyword type] ;; kw
-  (js/document.createElement (.-name type)))
+  {:jsdoc ["@return {Element}"]}
+  [env ^string element-ns ^Keyword type] ;; kw
+  (if (nil? element-ns)
+    (js/document.createElement (.-name type))
+    (js/document.createElementNS element-ns (.-name type))
+    ))
 
 (defn create-text
   ;; {:jsdoc ["@noinline"]}

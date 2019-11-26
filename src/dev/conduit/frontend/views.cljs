@@ -48,6 +48,7 @@
        [:div.info
         [:a.author {:href (url-for :profile author-name)} author-name]
         [:span.date (format-date createdAt)]]
+
        (cond
          user-is-author?
          (<> [:span
@@ -131,7 +132,16 @@
 
   (<> [:nav.navbar.navbar-light
        [:div.container
-        [:a.navbar-brand {:href (url-for :home)} "conduit"]
+        [:svg {:style {:width "40px" :height "40px"} :viewBox "0 0 68.4 68.4"}
+         [:g {:fill "none"}
+          [:g {:stroke "#000" :stroke-linecap "round" :stroke-linejoin "round" :stroke-width "2"}
+           [:path {:d "m60.866 25.111a7.837 7.837 0 0 0 -1.1-2.234 7.723 7.723 0 0 0 -6.31-3.277c-4.275 0-8.073 3.509-7.784 7.816.67 10.053 14.318 20.826 14.318 20.826 15.123-12.016 14.317-20.634 14.317-20.634a7.8 7.8 0 0 0 -7.581-8 7.442 7.442 0 0 0 -6.53 3.947" :transform "translate(-29.391 -12.618)"}]
+           [:path {:d "m58.569 118.227a2.216 2.216 0 0 1 -.257 4.421m.445-4.393s-10.064-2-12.565-2.529c-1.425-.306-3.046-.78-4.275-1.161a10.88 10.88 0 0 0 -8.265.659c-2.6 1.35-5.344 4.029-6.833 9.3" :transform "translate(-17.265 -73.414)"}]
+           [:path {:d "m67.3 139.779s1.938-1.678 3.424-1.749c1.849-.089 13.342.029 13.68.032" :transform "translate(-43.324 -88.835)"}]
+           [:path {:d "m56.949 113.312 13.42-6.145a2.715 2.715 0 0 1 3.438 1.012 2.715 2.715 0 0 1 -1.069 3.876c-6.331 3.206-24.015 12.469-25.119 12.95l-.31.125a11.974 11.974 0 0 1 -4.428.6h-14.7m39.819-17.794a2.7 2.7 0 0 0 -.424-1.457 2.715 2.715 0 0 0 -3.438-1.012l-12.707 5.846m8-3.962a2.7 2.7 0 0 0 -.424-1.457 2.715 2.715 0 0 0 -3.438-1.012l-11.042 5.088m-24.407 7.93 10.623 10.62" :transform "translate(-12.952 -67.356)"}]]
+          [:path {:d "m0 0h68.4v68.4h-68.4z"}]]]
+        [:a.navbar-brand {:href (url-for :home)}
+         "conduit"]
         (if (empty? user)
           (<> [:ul.nav.navbar-nav.pull-xs-right
                [:li.nav-item
@@ -488,6 +498,9 @@
         [:div.container
          [:h1 (:title article-data)]
          (article-meta {:article article})]]
+
+
+
        [:div.container.page
         [:div.row.article-content
          [:div.col-md-12
@@ -529,6 +542,7 @@
 (defc ui-root [props]
   [{:keys [active-page]} (sg/query [:active-page])]
   (<> (ui-header)
+
       (case active-page
         :home (ui-home)
         :login (ui-login)
