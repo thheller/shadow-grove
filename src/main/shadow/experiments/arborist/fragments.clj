@@ -67,8 +67,28 @@
 (declare analyze-node)
 
 (defn analyze-component [env [component attrs :as el]]
-  (assert (>= (count el) 1))
+  ;; FIXME: decide if [some-component ...] should be allowed alongside [:div ...]
+  ;; probably going to remove [some-component arg1 arg2] since it makes guessing if there are attributes
+  ;; annoying and calling (some-component arg1 arg2) makes it clear that its a regular fn call
+  ;; the only place where the vector style makes sense is for passing "slot" elements
+  ;; [some-component {:props 1} [:h1 "hello"] ...] but that is enough of a special case
+  ;; to warrant special syntax, this isn't too bad and avoids all ambiguities when parsing hiccup
+  ;; [:> (some-component {:props 1})
+  ;;   [:h1 "hello"]
+  ;;   [:p "world]]
+  ;; multi slot?
+  ;; [:> (some-component {:props 1})
+  ;;   [:slot/title
+  ;;     [:h1 "hello"]]
+  ;;   [:slot/body
+  ;;     [:p "world"]]]
 
+  ;; so the only remaining cause is [some-kw ...] if someone wants to dynamically switch between :div :button or so
+  ;; but that can also by covered by [:> (some-helper :div {:props 1}) ...]
+  (throw (ex-info "only keywords allowed, use (component {...}) for components"
+           (merge (meta el) {:type ::input-error})))
+
+  (assert (>= (count el) 1))
   (let [id (next-el-id env)
         el-sym (symbol (str "c" id))
 
@@ -182,6 +202,9 @@
     (cond
       (not (keyword? tag-kw))
       (analyze-component env el)
+
+      (= :> tag-kw)
+      (analyze-slotted env el)
 
       ;; automatic switch to svg by turning
       ;; [:svg ...] into (svg [:svg ...])
