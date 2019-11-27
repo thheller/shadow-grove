@@ -1,6 +1,8 @@
 (ns shadow.experiments.grove.bench-fragment
   (:require
     ["benchmark" :as b]
+    ["react" :as react :rename {createElement $}]
+    ["react-dom" :as rdom]
     [goog.reflect :as gr]
     [shadow.experiments.arborist :as sa]
     [shadow.experiments.arborist.interpreted]
@@ -51,6 +53,16 @@
        [:button "ok" v]
        [:button "cancel"]]])])
 
+(defn react-element [v]
+  ($ "div" #js {:className "card"}
+    ($ "div" #js {:className "card-title"} "title")
+    ($ "div" #js {:className "card-body"} v)
+    (when v
+      ($ "div" #js {:className "card-footer"}
+        ($ "div" #js {:className "card-actions"}
+          ($ "button" nil "ok" v)
+          ($ "button" nil "cancel"))))))
+
 (defn start []
   (let [m-optimized
         (sap/as-managed (fragment-optimized (str "dont-inline-this: " (rand))) {})
@@ -59,11 +71,18 @@
         (sap/as-managed (fragment-fallback (str "dont-inline-this: " (rand))) {})
 
         m-hiccup
-        (sap/as-managed (hiccup (str "dont-inline-this: " (rand))) {})]
+        (sap/as-managed (hiccup (str "dont-inline-this: " (rand))) {})
+
+        r-root
+        (js/document.createElement "div")]
 
     (sap/dom-insert m-optimized js/document.body nil)
     (sap/dom-insert m-fallback js/document.body nil)
     (sap/dom-insert m-hiccup js/document.body nil)
+
+    (js/document.body.appendChild r-root)
+
+    (rdom/render (react-element (rand)) r-root)
 
     (-> (b/Suite.)
         ;; just fragment
@@ -80,6 +99,11 @@
         (.add "hiccup" #(hiccup (rand)))
         (.add "managed-hiccup" #(sap/as-managed (hiccup (rand)) {}))
         (.add "update-hiccup" #(sap/dom-sync! m-hiccup (hiccup (rand))))
+
+        (.add "react-element" #(react-element (rand)))
+        ;; can't test create-only since rdom requires the element to be in the dom
+        (.add "react-dom" #(rdom/render (react-element (rand)) r-root))
+
         (.on "cycle" log-cycle)
         (.run #js {:async true}))))
 
