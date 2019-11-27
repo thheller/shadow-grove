@@ -55,7 +55,7 @@
             ;; update previous children
             next-children
             (reduce-kv
-              (fn [c idx child]
+              (fn [c idx ^not-native child]
                 (if (>= idx nc)
                   (do (p/destroy! child)
                       c)

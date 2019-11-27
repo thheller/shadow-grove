@@ -19,7 +19,7 @@
     ))
 
 ;; swappable root
-(deftype ManagedRoot [env ^:mutable node ^:mutable val]
+(deftype ManagedRoot [env ^:mutable ^not-native node ^:mutable val]
   p/IManageNodes
   (dom-first [this]
     (p/dom-first node))

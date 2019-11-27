@@ -152,7 +152,7 @@
 
   ;; FIXME: actually benchmark in an actual app
   (when (not= oval nval)
-    (let [el (aget nodes idx)]
+    (let [^not-native el (aget nodes idx)]
       (if (p/supports? el nval)
         (p/dom-sync! el nval)
         (let [next (common/replace-managed env el nval)]
@@ -173,7 +173,7 @@
 ;; FIXME: does this ever need the old attrs oa?
 (defn component-update [env roots nodes idx oc nc oa na]
   {:pre [(map? na)]}
-  (let [comp (aget nodes idx)
+  (let [^not-native comp (aget nodes idx)
         tmp (comp/->ComponentNode nc na)]
     (if (p/supports? comp tmp)
       (p/dom-sync! comp tmp)

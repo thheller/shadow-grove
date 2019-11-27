@@ -61,7 +61,7 @@
               (if (neg? idx)
                 (persistent! updated)
                 (let [key (nth new-keys idx)
-                      item (get items key)
+                      ^not-native item (get items key)
                       data (nth new-coll idx)
                       updated (conj! updated key)]
 
