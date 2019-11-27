@@ -63,7 +63,8 @@
    :compiler-options {:fn-invoke-direct true
                       ;; FIXME: can't use :advanced because it is too smart
                       ;; and removes the code we actually want to test :P
-                      :optimizations :simple}
+                      ;; :optimizations :simple
+                      }
    :output-dir "examples/bench-fragment/js"
    :modules {:main {:init-fn shadow.experiments.grove.bench-fragment/init}}
    :devtools {:enabled false}}

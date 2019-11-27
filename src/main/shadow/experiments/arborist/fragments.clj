@@ -428,7 +428,7 @@
         frag-id
         `(fragment-id ~(str *ns* "/" code-id))]
 
-    (if-let [analyze-top (and shadow-analyze-top @shadow-analyze-top)]
+    (if-let [analyze-top (and (not (false? (::optimize macro-env))) shadow-analyze-top @shadow-analyze-top)]
       ;; optimal variant, best performance, requires special support from compiler
       (do (analyze-top `(def ~code-id (->FragmentCode ~(make-build-impl ast) ~(make-update-impl ast))))
           `(->FragmentNode (cljs.core/array ~@code-snippets) ~ns-hint ~code-id))

@@ -22,7 +22,7 @@
 
 ;; only here for bench-fragment, do not use directly.
 (defmacro fragment-fallback [& body]
-  (fragments/make-fragment (dissoc &env :shadow.build.compiler/analyze-top) body))
+  (fragments/make-fragment (assoc &env ::fragments/optimize false) body))
 
 (defmacro defc [& args]
   `(comp/defc ~@args))
