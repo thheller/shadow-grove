@@ -1,6 +1,6 @@
 (ns shadow.experiments.grove.test-app.todomvc
   (:require
-    [shadow.experiments.arborist :as sa :refer (<> defc)]
+    [shadow.experiments.arborist :as sa :refer (<< defc)]
     [shadow.experiments.grove :as sg]
     [shadow.experiments.grove.db :as db]
     [shadow.experiments.arborist.effects :as sfx]))
@@ -41,7 +41,7 @@
    (fn [env e todo]
      (test-fx #(sg/run-tx env ::delete! todo)))]
 
-  (<> [:li {::sfx/effect test-fx
+  (<< [:li {::sfx/effect test-fx
             :class {:completed completed?
                     :editing editing?}}
        [:div.view
@@ -52,7 +52,7 @@
         [:button.destroy {:on-click [delete! todo]}]]
 
        (when editing?
-         (<> [:input#edit.edit {:autofocus true
+         (<< [:input#edit.edit {:autofocus true
                                 :on-keydown [::edit-update! todo]
                                 :on-blur [::edit-complete! todo]
                                 :value todo-text}]))]))
@@ -70,13 +70,13 @@
 
    filter-row
    (fn [{:keys [label value]}]
-     (<> [:li [:a
+     (<< [:li [:a
                {:class {:selected (= current-filter value)}
                 :href "#"
                 :on-click [::set-filter! value]}
                label]]))]
 
-  (<> [:ul.filters
+  (<< [:ul.filters
        (sa/render-seq filter-options :value filter-row)]))
 
 (defc ui-root
@@ -107,14 +107,14 @@
    (fn [todo]
      (todo-item {:todo todo}))]
 
-  (<> [:header.header
+  (<< [:header.header
        [:h1 "todos"]
        [:input.new-todo {:on-keydown [::create-new!]
                          :placeholder "What needs to be done?"
                          :autofocus true}]]
 
       (when (pos? num-total)
-        (<> [:section.main
+        (<< [:section.main
              [:input#toggle-all.toggle-all
               {:type "checkbox"
                :on-change [::toggle-all!]
@@ -131,7 +131,7 @@
               (ui-filter-select)
 
               (when (pos? num-completed)
-                (<> [:button.clear-completed {:on-click [::clear-completed!]} "Clear completed"]))]]))
+                (<< [:button.clear-completed {:on-click [::clear-completed!]} "Clear completed"]))]]))
       ))
 
 (defonce root-el (js/document.getElementById "app"))
