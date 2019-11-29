@@ -141,3 +141,55 @@ A dummy todomvc example can be found [here](https://github.com/thheller/shadow-e
 Note that this is all still extremely experimental. The todomvc stuff uses the maybe beginnings of a framework/library I might build on top of what I described here or previously. 
 
 To be continued ...
+
+## Open Questions
+
+
+### Props?
+
+Should Components be limited to one argument map? React forces components to adopt the one "props" object. Technically this isn't necessary for us given that Components should be used as regular functions anyways. They aren't actually functions but they do implement the `IFn` protocol.
+
+```
+(defc ui-foo [{:keys [foo bar] :as props}]
+  []
+  (<< [:div foo bar])))
+```
+
+Using this via `(ui-foo {:foo "foo" :bar "bar"})` uses the forced "props" map just because React does it this way. Technically there is nothing stopping it from being
+
+```
+(defc ui-foo [foo bar]
+  []
+  (<< [:div foo bar])))
+```
+
+And `(ui-foo "foo" "bar")`. Named arguments are generally better if you have many of them but allowing multiple may make for an easier API. The user can decide but that may make for an inconsistent API if one library decided to use maps only while another splits it into multiple args.
+
+
+### State?
+
+Should components have inherent managed "state" or should this be done entirely via hooks? I'm currently leaning towards pure hooks since that opens up using multiple "props" from above. Otherwise there needs to be one place where state is "declared"
+
+```
+(defc ui-foo [props state]
+  []
+  ...)
+
+(defc ui-foo
+  {:init-state {:foo 1}}
+  [props state]
+  []
+  ...)
+```
+
+vs
+
+```
+(defc ui-foo [props-a props-b]
+  [state (use-state ::key {:foo 1})]
+  ...)
+```
+
+The above example using atoms already allows using state in a simple way without the component having to implement it but makes hot-reload hard if the atom is created in a hook.
+
+State should be kept in a DB in some way as much as possible but local-state is a useful optimization for highly dynamic UI components that want to store DOM related data where writing that to a DB is overkill since it is pointless without the actual DOM element. (eg. tracking element size for animations).
