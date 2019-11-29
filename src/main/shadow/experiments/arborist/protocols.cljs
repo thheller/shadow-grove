@@ -65,9 +65,6 @@
   [component-name
    hooks
    opts
-   props-affects-render
-   props-affects
-   state-affects-render
-   state-affects
+   check-args-fn
    render-deps
    render-fn])

@@ -22,7 +22,7 @@
 
    ::toggle-completed! sg/tx
    ::edit-start! sg/tx}
-  [{:keys [todo]}]
+  [todo]
   [{::keys [completed? editing? todo-text]}
    (sg/query todo [::todo-text
                    ::editing?
@@ -59,7 +59,7 @@
 
 (defc ui-filter-select
   {::set-filter! sg/tx}
-  [props state]
+  []
   [{::keys [current-filter]}
    (sg/query [::current-filter])
 
@@ -95,17 +95,13 @@
    (fn [env e]
      (sg/run-tx env ::toggle-all! {:completed? (-> e .-target .-checked)}))}
 
-  [props]
+  []
   [{::keys [num-total filtered-todos num-active num-completed] :as query}
    (sg/query [::filtered-todos
               ::editing
               ::num-total
               ::num-active
-              ::num-completed])
-
-   todo-row
-   (fn [todo]
-     (todo-item {:todo todo}))]
+              ::num-completed])]
 
   (<< [:header.header
        [:h1 "todos"]
@@ -122,7 +118,7 @@
              [:label {:for "toggle-all"} "Mark all as complete"]
 
              [:ul.todo-list
-              (sa/render-seq filtered-todos identity todo-row)]
+              (sa/render-seq filtered-todos identity todo-item)]
 
              [:footer.footer
               [:span.todo-count

@@ -13,19 +13,32 @@
 (defonce components-ref (atom {}))
 
 (declare ^{:arglists '([x])} component-node?)
-(declare ^{:arglists '([component props])} ->ComponentNode)
+(declare ^{:arglists '([component args])} ->ComponentNode)
 
-(defn- make-component-node [component props]
-  {:pre [(map? props)]}
-  (->ComponentNode component props))
+(defn- make-component-node [component args]
+  ;; FIXME: maybe use array, never directly accessible anyways
+  {:pre [(vector? args)]}
+  (->ComponentNode component args))
 
 (extend-type p/ComponentConfig
   cljs.core/IFn
   (-invoke
     ([this]
-     (make-component-node this {}))
-    ([this props]
-     (make-component-node this props))))
+     (make-component-node this []))
+    ([this a1]
+     (make-component-node this [a1]))
+    ([this a1 a2]
+     (make-component-node this [a1 a2]))
+    ([this a1 a2 a3]
+     (make-component-node this [a1 a2 a3]))
+    ([this a1 a2 a3 a4]
+     (make-component-node this [a1 a2 a3 a4]))
+    ([this a1 a2 a3 a4 a5]
+     (make-component-node this [a1 a2 a3 a4 a5]))
+    ([this a1 a2 a3 a4 a5 a6]
+     (make-component-node this [a1 a2 a3 a4 a5 a6]))
+    ;; FIXME: add more, user should really use maps at this point
+    ))
 
 (defn component-config? [x]
   (instance? p/ComponentConfig x))
@@ -57,51 +70,18 @@
       idx
       (recur (bit-shift-right search 1) (inc idx)))))
 
-;; FIXME: should state be a hook or something implicit for each component
-;; hook would mean there could be multiple non-conflicting "state" variants
-;; capturing the state however becomes rather difficult and hot-reload becomes harder
-;; component managed map looks and functions like an atom
-;; could be preserved between reloads if init-state is =
-;; how do you get initial state though? that is somewhat better solved with hooks?
-;; ref types in hooks makes things complicated since they don't change unless deref'd
-
-;; this is ugly
-;; (defc some-component [props]
-;;   [state-ref (use-state {:init true})
-;;    state @state]
-
-;; this sucks too
-;; (defc some-component [props]
-;;   [[state set-state] (use-state {:init true})
-
-;; this only kinda sucks and lets hook use state implicitly without being passed in
-;; (defc some-component [props state]
-;;   [::init-state {:some "data"}
-;;    foo (hook-using-its-own-state)]
-
-;; too confusing?
-;; (defc some-component [props state :init-state {:some "data"}]
-;;   [...]
-
-;; meta like?
-;; (defc some-component
-;;   {:init-state {:some "data"}}
-;;   [props state]
-;;   [...]
-
 (deftype ManagedComponent
   [^not-native ^:mutable parent-env
    ^not-native ^:mutable component-env
-   ^:mutable props
-   ^:mutable state
-   ^:mutable rendered-props
-   ^:mutable rendered-state
+   ^:mutable args
+   ^:mutable rendered-args
    ^ComponentConfig ^:mutable config
    ^not-native ^:mutable events
    ^:mutable root
    ^:mutable slots
    ^number ^:mutable current-idx
    ^array ^:mutable hooks
+   ^number ^:mutable dirty-from-args
    ^number ^:mutable dirty-hooks
    ^number ^:mutable updated-hooks
    ^boolean ^:mutable needs-render?
@@ -118,22 +98,12 @@
   (supports? [this next]
     (and (component-node? next)
          (let [other (.-component ^ComponentNode next)]
-           ;; FIXME: hot-reloadable version should compare names?
-           ;; so we can maybe maintain local state?
            (identical? config other))))
 
   (dom-sync! [this ^ComponentNode next]
-    (when (not= props (.-props next))
-      (set! props (.-props next))
-
-      (set! dirty-hooks (bit-or dirty-hooks (.-props-affects config)))
-      (set! current-idx (find-first-set-bit-idx dirty-hooks))
-
-      (when (.-props-affects-render config)
-        (set! needs-render? true))
-
-      ;; FIXME: should this do work right away?
-      ;; FIXME: only need to schedule if something was actually affected
+    (. config (check-args-fn this args (.-args next)))
+    (set! args (.-args next))
+    (when (p/work-pending? this)
       (p/schedule-update! (::scheduler component-env) this)))
 
   ;; FIXME: figure out default event handler
@@ -222,9 +192,6 @@
 
       (p/perf-start! this)
 
-      (set! state (get (.-opts config) :init-state {}))
-      (set! rendered-state state) ;; didn't really render yet but lets pretend
-
       (set! component-env child-env)
       (set! root (common/ManagedRoot. child-env nil nil))
       (set! current-idx 0)
@@ -245,6 +212,17 @@
       (set! current-idx idx))
 
     (p/schedule-update! (::scheduler component-env) this))
+
+  (^clj mark-hooks-dirty! [this dirty-bits]
+    (set! dirty-hooks (bit-or dirty-hooks dirty-bits))
+    (set! current-idx (find-first-set-bit-idx dirty-hooks)))
+
+  (^clj mark-dirty-from-args! [this dirty-bits]
+    (.mark-hooks-dirty! this dirty-bits)
+    )
+
+  (^clj set-render-required! [this]
+    (set! needs-render? true))
 
   (^clj run-next! [^not-native this]
     ;; (js/console.log "Component:run-next!" (:component-name config) current-idx)
@@ -286,11 +264,10 @@
           (let [hook-config (aget (.-hooks config) current-idx)
 
                 deps-updated?
+                ;; dirty hooks this depends-on should trigger an update
+                ;; or changed args used by this should trigger
                 (or (pos? (bit-and (.-depends-on hook-config) updated-hooks))
-                    (and (not (identical? state rendered-state))
-                         (bit-test (.-state-affects config) current-idx))
-                    (and (not (identical? props rendered-props))
-                         (bit-test (.-props-affects config) current-idx)))
+                    (bit-test dirty-from-args current-idx))
 
                 ^function run (.-run hook-config)
 
@@ -334,6 +311,7 @@
     (assert (zero? dirty-hooks) "Got to render while hooks are dirty")
     ;; (js/console.log "Component:render!" (:component-name config) updated-hooks)
     (set! updated-hooks 0)
+    (set! dirty-from-args 0)
     (if-not needs-render?
       (p/perf-count! this [::render-skip])
 
@@ -342,8 +320,7 @@
 
         (p/perf-count! this [::render])
 
-        (set! rendered-props props)
-        (set! rendered-state state)
+        (set! rendered-args args)
         (set! needs-render? false)
 
         ;; FIXME: let scheduler decide if frag should be applied
@@ -362,45 +339,28 @@
     (get slots slot-id))
 
   (^clj set-slot! [this slot-id slot]
-    (set! slots (assoc slots slot-id slot)))
-
-  (^clj swap-state! [this update-fn]
-    (let [next-state (update-fn state)]
-      (when-not (identical? state next-state)
-        (set! state next-state)
-
-        (set! dirty-hooks (bit-or dirty-hooks (.-state-affects config)))
-        (set! current-idx (find-first-set-bit-idx dirty-hooks))
-
-        (when (.-state-affects-render config)
-          (set! needs-render? true))
-
-        ;; FIXME: only need to schedule is something was actually affected
-        (p/schedule-update! (::scheduler component-env) this)))))
-
+    (set! slots (assoc slots slot-id slot))))
 
 (set! *warn-on-infer* true)
 
-(defn component-create [env config props]
+(defn component-create [env config args]
   (when ^boolean js/goog.DEBUG
     (when-not (instance? p/ComponentConfig config)
-      (throw (ex-info "not a component definition" {:config config :props props})))
-    (when-not (map? props)
-      (throw (ex-info "components can only receive a map as props" {:props props}))))
+      (throw (ex-info "not a component definition" {:config config :props args}))))
 
-  (doto (ManagedComponent. env nil props nil props nil config {} nil {} 0 nil 0 0 true false)
+  (doto (ManagedComponent. env nil args args config {} nil {} 0 nil 0 0 0 true false)
     (.component-init!)))
 
-(deftype ComponentNode [component props]
+(deftype ComponentNode [component args]
   p/IConstruct
   (as-managed [this env]
-    (component-create env component props))
+    (component-create env component args))
 
   IEquiv
   (-equiv [this ^ComponentNode other]
     (and (instance? ComponentNode other)
          (identical? component (.-component other))
-         (= props (.-props other)))))
+         (= args (.-args other)))))
 
 (defn component-node? [x]
   (instance? ComponentNode x))
@@ -484,20 +444,14 @@
   [component-name
    hooks
    opts
-   props-affects-render
-   props-affects
-   state-affects-render
-   state-affects
+   check-args-fn
    render-deps
    render-fn]
   {:pre [(string? component-name)
          (array? hooks)
          (every? #(instance? HookConfig %) hooks)
          (map? opts)
-         (boolean? props-affects-render)
-         (nat-int? props-affects)
-         (boolean? state-affects-render)
-         (nat-int? state-affects)
+         (fn? check-args-fn)
          (nat-int? render-deps)
          (fn? render-fn)]}
 
@@ -506,10 +460,7 @@
           component-name
           hooks
           opts
-          props-affects-render
-          props-affects
-          state-affects-render
-          state-affects
+          check-args-fn
           render-deps
           render-fn)]
 
@@ -518,11 +469,17 @@
 
     cfg))
 
-(defn get-props ^not-native [^ManagedComponent comp]
-  (.-props comp))
+(defn get-arg ^not-native [^ManagedComponent comp idx]
+  (-nth ^not-native (.-args comp) idx))
 
-(defn get-state ^not-native [^ManagedComponent comp]
-  (.-state comp))
+(defn check-args! [^ManagedComponent comp new-args expected]
+  (assert (>= (count new-args) expected) (str "component expected at least " expected " arguments")))
+
+(defn arg-triggers-hooks! [^ManagedComponent comp idx dirty-bits]
+  (.mark-dirty-from-args! comp dirty-bits))
+
+(defn arg-triggers-render! [^ManagedComponent comp idx]
+  (.set-render-required! comp))
 
 (defn get-dom-ref [{::keys [dom-refs] :as env} ref-id]
   (get @dom-refs ref-id))
@@ -530,16 +487,6 @@
 (defn get-slot [^ManagedComponent comp slot-id]
   {:pre [(keyword? slot-id)]}
   (.get-slot comp slot-id))
-
-(defn swap-state!
-  ([{::keys [^ManagedComponent component] :as env} update-fn]
-   {:pre [(map? env)
-          (instance? ManagedComponent component)]}
-   (.swap-state! component update-fn))
-  ([env update-fn a1] (swap-state! env #(update-fn %1 a1)))
-  ([env update-fn a1 a2] (swap-state! env #(update-fn %1 a1 a2)))
-  ([env update-fn a1 a2 a3] (swap-state! env #(update-fn %1 a1 a2 a3)))
-  ([env update-fn a1 a2 a3 a4] (swap-state! env #(update-fn %1 a1 a2 a3 a4))))
 
 (defn get-env [^ManagedComponent comp]
   (.-component-env comp))

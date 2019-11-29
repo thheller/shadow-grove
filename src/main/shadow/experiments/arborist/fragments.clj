@@ -203,7 +203,7 @@
       (not (keyword? tag-kw))
       (analyze-component env el)
 
-      (= :> tag-kw)
+      #_#_(= :> tag-kw)
       (analyze-slotted env el)
 
       ;; automatic switch to svg by turning

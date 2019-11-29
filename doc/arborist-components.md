@@ -144,6 +144,7 @@ To be continued ...
 
 ## Open Questions
 
+Not so open anymore .. decided to go with multiple props, no state. Makes API nicer to use IMHO.
 
 ### Props?
 

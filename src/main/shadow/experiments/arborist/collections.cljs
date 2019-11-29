@@ -44,6 +44,9 @@
       (set! key-fn (.-key-fn next))
       (set! render-fn (.-render-fn next))
 
+      ;; FIXME: figure out how to pass args to render-fn properly, what to do about idx/key
+      ;; maybe just allow one extra arg?
+
       ;; FIXME: this should probably be use separate phases
       ;; one that finds all the nodes that need to be removed (but doesn't yet)
       ;; one that finds all new nodes (and constructs them)
@@ -67,7 +70,7 @@
 
                   (if-not item
                     ;; new item added to list, render normally and insert
-                    (let [rendered (render-fn data idx key)
+                    (let [rendered (render-fn data #_ #_ idx key)
                           item (p/as-managed rendered env)]
 
                       (p/dom-insert item (.-parentNode anchor) anchor)
@@ -76,7 +79,7 @@
                       (recur (p/dom-first item) (dec idx) updated))
 
                     ;; item did exist, re-render and maybe move
-                    (let [rendered (render-fn data idx key)]
+                    (let [rendered (render-fn data #_ #_ idx key)]
 
                       ;; skip dom-sync if render result is equal
                       (if (= rendered (get item-vals key))
@@ -160,7 +163,7 @@
 
           (let [val (nth coll idx)
                 key (key-fn val)
-                rendered (render-fn val idx key)
+                rendered (render-fn val #_#_ idx key)
                 managed (p/as-managed rendered env)]
 
             (recur
@@ -182,5 +185,5 @@
 (defn node [coll key-fn render-fn]
   {:pre [(sequential? coll)
          (ifn? key-fn)
-         (fn? render-fn)]}
+         (ifn? render-fn)]}
   (CollectionNode. coll key-fn render-fn))

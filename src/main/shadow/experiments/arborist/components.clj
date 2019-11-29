@@ -39,45 +39,6 @@
           (throw (ex-info "unknown destructure" {:entry entry}))
           )))))
 
-(defn add-props-binding [state sym-or-map]
-  (cond
-    (symbol? sym-or-map)
-    (-> state
-        (assoc :props-name sym-or-map)
-        (assoc-in [:bindings sym-or-map] {:type :props :name sym-or-map}))
-
-    (map? sym-or-map)
-    (let [{:keys [as]} sym-or-map
-          props-name (or as (gensym "props"))]
-      (-> state
-          (assoc :props-name props-name)
-          (assoc-in [:bindings props-name] {:type :props :name props-name})
-          (hook-destructure-map props-name sym-or-map)))
-
-    :else
-    (throw (ex-info "unsupported form for props" {}))))
-
-(defn add-state-binding [state sym-or-map]
-  (cond
-    (nil? sym-or-map)
-    state
-
-    (symbol? sym-or-map)
-    (-> state
-        (assoc :state-name sym-or-map)
-        (assoc-in [:bindings sym-or-map] {:type :state :name sym-or-map}))
-
-    (map? sym-or-map)
-    (let [{:keys [as]} sym-or-map
-          state-name (or as (gensym "state"))]
-      (-> state
-          (assoc :state-name state-name)
-          (assoc-in [:bindings state-name] {:type :state :name state-name})
-          (hook-destructure-map state-name sym-or-map)))
-
-    :else
-    (throw (ex-info "unsupported form for state" {}))))
-
 ;; FIXME: this will mistakenly match "shadow" bindings
 ;; (defc some-component [env props state]
 ;;   [x (let [env (:thing props)]
@@ -145,10 +106,10 @@
        (mapcat (fn [{:keys [name type idx]}]
                  [name
                   (case type
-                    :props
-                    `(get-props ~comp-sym)
-                    :state
-                    `(get-state ~comp-sym)
+                    :arg
+                    `(get-arg ~comp-sym ~idx)
+                    #_#_:state
+                        `(get-state ~comp-sym)
                     :hook
                     `(get-hook-value ~comp-sym ~idx))]
                  ))
@@ -165,6 +126,13 @@
              (map #(get bindings %))
              (filter #(= :hook (:type %)))
              (map :idx)
+             (set))
+
+        hook-args
+        (->> deps
+             (map #(get bindings %))
+             (filter #(= :arg (:type %)))
+             (map :idx)
              (set))]
     (-> state
         (assoc-in [:bindings key]
@@ -173,19 +141,17 @@
            :name key
            :deps deps})
 
-        (cond->
-          (contains? deps (:props-name state))
-          (update :props-affects bit-set hook-idx)
-
-          (contains? deps (:state-name state))
-          (update :state-affects bit-set hook-idx))
-
         ;; update already created hooks if they affect this hook
         ;; doing this in the macro so we don't have to calc it at runtime
         (r->
           (fn [state idx]
             (update-in state [:hooks idx :affects] conj hook-idx))
           hook-deps)
+
+        (r->
+          (fn [state idx]
+            (update-in state [:args idx :affects] conj hook-idx))
+          hook-args)
 
         (update :hooks conj
           {:depends-on hook-deps
@@ -209,21 +175,26 @@
              (map #(get bindings %))
              (filter #(= :hook (:type %)))
              (map :idx)
+             (set))
+
+        hook-args
+        (->> deps
+             (map #(get bindings %))
+             (filter #(= :arg (:type %)))
+             (map :idx)
              (set))]
     (-> state
-        (cond->
-          (contains? deps (:props-name state))
-          (update :props-affects bit-set hook-idx)
-
-          (contains? deps (:state-name state))
-          (update :state-affects bit-set hook-idx))
-
         ;; update already created hooks if they affect this hook
         ;; doing this in the macro so we don't have to calc it at runtime
         (r->
           (fn [state idx]
             (update-in state [:hooks idx :affects] conj hook-idx))
           hook-deps)
+
+        (r->
+          (fn [state idx]
+            (update-in state [:args idx :affects] conj hook-idx))
+          hook-args)
 
         (update :hooks conj
           {:depends-on hook-deps
@@ -270,17 +241,41 @@
     state
     (partition-all 2 hook-bindings)))
 
+(defn analyze-arg [state idx binding]
+  (cond
+    (symbol? binding)
+    (-> state
+        (assoc-in [:args idx] {:name binding :idx idx :affects #{}})
+        (assoc-in [:bindings binding] {:type :arg :name binding :idx idx}))
+
+    (map? binding)
+    (let [{:keys [as]} binding
+          arg-name (or as (gensym (str "arg_" idx "_")))]
+      (-> state
+          (assoc-in [:args idx] {:name arg-name :idx idx :affects #{}})
+          (assoc-in [:bindings arg-name] {:type :arg :name arg-name :idx idx})
+          (hook-destructure-map arg-name binding)))
+
+    :else
+    (throw (ex-info "unsupported form for component arg" {:binding binding :idx idx}))))
+
+(defn analyze-args [state arg-bindings]
+  (reduce-kv analyze-arg state arg-bindings))
+
 (defn analyze-body [{:keys [bindings] :as state} body]
   (let [deps (find-used-bindings #{} bindings body)]
     (assoc state
       :render-used deps
+      :render-args (->> deps
+                        (map #(get bindings %))
+                        (filter #(= :arg (:type %)))
+                        (map :idx)
+                        (set))
       :render-deps (->> deps
                         (map #(get bindings %))
                         (filter #(= :hook (:type %)))
                         (map :idx)
-                        (set))
-      :props-affect-render (contains? deps (:props-name state))
-      :state-affect-render (contains? deps (:state-name state)))))
+                        (set)))))
 
 (s/def ::defc-args
   (s/cat
@@ -300,16 +295,16 @@
         state
         (-> {:bindings {}
              :comp-sym (gensym "comp")
+             :old-args-sym (with-meta (gensym "old") {:tag 'not-native})
+             :new-args-sym (with-meta (gensym "new") {:tag 'not-native})
+             :args []
              :hooks []
              :opts opts
              :hook-bindings []
-             :props-affects 0
-             :state-affects 0
-             :env-affects 0
              :render-deps #{}
+             :render-args #{}
              :hook-idx 0}
-            (add-props-binding (get bindings 0))
-            (add-state-binding (get bindings 1))
+            (analyze-args bindings)
             (update :hook-bindings into hook-bindings)
             (analyze-hooks)
             (analyze-body body))]
@@ -334,37 +329,39 @@
                             ~(reduce bit-set 0 affects)
                             ~run)))))
          ~(or opts {})
-         ;; FIXME: props/state should probably integrate into hook bits somehow
-         ~(:props-affect-render state)
-         ~(:props-affects state)
-         ~(:state-affect-render state)
-         ~(:state-affects state)
+         ;; fn that checks args and invalidates hooks or sets render-required
+         (fn [~(:comp-sym state) ~(:old-args-sym state) ~(:new-args-sym state)]
+           (check-args! ~(:comp-sym state) ~(:new-args-sym state) ~(count (:args state)))
+           ~@(for [{:keys [idx affects]} (:args state)
+                   :let [affects-render? (contains? (:render-args state) idx)
+                         affects-hooks? (seq affects)]
+                   :when (or affects-render? affects-hooks?)]
+               `(when (not=
+                        ;; validated to be vectors elsewhere
+                        (cljs.core/-nth ~(:old-args-sym state) ~idx)
+                        (cljs.core/-nth ~(:new-args-sym state) ~idx))
+                  ;; ~@ so that it doesn't leave ugly nil
+                  ~@(when affects-render?
+                     [`(arg-triggers-render! ~(:comp-sym state) ~idx)])
+                  ~@(when affects-hooks?
+                      [`(arg-triggers-hooks! ~(:comp-sym state) ~idx ~(reduce bit-set 0 affects))])))
+           ;; trailing nil so the above isn't turned into an expression which results in ? : ...
+           ;; dunno if there is a way to tell CLJS that this function has no return value
+           nil)
          ~(reduce bit-set 0 (:render-deps state))
          (fn [~(:comp-sym state)]
            (let ~(let-bindings state (:render-used state))
              ~@body))))))
-(comment
-  (defc some-props [{:keys [x] :as props} state]
-    []
-    ...)
-
-  ;; is turned into
-
-  (defc some-props [props state]
-    [x (get props :x)]
-    ...)
-
-  ;; so that the hooks logic is used for simple dirty checks
-  ;; but also so that props can carry hook inits that will apply to the component
-  ;; FIXME: not sure that is actually a good idea, we'll see
-
-  )
 
 (comment
-  (macroexpand '(defc hello [{:keys [pa] :as props} state]
-                  [{::keys [foo] :as x}
-                   (query [::foo])]
-                  [:div pa foo])))
+  (require 'clojure.pprint)
+  (clojure.pprint/pprint
+    (macroexpand '(defc hello [arg1 arg2]
+                    [{::keys [foo] :as x}
+                     (query arg2 [::foo])
+                     bar [arg1 arg2]]
+                    [:div arg1 foo bar]))))
+
 
 (comment
   (macroexpand '(defc hello
