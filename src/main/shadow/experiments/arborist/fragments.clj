@@ -451,18 +451,26 @@
         frag-id
         `(fragment-id ~(str *ns* "/" code-id))]
 
-    (if-let [analyze-top (and (not (false? (::optimize macro-env))) shadow-analyze-top @shadow-analyze-top)]
-      ;; optimal variant, best performance, requires special support from compiler
-      (do (analyze-top `(def ~code-id (->FragmentCode ~(make-build-impl ast) ~(make-update-impl ast))))
-          `(->FragmentNode (cljs.core/array ~@code-snippets) ~ns-hint ~code-id))
+    ;; skip fragment if someone did `(<< (something))`, no point in wrapping, just call `(something)`
+    (if (and (= 1 (count ast))
+             (= :code-ref (:op (first ast))))
+      (first body)
+      (if-let [analyze-top (and (not (false? (::optimize macro-env))) shadow-analyze-top @shadow-analyze-top)]
+        ;; optimal variant, best performance, requires special support from compiler
+        (do (analyze-top `(def ~code-id (->FragmentCode ~(make-build-impl ast) ~(make-update-impl ast))))
+            `(->FragmentNode (cljs.core/array ~@code-snippets) ~ns-hint ~code-id))
 
-      ;; fallback, probably good enough, registers fragments to maintain identity
-      `(->FragmentNode
-         (cljs.core/array ~@code-snippets)
-         ~ns-hint
-         (~'js* "(~{} || ~{})"
-           (cljs.core/unchecked-get known-fragments ~frag-id)
-           (cljs.core/unchecked-set known-fragments ~frag-id
-             (->FragmentCode
-               ~(make-build-impl ast)
-               ~(make-update-impl ast))))))))
+        ;; fallback, probably good enough, registers fragments to maintain identity
+        `(->FragmentNode
+           (cljs.core/array ~@code-snippets)
+           ~ns-hint
+           (~'js* "(~{} || ~{})"
+             (cljs.core/unchecked-get known-fragments ~frag-id)
+             (cljs.core/unchecked-set known-fragments ~frag-id
+               (->FragmentCode
+                 ~(make-build-impl ast)
+                 ~(make-update-impl ast)))))))))
+
+(comment
+  (make-fragment {} '[[:div 1 2 3]])
+  (make-fragment {} '[(foo 1 2 3)]))
