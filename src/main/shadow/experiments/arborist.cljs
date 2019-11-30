@@ -13,63 +13,17 @@
     [shadow.experiments.arborist.collections :as coll])
   (:import [goog.structs AvlTree]))
 
-
-;; FIXME: this is not a good strategy at all.
-;; it should completely process one branch of a tree before starting a new one
-;; AvlTree is nice but not suited for this, should just make something custom
-
-;; FIXME: is there a better way to compare these?
-;; goal is to have high priority updates always first
-;; then work higher in the dom before children (in case the work causes the removal of children)
-;; then ideally based on DOM index so visible updates happen first
-;; now cheating and just sorting by some.component/foo-bar@1
-;; that is creation order which is kinda non-sense but easy to track as position in
-;; DOM is dynamic
-;; FIXME: this is called lots and should probably be smarter
-(defn work-comparator [^not-native a ^not-native b]
-  (if (identical? a b)
-    0
-    (let [c1 (js/goog.array.inverseDefaultCompare (p/work-priority a) (p/work-priority b))]
-      (if-not (zero? c1)
-        c1
-        (let [c2 (js/goog.array.defaultCompare (p/work-depth a) (p/work-depth b))]
-          (if-not (zero? c2)
-            c2
-            (let [c3 (js/goog.array.defaultCompare (p/work-id a) (p/work-id b))]
-              (if-not (zero? c3)
-                c3
-                (throw (ex-info "work comparator shouldn't reach here?" {:a a :b b}))
-                ))))))))
-
-(comment
-  (defrecord DummyCompare [prio depth id]
-    p/IWork
-    (work-priority [this] prio)
-    (work-depth [this] depth)
-    (work-id [this] id))
-
-  (let [t (AvlTree. work-comparator)]
-    (let [x (DummyCompare. 10 1 "test.b#3")]
-      (.add t x)
-      (.add t x)
-      (.add t x))
-    (.add t (DummyCompare. 10 0 "test.a#1"))
-    (.add t (DummyCompare. 10 0 "test.a#2"))
-    ;; should be first
-    (.add t (DummyCompare. 100 5 "some.event"))
-    (.inOrderTraverse t prn)))
-
-(deftype TreeScheduler [^AvlTree work-tree ^:mutable update-pending?]
+(deftype TreeScheduler [^:mutable work-set ^:mutable update-pending?]
   p/IScheduleUpdates
   (schedule-update! [this component]
-    (.add work-tree component)
+    (set! work-set (conj work-set component))
 
     ;; schedule was added in some async work
     (when-not update-pending?
       (js/console.warn "async schedule?" this component)))
 
   (unschedule! [this component]
-    (.remove work-tree component))
+    (set! work-set (disj work-set component)))
 
   (run-now! [this callback]
     (set! update-pending? true)
@@ -87,10 +41,9 @@
     ;; keep working on the first task only
     ;; any work may cause changes in the work-tree
     (loop []
-      (when (pos? (.getCount work-tree))
-        (let [next (.getMinimum work-tree)]
-          (p/work! next)
-          (recur))))
+      (when-some [next (first work-set)]
+        (p/work! next)
+        (recur)))
 
     (set! update-pending? false)
 
@@ -115,7 +68,7 @@
       (p/destroy! root))))
 
 (defn init [env]
-  (assoc env ::comp/scheduler (TreeScheduler. (AvlTree. work-comparator) false)))
+  (assoc env ::comp/scheduler (TreeScheduler. #{} false)))
 
 (defn run-now! [env callback]
   (p/run-now! (::comp/scheduler env) callback))

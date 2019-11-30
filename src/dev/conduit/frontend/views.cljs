@@ -23,11 +23,11 @@
                 (str/join "/"))))
 
 (defc tags-list [{:keys [tags]}]
-  [tag-item
-   (fn [tag]
-     (<> [:li.tag-default.tag-pill.tag-outline tag]))]
+  []
   (<> [:ul.tag-list
-       (sa/render-seq tags identity tag-item)]))
+       (sa/render-seq tags identity
+         (fn [tag]
+           (<> [:li.tag-default.tag-pill.tag-outline tag])))]))
 
 (defc article-meta [{:keys [article]}]
   [{:keys [user-is-author? user-can-follow? user-is-following-author? author createdAt favoritesCount favorited slug] :as data}
@@ -226,15 +226,15 @@
          [:div.col-md-3
           [:div.sidebar
            [:p "Popular Tags"]
-           (<> [:div.tag-list
-                (sa/render-seq tags identity
-                  (fn [tag]
-                    (<> [:a.tag-pill.tag-default
-                         {:href (url-for :home)
-                          :on-click [:get-articles {:tag tag
-                                                    :limit 10
-                                                    :offset 0}]}
-                         tag])))])]]]]]))
+           [:div.tag-list
+            (sa/render-seq tags identity
+              (fn [tag]
+                (<> [:a.tag-pill.tag-default
+                     {:href (url-for :home)
+                      :on-click [:get-articles {:tag tag
+                                                :limit 10
+                                                :offset 0}]}
+                     tag])))]]]]]]))
 
 ;; -- Login -------------------------------------------------------------------
 ;;

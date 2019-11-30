@@ -147,7 +147,7 @@
     destroyed?)
 
   (destroy! [this]
-    (p/unschedule! (::scheduler component-env) this)
+    (.unschedule! this)
     (set! destroyed? true)
     (run!
       (fn [hook]
@@ -253,10 +253,9 @@
             (when (bit-test (.-render-deps config) current-idx)
               (set! needs-render? true))
 
-            (when-not (p/hook-ready? hook)
-              (throw (ex-info "can't suspend yet" {})))
-
-            (set! current-idx (inc current-idx)))
+            (if (p/hook-ready? hook)
+              (set! current-idx (inc current-idx))
+              (.unschedule! this)))
 
           ;; marked dirty, update it
           ;; make others dirty if actually updated
@@ -299,13 +298,18 @@
               (when (bit-test (.-render-deps config) current-idx)
                 (set! needs-render? true)))
 
-            (when-not (p/hook-ready? hook)
-              (throw (ex-info "can't suspend yet" {})))
-
-            (set! current-idx (inc current-idx)))
+            (if (p/hook-ready? hook)
+              (set! current-idx (inc current-idx))
+              (.unschedule! this)))
 
           :else
           (set! current-idx (inc current-idx))))))
+
+  (^clj unschedule! [this]
+    (p/unschedule! (::scheduler component-env) this))
+
+  (^clj schedule! [this]
+    (p/schedule-update! (::scheduler component-env) this))
 
   (^clj component-render! [^ComponentInstance this]
     (assert (zero? dirty-hooks) "Got to render while hooks are dirty")

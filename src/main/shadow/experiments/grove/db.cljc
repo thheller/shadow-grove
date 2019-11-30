@@ -49,22 +49,28 @@
     spec))
 
 (defn make-ident [type id]
-  (p/Ident. type id nil))
+  [type id]
+  #_ (p/Ident. type id nil))
 
 (defn ident? [thing]
-  (instance? p/Ident thing))
+  (and (vector? thing)
+       (= (count thing) 2)
+       (keyword? (first thing)))
+  #_ (instance? p/Ident thing))
 
 (defn ident-key [^p/Ident thing]
   {:pre [(ident? thing)]}
-  (.-entity-type thing))
+  (first thing)
+  #_ (.-entity-type thing))
 
 (defn coll-key [^p/Ident thing]
   {:pre [(ident? thing)]}
-  [::all (.-entity-type thing)])
+  [::all (ident-key thing)])
 
 (defn ident-val [^p/Ident thing]
   {:pre [(ident? thing)]}
-  (.-id thing))
+  (nth thing 1)
+  #_ (.-id thing))
 
 (defn- normalize* [imports schema entity-type item]
   (let [{:keys [id-attr id-pred joins] :as ent-config}

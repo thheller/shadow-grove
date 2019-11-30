@@ -57,30 +57,27 @@
                                 :on-blur [::edit-complete! todo]
                                 :value todo-text}]))]))
 
-(defc ui-filter-select
-  {::set-filter! sg/tx}
-  []
+(defc ui-filter-select []
   [{::keys [current-filter]}
    (sg/query [::current-filter])
 
    filter-options
    [{:label "All" :value :all}
     {:label "Active" :value :active}
-    {:label "Completed" :value :completed}]
-
-   filter-row
-   (fn [{:keys [label value]}]
-     (<< [:li [:a
-               {:class {:selected (= current-filter value)}
-                :href "#"
-                :on-click [::set-filter! value]}
-               label]]))]
+    {:label "Completed" :value :completed}]]
 
   (<< [:ul.filters
-       (sa/render-seq filter-options :value filter-row)]))
+       (sa/render-seq filter-options :value
+         (fn [{:keys [label value]}]
+           (<< [:li [:a
+                     {:class {:selected (= current-filter value)}
+                      :href "#"
+                      :on-click [::set-filter! value]}
+                     label]])))]))
 
 (defc ui-root
-  {::create-new!
+  {::set-filter! sg/tx
+   ::create-new!
    (fn [env ^js e]
      (when (= 13 (.-keyCode e))
        (let [input (.-target e)

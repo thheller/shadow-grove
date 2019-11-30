@@ -34,6 +34,26 @@
                     :preloads [shadow.experiments.grove.dev-support
                                shadow.remote.runtime.cljs.browser]}}}
 
+  :todomvc-split
+  {:target :browser
+   :output-dir "examples/todomvc/js"
+   :compiler-options
+   {:infer-externs :auto
+    :shadow-keywords true}
+   :modules
+   {:shared
+    {:entries []}
+    :main
+    {:init-fn shadow.experiments.grove.test-app.todomvc.main/init
+     :preloads [shadow.experiments.grove.dev-support
+                shadow.remote.runtime.cljs.browser]
+     :depends-on #{:shared}}
+    :worker
+    {:init-fn shadow.experiments.grove.test-app.todomvc.worker/init
+     :web-worker true
+     :depends-on #{:shared}}}
+   :devtools {:loader-mode :script}}
+
   :conduit
   {:target :browser
    :output-dir "examples/conduit/js"
