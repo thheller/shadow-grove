@@ -77,7 +77,7 @@
                [:span (if favorited " Unfavorite Post " " Favorite Post ")]
                [:span.counter "(" favoritesCount ")"]]]))]))
 
-(defc articles-preview [{:keys [article]}]
+(defc articles-preview [article]
   [{:keys [user-can-favorite? description slug createdAt title author favoritesCount favorited tagList]
     :as article-data}
    (sg/query article [:description
@@ -112,9 +112,7 @@
               [:p "No articles are here... yet."]])
 
          :else
-         (sa/render-seq articles identity
-           (fn [article]
-             (articles-preview {:article article}))))]))
+         (sa/render-seq articles identity articles-preview))]))
 
 (defn errors-list
   [errors]
@@ -457,7 +455,7 @@
                "Update Article"
                "Publish Article")]]]]]]]))
 
-(defc ui-comment [{:keys [comment]}]
+(defc ui-comment [comment]
   [{:keys [id createdAt body author]}
    (sg/query comment [:id])
 
@@ -530,9 +528,7 @@
                  [:a {:href (url-for :login)} "Sign in"]
                  " to add comments on this article."]))
 
-          (sa/render-seq (:comments article-data) identity
-            (fn [ident]
-              (ui-comment {:comment ident})))
+          (sa/render-seq (:comments article-data) identity ui-comment)
           ]]]]))
 
 (defc ui-page-article [props]
