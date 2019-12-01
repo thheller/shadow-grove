@@ -1,10 +1,11 @@
-(ns shadow.experiments.grove.test-app.todomvc.main
+;; FIXME: should remain identical to split.views
+;; need to sort out ns structure it can be actually identical
+(ns todomvc.simple.views
   (:require
     [shadow.experiments.arborist :as sa :refer (<< defc)]
-    [shadow.experiments.grove-main :as sg]
     [shadow.experiments.arborist.effects :as sfx]
-    [shadow.experiments.grove.test-app.todomvc.model :as m]
-    [cognitect.transit :as transit]))
+    [shadow.experiments.grove :as sg]
+    [todomvc.model :as m]))
 
 (defc todo-item
   {::m/edit-update!
@@ -76,6 +77,11 @@
                       :on-click [::m/set-filter! value]}
                      label]])))]))
 
+(defc ui-todo-list []
+  [{::m/keys [filtered-todos] :as query}
+   (sg/query [::m/filtered-todos])]
+  (<< [:ul.todo-list (sa/render-seq filtered-todos identity todo-item)]))
+
 (defc ui-root
   {::m/set-filter! sg/tx
    ::m/create-new!
@@ -95,13 +101,11 @@
      (sg/run-tx env ::m/toggle-all! {:completed? (-> e .-target .-checked)}))}
 
   []
-  [{::m/keys [num-total filtered-todos num-active num-completed] :as query}
-   (sg/query [::m/filtered-todos
-              ::m/editing
+  [{::m/keys [num-total num-active num-completed] :as query}
+   (sg/query [::m/editing
               ::m/num-total
               ::m/num-active
               ::m/num-completed])]
-
 
   (<< [:div {:on-click [::m/shuffle!]} "shuffle todos"]
       [:header.header
@@ -118,8 +122,11 @@
                :checked false}]
              [:label {:for "toggle-all"} "Mark all as complete"]
 
-             [:ul.todo-list
-              (sa/render-seq filtered-todos identity todo-item)]
+             ;; test extract to see if shuffle gets faster
+             ;; since all the other stuff doesn't need to happen here when only the todos are shuffled
+             ;; does have an impact overall but its all very efficient already so doesn't matter much
+             ;; even with 6x slowdown
+             (ui-todo-list)
 
              [:footer.footer
               [:span.todo-count
@@ -128,21 +135,4 @@
               (ui-filter-select)
 
               (when (pos? num-completed)
-                (<< [:button.clear-completed {:on-click [::m/clear-completed!]} "Clear completed"]))]]))
-      ))
-
-(defonce root-el (js/document.getElementById "app"))
-
-;; FIXME: these need to be customizable so don't move to app
-;; need to support custom handlers, maybe just as options though
-(def tr (transit/reader :json))
-(def tw (transit/writer :json))
-
-(defonce app-env (sa/init {}))
-
-(defn ^:dev/after-load start []
-  (sg/start app-env root-el (ui-root)))
-
-(defn init []
-  (set! app-env (sg/init app-env ::todomvc js/SHADOW_WORKER tr tw))
-  (start))
+                (<< [:button.clear-completed {:on-click [::m/clear-completed!]} "Clear completed"]))]]))))

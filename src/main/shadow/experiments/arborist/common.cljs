@@ -1,8 +1,7 @@
 (ns shadow.experiments.arborist.common
   (:require [shadow.experiments.arborist.protocols :as p]))
 
-
-(defn marker [env]
+(defn dom-marker [env]
   (js/document.createTextNode ""))
 
 (defn fragment-replace [old-managed new-managed]
@@ -19,15 +18,17 @@
     ))
 
 ;; swappable root
-(deftype ManagedRoot [env marker ^:mutable added-to-dom? ^:mutable ^not-native node ^:mutable val]
+(deftype ManagedRoot [env ^:mutable marker ^:mutable added-to-dom? ^:mutable ^not-native node ^:mutable val]
   p/IManageNodes
   (dom-first [this] marker)
 
   (dom-insert [this parent anchor]
     (set! added-to-dom? true)
-    (.insertBefore parent marker anchor)
-    (when node
-      (p/dom-insert node parent anchor)))
+    (if node
+      (p/dom-insert node parent anchor)
+      ;; when nothing was rendered yet just insert a marker element
+      (do (set! marker (dom-marker env))
+          (.insertBefore parent marker anchor))))
 
   p/IDirectUpdate
   (update! [this next]
@@ -52,12 +53,13 @@
 
   p/IDestructible
   (destroy! [this]
-    (.remove marker)
+    (when marker
+      (.remove marker))
     (when node
       (p/destroy! node))))
 
 (defn managed-root [env node val]
-  (ManagedRoot. env (marker env) false node val))
+  (ManagedRoot. env nil false node val))
 
 (deftype ManagedText [env ^:mutable val node]
   p/IManageNodes

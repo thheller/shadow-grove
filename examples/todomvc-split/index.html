@@ -1,18 +1,24 @@
 <!doctype html>
 <html lang="en">
 <head>
+    <!-- loading the worker directly so it doesn't have to wait for shared/main init -->
     <link rel="preload" as="script" href="js/shared.js">
     <link rel="preload" as="script" href="js/main.js">
-    <!-- loading the worker directly so it doesn't have to wait for shared/main init -->
+    <!--
+    complains about invalid value, guess its not implemented
+    <link rel="preload" as="worker" href="js/worker.js">
+
+    still figuring out how to start the worker asap
+    -->
     <script>var SHADOW_WORKER = new Worker("js/worker.js");</script>
+
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Template • TodoMVC</title>
+    <title>split • TodoMVC</title>
     <link rel="stylesheet" href="vendor/todomvc-common/base.css">
     <link rel="stylesheet" href="vendor/todomvc-app-css/index.css">
 </head>
 <body>
-<img src="loading.svg"/>
 <section id="app" class="todoapp"></section>
 <footer class="info">
     <p>Double-click to edit a todo</p>

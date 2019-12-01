@@ -10,20 +10,21 @@
     [shadow.experiments.arborist.attributes :as attr]
     [shadow.experiments.arborist.components :as comp]
     [shadow.experiments.arborist.common :as common]
-    [shadow.experiments.arborist.collections :as coll])
-  (:import [goog.structs AvlTree]))
+    [shadow.experiments.arborist.collections :as coll]
+    [goog.async.nextTick]))
 
 (deftype TreeScheduler [^:mutable work-set ^:mutable update-pending?]
   p/IScheduleUpdates
-  (schedule-update! [this component]
-    (set! work-set (conj work-set component))
+  (schedule-update! [this work-task]
+    (set! work-set (conj work-set work-task))
 
     ;; schedule was added in some async work
     (when-not update-pending?
-      (js/console.warn "async schedule?" this component)))
+      (set! update-pending? true)
+      (js/goog.async.nextTick #(.process-pending! this))))
 
-  (unschedule! [this component]
-    (set! work-set (disj work-set component)))
+  (unschedule! [this work-task]
+    (set! work-set (disj work-set work-task)))
 
   (run-now! [this callback]
     (set! update-pending? true)
@@ -40,8 +41,11 @@
 
     ;; keep working on the first task only
     ;; any work may cause changes in the work-tree
+    ;; FIXME: this now processes in "random" order
     (loop []
       (when-some [next (first work-set)]
+        (when-not (p/work-pending? next)
+          (throw (ex-info "work was scheduled but isn't pending?" {:next next})))
         (p/work! next)
         (recur)))
 

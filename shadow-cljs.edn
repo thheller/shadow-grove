@@ -15,8 +15,9 @@
  :dev-http
  {3005 "public"
   3006 "examples/todomvc"
-  3007 "examples/conduit"
-  3008 "examples/bench-fragment"}
+  3007 "examples/todomvc-split"
+  3008 "examples/conduit"
+  3009 "examples/bench-fragment"}
 
  :builds
  {:test-dom
@@ -30,13 +31,13 @@
    :output-dir "examples/todomvc/js"
    :compiler-options {:infer-externs :auto
                       :shadow-keywords true}
-   :modules {:main {:init-fn shadow.experiments.grove.test-app.todomvc/init
+   :modules {:main {:init-fn todomvc.simple.main/init
                     :preloads [shadow.experiments.grove.dev-support
                                shadow.remote.runtime.cljs.browser]}}}
 
   :todomvc-split
   {:target :browser
-   :output-dir "examples/todomvc/js"
+   :output-dir "examples/todomvc-split/js"
    :compiler-options
    {:infer-externs :auto
     :shadow-keywords true}
@@ -44,12 +45,12 @@
    {:shared
     {:entries []}
     :main
-    {:init-fn shadow.experiments.grove.test-app.todomvc.main/init
+    {:init-fn todomvc.split.main/init
      :preloads [shadow.experiments.grove.dev-support
                 shadow.remote.runtime.cljs.browser]
      :depends-on #{:shared}}
     :worker
-    {:init-fn shadow.experiments.grove.test-app.todomvc.worker/init
+    {:init-fn todomvc.split.worker/init
      :web-worker true
      :depends-on #{:shared}}}
    :devtools {:loader-mode :script}}

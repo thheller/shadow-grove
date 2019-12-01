@@ -6,13 +6,25 @@
     [shadow.experiments.arborist.components :as comp]
     [shadow.experiments.arborist :as sa]
     [goog.async.nextTick]
+    [goog.async.run]
     [cognitect.transit :as transit]))
 
 (defonce active-roots-ref (atom {}))
 
-(defn send-to-worker [{::keys [worker transit-str] :as env} msg]
+(defonce async-queue (js/Promise.resolve))
+
+(defn next-tick [callback]
+  ;; browser microtrask, too high prio for this
+  ;; (.then async-queue callback)
+  ;; this drains everything at once and never yields
+  ;; (js/goog.async.run callback)
+  ;; actually runs after the current task, seems best for now?
+  (js/goog.async.nextTick callback))
+
+;; batch?
+(defn send-to-worker [{::keys [worker ^function transit-str] :as env} msg]
   ;; (js/console.log "worker-write" env msg)
-  (js/goog.async.nextTick #(.postMessage worker (transit-str msg))))
+  (next-tick #(.postMessage worker (transit-str msg))))
 
 (defonce query-id-seq (atom 0))
 
@@ -59,9 +71,13 @@
 
   Object
   (set-data! [this data]
-    (set! ready? true)
     (set! read-result data)
-    (comp/hook-ready! component idx)))
+    ;; on query update just invalidate. might be useful to bypass certain suspend logic?
+    (if ready?
+      (comp/hook-invalidate! component idx)
+      (do (comp/hook-ready! component idx)
+          (set! ready? true)))
+    ))
 
 (defn query
   ([query]
@@ -73,17 +89,14 @@
    (QueryHook. ident query nil nil nil nil false nil)))
 
 (defn tx*
-  [{::keys [config-ref data-ref active-queries-ref]
-    ::comp/keys [ev-id]
-    :as env}
-   params]
-  (js/console.log ::tx env params))
+  [env ev-id params]
+  (send-to-worker env [:tx ev-id params]))
 
 (defn tx [env e params]
-  (tx* env params))
+  (tx* env (::comp/ev-id env) params))
 
-(defn run-tx [env other params]
-  (tx* (assoc env ::comp/ev-id other) params))
+(defn run-tx [env ev-id params]
+  (tx* env ev-id params))
 
 (defn form [defaults])
 
@@ -91,13 +104,17 @@
 
 (defn form-reset! [form])
 
-
 ;; not using an atom as env to make it clearer that it is to be treated as immutable
 ;; can put mutable atoms in it but env once created cannot be changed.
 ;; a node in the tree can modify it for its children but only on create.
 
-(defn init [{::comp/keys [scheduler] :as env} app-id worker tr tw]
-  (let [transit-read
+(defn init
+  [{::comp/keys [scheduler] :as env} app-id worker]
+  ;; FIXME: take reader-opts/writer-opts from env if set?
+  (let [tr (transit/reader :json)
+        tw (transit/writer :json)
+
+        transit-read
         (fn transit-read [data]
           (transit/read tr data))
 
@@ -118,10 +135,12 @@
 
     (.addEventListener worker "message"
       (fn [e]
+        (js/performance.mark "transit-read-start")
         (let [msg (transit-read (.-data e))]
+          (js/performance.measure "transit-read" "transit-read-start")
           ;; everything was already async so just keep delaying
           ;; msg read could have taken a long time so just give the browser a chance
-          (js/goog.async.nextTick
+          (next-tick
             (fn []
               (let [[op & args] msg]
 

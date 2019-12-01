@@ -89,7 +89,7 @@
   (as-managed [_ env]
     (let [env (cond-> env element-ns (assoc ::element-ns element-ns))
           state (.. code (create-fn env vals))]
-      (ManagedFragment. env code vals (common/marker env) (aget state 0) (aget state 1))))
+      (ManagedFragment. env code vals (common/dom-marker env) (aget state 0) (aget state 1))))
 
   IEquiv
   (-equiv [this ^FragmentNode other]

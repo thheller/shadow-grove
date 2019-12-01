@@ -178,13 +178,15 @@
 
 ;; FIXME: very inefficient, maybe worth maintaining an index
 (defn invalidate-queries! [active-queries keys-to-invalidate]
-  (run!
-    (fn [^QueryHook query]
+  (reduce-kv
+    (fn [_ query-id ^ActiveQuery query]
       (run!
         (fn [key]
           (when (.affected-by-key? query key)
             (.refresh! query)))
-        keys-to-invalidate))
+        keys-to-invalidate)
+      nil)
+    nil
     active-queries))
 
 (defn tx*
@@ -261,39 +263,56 @@
     ::config-ref (atom {:events {}})
     ::data-ref data-ref))
 
+(defonce query-queue (js/Promise.resolve))
+
 (deftype ActiveQuery
   [env
    query-id
    ident
    query
    ^:mutable read-keys
-   ^:mutable read-result]
+   ^:mutable read-result
+   ^:mutable pending?]
 
   Object
   (do-read! [this]
     (let [{::keys [data-ref]} env
           observed-data (observed @data-ref)
           query (if ident [{ident query}] query)
-          result (db/query env observed-data query)]
+          result (db/query env observed-data query)
+
+          new-result
+          (if ident (get result ident) result)]
 
       (set! read-keys @observed-data)
-      (set! read-result (if ident (get result ident) result))
 
-      ;; (js/console.log "did-read" read-keys read-result @data-ref)
-      (send-to-main env [:query-result query-id read-result])))
+      (when (not= new-result read-result)
+        (set! read-result new-result)
+        ;; (js/console.log "did-read" read-keys read-result @data-ref)
+        ;; FIXME: we know which data the client already had. could skip over those parts
+        ;; but computing that might be more expensive than just replacing it?
+        (send-to-main env [:query-result query-id new-result]))))
+
+  (actually-refresh! [this]
+    (when pending?
+      (set! pending? false)
+      (.do-read! this)))
 
   (refresh! [this]
-    ;; don't read here, just invalidate the component
-    ;; other updates may cause this query to be destroyed
-    ;; wait till its our turn to actually run again
-    ;; (comp/invalidate! component idx)
-    (js/console.log "query needs resending to main" this))
+    ;; this may be called multiple times during one invalidation cycle right now
+    ;; so we queue to ensure its only sent out once
+    ;; FIXME: fix invalidate-queries! so this isn't necessary
+    (set! pending? true)
+    (.then query-queue #(.actually-refresh! this)))
 
   (affected-by-key? [this key]
     (contains? read-keys key)))
 
-(defn init [env tr tw]
-  (let [transit-read
+(defn init [env]
+  (let [tr (transit/reader :json)
+        tw (transit/writer :json)
+
+        transit-read
         (fn transit-read [data]
           (transit/read tr data))
 
@@ -319,9 +338,18 @@
           (case op
             :query-init
             (let [[query-id ident query] args
-                  q (ActiveQuery. env query-id ident query nil nil)]
+                  q (ActiveQuery. env query-id ident query nil nil true)]
               (swap! active-queries-ref assoc query-id q)
               (.do-read! q))
+
+            ;; FIXME: make sure no more work happens for this, might still be in queue
+            :query-destroy
+            (let [[query-id] args]
+              (swap! active-queries-ref dissoc query-id))
+
+            :tx
+            (let [[ev-id params] args]
+              (tx* env ev-id params))
 
             (js/console.warn "unhandled worker msg" msg)))))
 

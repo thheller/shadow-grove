@@ -68,13 +68,11 @@
 
   (.setEnabled history true))
 
-
 (defn set-token! [env new-token]
   (let [^goog history (get-in env [:shared ::env/history])]
     (js/console.log "set-token!" env new-token)
     (.setToken history new-token)
     ))
-
 
 (defn ^:dev/after-load start []
   (sg/start env/app root-el (views/ui-root)))

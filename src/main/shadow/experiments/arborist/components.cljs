@@ -71,7 +71,8 @@
       (recur (bit-shift-right search 1) (inc idx)))))
 
 (deftype ManagedComponent
-  [^not-native ^:mutable parent-env
+  [^not-native scheduler ;; called often, need to avoid map lookup
+   ^not-native ^:mutable parent-env
    ^not-native ^:mutable component-env
    ^:mutable args
    ^:mutable rendered-args
@@ -172,7 +173,7 @@
     (.run-next! this)
 
     (when-not (p/work-pending? this)
-      (p/unschedule! (::scheduler component-env) this)))
+      (p/unschedule! scheduler this)))
 
   p/IProfile
   (perf-count! [this counter-id])
@@ -186,10 +187,10 @@
     (let [child-env
           (-> parent-env
               (update ::depth safe-inc)
-              (assoc ::parent (::component parent-env)
-                     ::dom-refs (atom {})
-                     ::component-id (str (.-component-name config) "@" (next-component-id))
-                     ::component this))]
+              (assoc ::parent (::component parent-env))
+              (assoc ::dom-refs (atom {}))
+              ;; (assoc ::component-id (str (.-component-name config) "@" (next-component-id)))
+              (assoc ::component this))]
 
       (p/perf-start! this)
 
@@ -198,9 +199,10 @@
       (set! current-idx 0)
       (set! hooks (js/Array. (alength (.-hooks config))))
 
+      (.schedule! this)
       ;; FIXME: should this run everything on init or hand it off to the scheduler?
-      (while (and (not suspended?) (p/work-pending? this))
-        (p/work! this))))
+      #_(while (and (not suspended?) (p/work-pending? this))
+          (p/work! this))))
 
   (^clj get-hook-value [this idx]
     (p/hook-value (aget hooks idx)))
@@ -317,7 +319,7 @@
           (set! current-idx (inc current-idx))))))
 
   (^clj unschedule! [this]
-    (p/unschedule! (::scheduler component-env) this))
+    (p/unschedule! scheduler this))
 
   (^clj suspend! [this hook-causing-suspend]
     ;; just in case we were already scheduled. should really track this more efficiently
@@ -325,7 +327,7 @@
     (set! suspended? true))
 
   (^clj schedule! [this]
-    (p/schedule-update! (::scheduler component-env) this))
+    (p/schedule-update! scheduler this))
 
   (^clj component-render! [^ComponentInstance this]
     (assert (zero? dirty-hooks) "Got to render while hooks are dirty")
@@ -368,7 +370,7 @@
     (when-not (instance? p/ComponentConfig config)
       (throw (ex-info "not a component definition" {:config config :props args}))))
 
-  (doto (ManagedComponent. env nil args args config {} nil {} 0 nil 0 0 0 true false false)
+  (doto (ManagedComponent. (::scheduler env) env nil args args config {} nil {} 0 nil 0 0 0 true false false)
     (.component-init!)))
 
 (deftype ComponentNode [component args]
@@ -385,11 +387,11 @@
 (defn component-node? [x]
   (instance? ComponentNode x))
 
-(defn call-event-fn [{::keys [component scheduler] :as env} ev-id e ev-args]
+(defn call-event-fn [{::keys [^ManagedComponent component] :as env} ev-id e ev-args]
   (when-not component
     (throw (ex-info "event handlers can only be used in components" {:env env :ev-id ev-id :e e :ev-args ev-args})))
 
-  (p/run-now! scheduler #(p/handle-event! component ev-id e ev-args)))
+  (p/run-now! (.-scheduler component) #(p/handle-event! component ev-id e ev-args)))
 
 (defn event-attr [env node event oval [ev-id & ev-args :as nval]]
 
@@ -512,7 +514,7 @@
   (.-component-env comp))
 
 (defn get-scheduler [^ManagedComponent comp]
-  (::scheduler (.-component-env comp)))
+  (. comp -scheduler))
 
 (defn get-hook-value [^ManageComponent comp idx]
   (.get-hook-value comp idx))
@@ -575,7 +577,7 @@
   [slot-id ^ManagedComponent component idx node]
   p/IBuildHook
   (hook-build [this c i]
-    (SlotHook. slot-id c i (common/marker (get-env c))))
+    (SlotHook. slot-id c i (common/dom-marker (get-env c))))
 
   p/IConstruct
   (as-managed [this env]

@@ -8,6 +8,8 @@
 (defn index-map ^not-native [key-vec]
   (persistent! (reduce-kv #(assoc! %1 %3 %2) (transient {}) key-vec)))
 
+(deftype CollectionEntry [data key rendered managed])
+
 (deftype ManagedCollection
   [env
    ^:mutable coll
@@ -67,7 +69,7 @@
                       ^not-native item (get items key)
                       data (nth new-coll idx)
                       updated (conj! updated key)
-                      rendered (render-fn data #_ #_ idx key)]
+                      rendered (render-fn data #_#_idx key)]
 
                   (if-not item
                     ;; new item added to list, nothing to compare to just insert
@@ -134,6 +136,9 @@
         items))
     (.remove marker-after)))
 
+;; FIXME: this shouldn't initialize everything in sync. might take too long
+;; could do work in chunks, maybe even check if items are visible at all?
+;; FIXME: with 6x throttle this already takes 150ms for 100 items
 (deftype CollectionNode [coll key-fn render-fn]
   p/IConstruct
   (as-managed [this env]
@@ -147,8 +152,6 @@
              keys (transient [])
              vals (transient {})]
 
-        ;; FIXME: this shouldn't initialize everything in sync. might take too long
-        ;; could do work in chunks, maybe even check if items are visible at all?
         (if (>= idx len)
           (ManagedCollection.
             env
