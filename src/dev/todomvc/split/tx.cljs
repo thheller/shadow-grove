@@ -2,7 +2,6 @@
 ;; need to sort out ns structure it can be actually identical
 (ns todomvc.split.tx
   (:require
-    [shadow.experiments.arborist :as sa :refer (<< defc)]
     [shadow.experiments.grove-worker :as sg]
     [shadow.experiments.grove.db :as db]
     [todomvc.model :as m]))
