@@ -144,5 +144,5 @@
   (sg/start app-env root-el (ui-root)))
 
 (defn init []
-  (set! app-env (sg/init app-env ::todomvc "js/worker.js" tr tw))
+  (set! app-env (sg/init app-env ::todomvc js/SHADOW_WORKER tr tw))
   (start))

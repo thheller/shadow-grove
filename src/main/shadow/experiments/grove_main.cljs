@@ -96,11 +96,8 @@
 ;; can put mutable atoms in it but env once created cannot be changed.
 ;; a node in the tree can modify it for its children but only on create.
 
-(defn init [{::comp/keys [scheduler] :as env} app-id worker-src tr tw]
-  (let [worker
-        (js/Worker. worker-src)
-
-        transit-read
+(defn init [{::comp/keys [scheduler] :as env} app-id worker tr tw]
+  (let [transit-read
         (fn transit-read [data]
           (transit/read tr data))
 
