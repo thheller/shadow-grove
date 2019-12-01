@@ -130,12 +130,16 @@
 (defonce root-el (js/document.getElementById "app"))
 
 (def init-todos
-  [{::todo-id 1
-    ::todo-text "Hello World"
-    ::completed? false}])
+  (->> (range 100)
+       (map (fn [i]
+              {::todo-id i
+               ::todo-text (str "item #" i)
+               ::completed? false}))
+       (vec)))
+
 
 (defonce data-ref
-  (-> {::id-seq 2
+  (-> {::id-seq 101
        ::editing nil
        ::current-filter :all}
       (with-meta {::db/schema (db/configure

@@ -14,8 +14,10 @@
   ;; (js/console.log "worker-write" env msg)
   (js/goog.async.nextTick #(.postMessage worker (transit-str msg))))
 
+(defonce query-id-seq (atom 0))
+
 (defn make-query-id []
-  (str (random-uuid)))
+  (swap! query-id-seq inc))
 
 (deftype QueryHook
   [ident
@@ -59,10 +61,7 @@
   (set-data! [this data]
     (set! ready? true)
     (set! read-result data)
-    ;; don't read here, just invalidate the component
-    ;; other updates may cause this query to be destroyed
-    ;; wait till its our turn to actually run again
-    (comp/invalidate! component idx)))
+    (comp/hook-ready! component idx)))
 
 (defn query
   ([query]

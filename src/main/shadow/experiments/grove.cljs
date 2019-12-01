@@ -128,7 +128,7 @@
     ;; don't read here, just invalidate the component
     ;; other updates may cause this query to be destroyed
     ;; wait till its our turn to actually run again
-    (comp/invalidate! component idx))
+    (comp/hook-invalidate! component idx))
 
   (affected-by-key? [this key]
     (contains? read-keys key)))

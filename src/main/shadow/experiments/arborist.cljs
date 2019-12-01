@@ -56,7 +56,7 @@
   (update! [this next]
     (if root
       (p/update! root next)
-      (let [new-root (common/ManagedRoot. env nil nil)]
+      (let [new-root (common/managed-root env nil nil)]
         (set! root new-root)
         (p/update! root next)
         (p/dom-insert root container nil)
@@ -115,7 +115,7 @@
         ;; don't take new-val just yet, it may change again in the time before
         ;; we actually get to an update. deref'ing when the actual update occurs
         ;; which will also reset the dirty flag
-        (comp/invalidate! component idx))))
+        (comp/hook-invalidate! component idx))))
 
   (hook-ready? [this] true) ;; born ready
   (hook-value [this] val)

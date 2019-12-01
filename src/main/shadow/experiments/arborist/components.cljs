@@ -85,6 +85,7 @@
    ^number ^:mutable dirty-hooks
    ^number ^:mutable updated-hooks
    ^boolean ^:mutable needs-render?
+   ^boolean ^:mutable suspended?
    ^boolean ^:mutable destroyed?]
 
   p/IManageNodes
@@ -104,7 +105,7 @@
     (. config (check-args-fn this args (.-args next)))
     (set! args (.-args next))
     (when (p/work-pending? this)
-      (p/schedule-update! (::scheduler component-env) this)))
+      (.schedule! this)))
 
   ;; FIXME: figure out default event handler
   ;; don't want to declare all events all the time
@@ -193,12 +194,12 @@
       (p/perf-start! this)
 
       (set! component-env child-env)
-      (set! root (common/ManagedRoot. child-env nil nil))
+      (set! root (common/managed-root child-env nil nil))
       (set! current-idx 0)
       (set! hooks (js/Array. (alength (.-hooks config))))
 
       ;; FIXME: should this run everything on init or hand it off to the scheduler?
-      (while (p/work-pending? this)
+      (while (and (not suspended?) (p/work-pending? this))
         (p/work! this))))
 
   (^clj get-hook-value [this idx]
@@ -211,7 +212,17 @@
     (when (< idx current-idx)
       (set! current-idx idx))
 
-    (p/schedule-update! (::scheduler component-env) this))
+    (.schedule! this))
+
+  (^clj ready-hook! [this idx]
+    ;; (js/console.log "invalidate-hook!" idx (:component-name config) this)
+
+    (when (not= current-idx idx)
+      (js/console.warn "hook become ready while not being the current?" current-idx idx this))
+
+    (set! suspended? false)
+    (.schedule! this))
+
 
   (^clj mark-hooks-dirty! [this dirty-bits]
     (set! dirty-hooks (bit-or dirty-hooks dirty-bits))
@@ -255,7 +266,7 @@
 
             (if (p/hook-ready? hook)
               (set! current-idx (inc current-idx))
-              (.unschedule! this)))
+              (.suspend! this)))
 
           ;; marked dirty, update it
           ;; make others dirty if actually updated
@@ -300,13 +311,18 @@
 
             (if (p/hook-ready? hook)
               (set! current-idx (inc current-idx))
-              (.unschedule! this)))
+              (.suspend! this)))
 
           :else
           (set! current-idx (inc current-idx))))))
 
   (^clj unschedule! [this]
     (p/unschedule! (::scheduler component-env) this))
+
+  (^clj suspend! [this hook-causing-suspend]
+    ;; just in case we were already scheduled. should really track this more efficiently
+    (.unschedule! this)
+    (set! suspended? true))
 
   (^clj schedule! [this]
     (p/schedule-update! (::scheduler component-env) this))
@@ -352,7 +368,7 @@
     (when-not (instance? p/ComponentConfig config)
       (throw (ex-info "not a component definition" {:config config :props args}))))
 
-  (doto (ManagedComponent. env nil args args config {} nil {} 0 nil 0 0 0 true false)
+  (doto (ManagedComponent. env nil args args config {} nil {} 0 nil 0 0 0 true false false)
     (.component-init!)))
 
 (deftype ComponentNode [component args]
@@ -501,8 +517,12 @@
 (defn get-hook-value [^ManageComponent comp idx]
   (.get-hook-value comp idx))
 
-(defn invalidate! [^ManagedComponent comp idx]
+(defn hook-invalidate! [^ManagedComponent comp idx]
   (.invalidate-hook! comp idx))
+
+(defn hook-ready! [^ManagedComponent comp idx]
+  (.ready-hook! comp idx))
+
 
 (deftype EventHook
   [event-id

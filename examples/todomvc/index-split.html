@@ -1,6 +1,13 @@
 <!doctype html>
 <html lang="en">
 	<head>
+		<link rel="preload" as="script" href="js/shared.js">
+		<link rel="preload" as="script" href="js/main.js">
+		<!--
+		not sure this works for worker scripts?
+		waterfall looks correct but kinda looks like worker just requests again?
+		<link rel="preload" as="script" href="js/worker.js">
+		-->
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
 		<title>Template • TodoMVC</title>
@@ -8,7 +15,8 @@
 		<link rel="stylesheet" href="vendor/todomvc-app-css/index.css">
 	</head>
 	<body>
-        <section id="app" class="todoapp"></section>
+	<img src="loading.svg"/>
+	<section id="app" class="todoapp"></section>
 		<footer class="info">
 			<p>Double-click to edit a todo</p>
 			<p>Created by <a href="https://twitter.com/thheller">Thomas Heller</a></p>

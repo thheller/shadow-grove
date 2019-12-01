@@ -19,25 +19,29 @@
     ))
 
 ;; swappable root
-(deftype ManagedRoot [env ^:mutable ^not-native node ^:mutable val]
+(deftype ManagedRoot [env marker ^:mutable added-to-dom? ^:mutable ^not-native node ^:mutable val]
   p/IManageNodes
-  (dom-first [this]
-    (p/dom-first node))
+  (dom-first [this] marker)
 
   (dom-insert [this parent anchor]
-    (when-not node
-      (throw (ex-info "root not initialized" {})))
-
-    (p/dom-insert node parent anchor))
+    (set! added-to-dom? true)
+    (.insertBefore parent marker anchor)
+    (when node
+      (p/dom-insert node parent anchor)))
 
   p/IDirectUpdate
   (update! [this next]
+    ;; FIXME: should this even compare?
+    ;; unlikely to be called with identical fragments right?
     (when (not= next val)
       (set! val next)
       (cond
         (not node)
         (let [el (p/as-managed val env)]
-          (set! node el))
+          (set! node el)
+          ;; root was already added to dom but no node was available at the time
+          (when added-to-dom?
+            (p/dom-insert node (.-parentElement marker) marker)))
 
         (p/supports? node next)
         (p/dom-sync! node next)
@@ -48,8 +52,12 @@
 
   p/IDestructible
   (destroy! [this]
+    (.remove marker)
     (when node
       (p/destroy! node))))
+
+(defn managed-root [env node val]
+  (ManagedRoot. env (marker env) false node val))
 
 (deftype ManagedText [env ^:mutable val node]
   p/IManageNodes

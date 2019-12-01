@@ -147,6 +147,8 @@
              keys (transient [])
              vals (transient {})]
 
+        ;; FIXME: this shouldn't initialize everything in sync. might take too long
+        ;; could do work in chunks, maybe even check if items are visible at all?
         (if (>= idx len)
           (ManagedCollection.
             env
