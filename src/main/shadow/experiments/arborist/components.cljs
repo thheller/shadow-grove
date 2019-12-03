@@ -401,7 +401,7 @@
 
   (let [ev-key (str "__shadow$" (name event))]
     (when-let [ev-fn (gobj/get node ev-key)]
-      (.removeEventListener node ev-fn))
+      (.removeEventListener node (name event) ev-fn))
 
     ;(js/console.log "adding ev fn" val)
 

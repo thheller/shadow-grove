@@ -458,10 +458,10 @@
       (if-let [analyze-top (and (not (false? (::optimize macro-env))) shadow-analyze-top @shadow-analyze-top)]
         ;; optimal variant, best performance, requires special support from compiler
         (do (analyze-top `(def ~code-id (->FragmentCode ~(make-build-impl ast) ~(make-update-impl ast))))
-            `(->FragmentNode (cljs.core/array ~@code-snippets) ~ns-hint ~code-id))
+            `(fragment-node (cljs.core/array ~@code-snippets) ~ns-hint ~code-id))
 
         ;; fallback, probably good enough, registers fragments to maintain identity
-        `(->FragmentNode
+        `(fragment-node
            (cljs.core/array ~@code-snippets)
            ~ns-hint
            (~'js* "(~{} || ~{})"

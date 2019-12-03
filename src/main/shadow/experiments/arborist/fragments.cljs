@@ -100,6 +100,13 @@
 (defn fragment-node? [thing]
   (instance? FragmentNode thing))
 
+(defn has-no-lazy-seqs? [vals]
+  (every? #(not (instance? cljs.core/LazySeq %)) vals))
+
+(defn fragment-node [vals element-ns code]
+  (assert (has-no-lazy-seqs? vals)  "no lazy seqs allowed in fragments")
+  (FragmentNode. vals element-ns code))
+
 ;; for fallback code, relying on registry
 (def ^{:jsdoc ["@dict"]} known-fragments #js {})
 

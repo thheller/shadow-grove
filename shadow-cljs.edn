@@ -7,7 +7,7 @@
  :jvm-opts
  ["-XX:-OmitStackTraceInFastThrow"]
 
- :version "2.8.77"
+ :version "2.8.78"
 
  :dependencies
  []
@@ -53,7 +53,7 @@
     {:init-fn todomvc.split.worker/init
      :web-worker true
      :depends-on #{:shared}}}
-   :devtools {:loader-mode :script}}
+   :devtools {:browser-inject :main}}
 
   :conduit
   {:target :browser
