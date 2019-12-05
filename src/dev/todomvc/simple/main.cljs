@@ -11,7 +11,7 @@
 (defonce root-el (js/document.getElementById "app"))
 
 (def init-todos
-  (->> (range 10)
+  (->> (range 100)
        (map (fn [i]
               {::m/todo-id i
                ::m/todo-text (str "item #" i)
@@ -19,7 +19,7 @@
        (vec)))
 
 (defonce data-ref
-  (-> {::m/id-seq 11
+  (-> {::m/id-seq 101
        ::m/editing nil
        ::m/current-filter :all}
       (with-meta {::db/schema (db/configure

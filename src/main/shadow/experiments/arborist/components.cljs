@@ -89,6 +89,10 @@
    ^boolean ^:mutable suspended?
    ^boolean ^:mutable destroyed?]
 
+  cljs.core/IHash
+  (-hash [this]
+    (goog/getUid this))
+
   p/IManageNodes
   (dom-first [this]
     (p/dom-first root))
@@ -196,13 +200,15 @@
 
       (set! component-env child-env)
       (set! root (common/managed-root child-env nil nil))
-      (set! current-idx 0)
+      (set! current-idx (int 0))
       (set! hooks (js/Array. (alength (.-hooks config))))
 
-      (.schedule! this)
-      ;; FIXME: should this run everything on init or hand it off to the scheduler?
-      #_(while (and (not suspended?) (p/work-pending? this))
-          (p/work! this))))
+      ;; FIXME: should this schedule instead?
+      ;; doing as much work as possible in as-managed removes a bunch of overhead though
+      (while (and (false? suspended?) (p/work-pending? this))
+        (p/work! this))
+
+      true))
 
   (^clj get-hook-value [this idx]
     (p/hook-value (aget hooks idx)))
@@ -324,6 +330,7 @@
   (^clj suspend! [this hook-causing-suspend]
     ;; just in case we were already scheduled. should really track this more efficiently
     (.unschedule! this)
+    (p/did-suspend! scheduler this)
     (set! suspended? true))
 
   (^clj schedule! [this]
@@ -332,8 +339,8 @@
   (^clj component-render! [^ComponentInstance this]
     (assert (zero? dirty-hooks) "Got to render while hooks are dirty")
     ;; (js/console.log "Component:render!" (:component-name config) updated-hooks)
-    (set! updated-hooks 0)
-    (set! dirty-from-args 0)
+    (set! updated-hooks (int 0))
+    (set! dirty-from-args (int 0))
     (if-not needs-render?
       (p/perf-count! this [::render-skip])
 
@@ -349,7 +356,9 @@
         (p/update! root frag)
 
         ;; FIXME: run dom after effects
-        )))
+        ))
+
+    (p/did-finish! scheduler this))
 
   (^clj register-event! [this event-id callback]
     (set! events (assoc events event-id callback)))
@@ -370,7 +379,26 @@
     (when-not (instance? p/ComponentConfig config)
       (throw (ex-info "not a component definition" {:config config :props args}))))
 
-  (doto (ManagedComponent. (::scheduler env) env nil args args config {} nil {} 0 nil 0 0 0 true false false)
+  (doto (ManagedComponent.
+          ;; FIXME: this is way too many args, there must be a way to simplifiy
+          (::scheduler env)
+          env ;; parent-env
+          nil ;; component-env (created in component-init! since it needs this pointer)
+          args
+          args ;; rendered-args
+          config
+          {} ;; event handlers
+          nil ;; root
+          {} ;; slots
+          (int 0) ;; current-idx
+          nil ;; hooks, array created in component-init!
+          (int 0) ;; dirty-from-args bits
+          (int 0) ;; dirty-hooks bits
+          (int 0) ;; updated-hooks bits
+          true ;; needs-render?
+          false ;; suspended?
+          false ;; destroyed?
+          )
     (.component-init!)))
 
 (deftype ComponentNode [component args]

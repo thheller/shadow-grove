@@ -6,7 +6,7 @@
 
   :dependencies
   [[org.clojure/clojure "1.10.0" :scope "provided"]
-   [org.clojure/clojurescript "1.10.520" :scope "provided"]]
+   [org.clojure/clojurescript "1.10.597" :scope "provided"]]
 
   :resource-paths
   ["src/resources"]
@@ -22,5 +22,5 @@
    {:source-paths ["src/dev"]}
    :cljs-dev ;; using this in shadow-cljs so can't use dev profile (Cursive complains about circular dep)
    {:dependencies
-    [[thheller/shadow-cljs "2.8.69"]]}})
+    [[thheller/shadow-cljs "2.8.80"]]}})
 

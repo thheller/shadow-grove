@@ -7,6 +7,7 @@
     [shadow.experiments.grove.db :as db]
     [todomvc.model :as m]))
 
+;; FIXME: counting lazy seq ..
 (defmethod db/query-calc ::m/num-active
   [env db current _ params]
   (->> (db/all-of db ::m/todo)
@@ -21,7 +22,7 @@
 
 (defmethod db/query-calc ::m/num-total
   [env db current _ params]
-  (count (db/all-idents-of db ::m/todo)))
+  (count (db/all-of db ::m/todo)))
 
 (defmethod db/query-calc ::m/editing?
   [env db current _ params]

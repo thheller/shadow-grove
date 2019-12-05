@@ -38,6 +38,10 @@
   (schedule-update! [this target])
   (unschedule! [this target])
   (run-now! [this action])
+
+  (did-suspend! [this target])
+  (did-finish! [this target])
+
   (run-asap! [this action])
   (run-whenever! [this action]))
 

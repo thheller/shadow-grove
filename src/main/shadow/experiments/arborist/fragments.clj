@@ -204,7 +204,7 @@
       (analyze-component env el)
 
       #_#_(= :> tag-kw)
-      (analyze-slotted env el)
+          (analyze-slotted env el)
 
       ;; automatic switch to svg by turning
       ;; [:svg ...] into (svg [:svg ...])
@@ -219,8 +219,9 @@
 
 (defn analyze-text [env node]
   {:op :text
+   :element-id (next-el-id env)
    :parent (:parent env)
-   :sym (gensym)
+   :sym (gensym "text_")
    :text node})
 
 (defn analyze-node [env node]
@@ -246,7 +247,7 @@
         vals-sym (with-meta (gensym "vals") {:tag 'not-native})
         element-ns-sym (gensym "element-ns")
 
-        {:keys [bindings mutations return nodes] :as result}
+        {:keys [bindings mutations return] :as result}
         (reduce
           (fn step-fn [env {:keys [op sym parent] :as ast}]
             (let [[parent-type parent-sym] parent]
@@ -260,52 +261,39 @@
                       (update :mutations conj (with-loc ast `(append-child ~parent-sym ~sym)))
 
                       (and parent-sym (= parent-type :component))
-                      (update :mutations conj (with-loc ast `(component-append ~parent-sym ~sym)))
-
-                      (not parent-sym)
-                      (update :nodes conj sym))
+                      (update :mutations conj (with-loc ast `(component-append ~parent-sym ~sym))))
                     (reduce-> step-fn (:children ast))
                     )
 
-                :component
-                (-> env
-                    (update :bindings conj sym
-                      (with-loc ast
-                        `(component-create ~env-sym
-                           (aget ~vals-sym ~(-> ast :component :ref-id))
-                           ~(if-not (:attrs ast)
-                              {}
-                              `(aget ~vals-sym ~(-> ast :attrs :ref-id))))))
-                    (update :return conj sym)
-                    (cond->
-                      parent-sym
-                      (update :mutations conj (with-loc ast `(append-managed ~parent-sym ~sym)))
-                      (not parent-sym)
-                      (update :nodes conj sym))
-                    (reduce-> step-fn (:children ast)))
+                #_#_:component
+                    (-> env
+                        (update :bindings conj sym
+                          (with-loc ast
+                            `(component-create ~env-sym
+                               (aget ~vals-sym ~(-> ast :component :ref-id))
+                               ~(if-not (:attrs ast)
+                                  {}
+                                  `(aget ~vals-sym ~(-> ast :attrs :ref-id))))))
+                        (update :return conj sym)
+                        (cond->
+                          parent-sym
+                          (update :mutations conj (with-loc ast `(managed-append ~parent-sym ~sym))))
+                        (reduce-> step-fn (:children ast)))
 
-                ;; text nodes can never mutate. no need to return them
-                ;;
                 :text
                 (-> env
                     (update :bindings conj sym `(create-text ~env-sym ~(:text ast)))
+                    (update :return conj sym)
                     (cond->
                       parent-sym
-                      (update :mutations conj `(append-child ~parent-sym ~sym))
-
-                      (not parent-sym)
-                      (update :nodes conj sym)
-                      ))
+                      (update :mutations conj `(append-child ~parent-sym ~sym))))
 
                 :code-ref
                 (-> env
-                    (update :bindings conj sym (with-loc ast `(create-managed ~env-sym (aget ~vals-sym ~(:ref-id ast)))))
+                    (update :bindings conj sym (with-loc ast `(managed-create ~env-sym (aget ~vals-sym ~(:ref-id ast)))))
                     (cond->
                       parent-sym
-                      (update :mutations conj (with-loc ast `(append-managed ~parent-sym ~sym)))
-
-                      (not parent-sym)
-                      (update :nodes conj sym))
+                      (update :mutations conj (with-loc ast `(managed-append ~parent-sym ~sym))))
                     (update :return conj sym))
 
                 :static-attr
@@ -313,27 +301,22 @@
                     (update :mutations conj (with-loc ast `(set-attr ~env-sym ~(:el ast) ~(:attr ast) nil ~(:value ast)))))
 
                 :dynamic-attr
-                (-> env
-                    (update :mutations conj (with-loc ast `(set-attr ~env-sym ~(:el ast) ~(:attr ast) nil (aget ~vals-sym ~(-> ast :value :ref-id))))
-                      ))))
-            )
+                (update env :mutations conj (with-loc ast `(set-attr ~env-sym ~(:el ast) ~(:attr ast) nil (aget ~vals-sym ~(-> ast :value :ref-id)))))
+                )))
           {:bindings [element-ns-sym `(::element-ns ~env-sym)]
            :mutations []
-           :return []
-           :nodes []}
+           :return []}
           ast)]
-
 
     `(fn [~env-sym ~vals-sym]
        (let [~@bindings]
          ~@mutations
-         (cljs.core/array (cljs.core/array ~@nodes) (cljs.core/array ~@return))))))
+         (cljs.core/array ~@return)))))
 
 (defn make-update-impl [ast]
   (let [this-sym (gensym "this")
         env-sym (gensym "env")
         nodes-sym (gensym "nodes")
-        roots-sym (gensym "roots")
         oldv-sym (gensym "oldv")
         newv-sym (gensym "newv")
 
@@ -346,22 +329,21 @@
                   (assoc-in [:sym->id sym] element-id)
                   (reduce-> step-fn (:children ast)))
 
-              :component
-              (-> env
-                  (update :mutations conj
-                    (with-loc ast
-                      `(component-update
-                         ~env-sym
-                         ~roots-sym
-                         ~nodes-sym
-                         ~(:element-id ast)
-                         (aget ~oldv-sym ~(-> ast :component :ref-id))
-                         (aget ~newv-sym ~(-> ast :component :ref-id))
-                         ~@(if-not (-> ast :attrs)
-                             [{} {}]
-                             [`(aget ~oldv-sym ~(-> ast :attrs :ref-id))
-                              `(aget ~newv-sym ~(-> ast :attrs :ref-id))]))))
-                  (reduce-> step-fn (:children ast)))
+              #_#_:component
+                  (-> env
+                      (update :mutations conj
+                        (with-loc ast
+                          `(component-update
+                             ~env-sym
+                             ~nodes-sym
+                             ~(:element-id ast)
+                             (aget ~oldv-sym ~(-> ast :component :ref-id))
+                             (aget ~newv-sym ~(-> ast :component :ref-id))
+                             ~@(if-not (-> ast :attrs)
+                                 [{} {}]
+                                 [`(aget ~oldv-sym ~(-> ast :attrs :ref-id))
+                                  `(aget ~newv-sym ~(-> ast :attrs :ref-id))]))))
+                      (reduce-> step-fn (:children ast)))
 
               :text
               env
@@ -373,7 +355,6 @@
                       (with-loc ast
                         `(update-managed
                            ~env-sym
-                           ~roots-sym
                            ~nodes-sym
                            ~(:element-id ast)
                            (aget ~oldv-sym ~ref-id)
@@ -395,8 +376,56 @@
           ast)]
 
 
-    `(fn [~env-sym ~roots-sym ~nodes-sym ~oldv-sym ~newv-sym]
+    `(fn [~env-sym ~nodes-sym ~oldv-sym ~newv-sym]
        ~@mutations)))
+
+(defn make-mount-impl [ast]
+  (let [this-sym (gensym "this")
+        nodes-sym (gensym "nodes")
+        parent-sym (gensym "parent")
+        anchor-sym (gensym "anchor")
+
+        mount-calls
+        (->> ast
+             (map (fn [{:keys [op element-id]}]
+                    (case op
+                      (:text :element)
+                      `(dom-insert-before ~parent-sym (aget ~nodes-sym ~element-id) ~anchor-sym)
+                      :code-ref
+                      `(managed-insert (aget ~nodes-sym ~element-id) ~parent-sym ~anchor-sym)
+                      nil)))
+             (remove nil?))]
+
+    `(fn [~nodes-sym ~parent-sym ~anchor-sym]
+       ~@mount-calls)))
+
+(defn make-destroy-impl [ast]
+  (let [this-sym (gensym "this")
+        nodes-sym (gensym "nodes")
+
+        destroy-calls
+        (reduce
+          (fn step-fn [calls {:keys [op sym element-id] :as ast}]
+            (case op
+              (:text :element)
+              (-> calls
+                  (cond->
+                    ;; can skip removing nodes when the parent is already removed
+                    (nil? (:parent ast))
+                    (conj `(dom-remove (aget ~nodes-sym ~element-id))))
+                  (reduce-> step-fn (:children ast)))
+
+              :code-ref
+              (-> calls
+                  (conj `(managed-remove (aget ~nodes-sym ~element-id)))
+                  (reduce-> step-fn (:children ast)))
+
+              calls))
+          []
+          ast)]
+
+    `(fn [~nodes-sym]
+       ~@destroy-calls)))
 
 (def shadow-analyze-top
   (try
@@ -449,7 +478,14 @@
         ;; closure will shorten this in :advanced by using the fragment-id generator
         ;; so length does not matter
         frag-id
-        `(fragment-id ~(str *ns* "/" code-id))]
+        `(fragment-id ~(str *ns* "/" code-id))
+
+        fragment-code
+        `(->FragmentCode
+           ~(make-build-impl ast)
+           ~(make-mount-impl ast)
+           ~(make-update-impl ast)
+           ~(make-destroy-impl ast))]
 
     ;; skip fragment if someone did `(<< (something))`, no point in wrapping, just call `(something)`
     (if (and (= 1 (count ast))
@@ -457,7 +493,7 @@
       (first body)
       (if-let [analyze-top (and (not (false? (::optimize macro-env))) shadow-analyze-top @shadow-analyze-top)]
         ;; optimal variant, best performance, requires special support from compiler
-        (do (analyze-top `(def ~code-id (->FragmentCode ~(make-build-impl ast) ~(make-update-impl ast))))
+        (do (analyze-top `(def ~code-id ~fragment-code))
             `(fragment-node (cljs.core/array ~@code-snippets) ~ns-hint ~code-id))
 
         ;; fallback, probably good enough, registers fragments to maintain identity
@@ -466,11 +502,14 @@
            ~ns-hint
            (~'js* "(~{} || ~{})"
              (cljs.core/unchecked-get known-fragments ~frag-id)
-             (cljs.core/unchecked-set known-fragments ~frag-id
-               (->FragmentCode
-                 ~(make-build-impl ast)
-                 ~(make-update-impl ast)))))))))
+             (cljs.core/unchecked-set known-fragments ~frag-id ~fragment-code)))))))
+
 
 (comment
-  (make-fragment {} '[[:div 1 2 3]])
+  (require 'clojure.pprint)
+  (clojure.pprint/pprint
+    (make-fragment {} '["before" [:div 1 [:div 2]] (yo) [:div [:div 3]] "after"])))
+
+(comment
+
   (make-fragment {} '[(foo 1 2 3)]))

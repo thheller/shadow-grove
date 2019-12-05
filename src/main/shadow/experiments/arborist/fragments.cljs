@@ -5,7 +5,6 @@
     [shadow.experiments.arborist.common :as common]
     [shadow.experiments.arborist.components :as comp]))
 
-
 (defn fragment-id
   ;; https://github.com/google/closure-compiler/wiki/Id-Generator-Annotations
   {:jsdoc ["@idGenerator {consistent}"]}
@@ -21,17 +20,11 @@
           (when (= (aget a i) (aget b i))
             (recur (inc i))))))))
 
-;; sometimes need to keep roots and elements in sync
-;; FIXME: do 2 array really make sense?
-;; could just be one array with indexes
-;; and one actual array with elements?
-;; roots needs to be kept in sync otherwise it prevents GC of detroyed elements
-(defn array-swap [a old swap]
-  (let [idx (.indexOf a old)]
-    (when-not (neg? idx)
-      (aset a idx swap))))
-
-(deftype FragmentCode [^function create-fn ^function update-fn])
+(deftype FragmentCode
+  [create-fn
+   mount-fn
+   update-fn
+   destroy-fn])
 
 (declare ^{:arglists '([thing])} fragment-node?)
 
@@ -40,7 +33,15 @@
    ^FragmentCode code
    ^:mutable vals
    marker
-   roots
+   ;; FIXME: I wonder how much faster this would be without an array
+   ;; but instead using a create-fn that closes over locals and returns
+   ;; functions that do the mount/update/destroy
+   ;; svelte does that and it certainly seems nicer to not juggle this array
+   ;; we can't do this without hacks in CLJS though since setting locals isn't allowed
+   ;; and I'd rather not js*
+   ;; should measure how much the array costs in comparison sometime though
+   ;; FIXME: in any case the create-fn doesn't need to return all elements
+   ;; could skip over those that'll never update, just requires rewriting index logic in macro
    nodes]
 
   p/IManageNodes
@@ -48,11 +49,7 @@
 
   (dom-insert [this parent anchor]
     (.insertBefore parent marker anchor)
-    (dotimes [idx (alength roots)]
-      (let [root (aget roots idx)]
-        (if (satisfies? p/IManageNodes root)
-          (p/dom-insert root parent anchor)
-          (.insertBefore parent root anchor)))))
+    (. code (mount-fn nodes parent anchor)))
 
   p/IUpdatable
   (supports? [this ^FragmentNode next]
@@ -61,35 +58,22 @@
 
   (dom-sync! [this ^FragmentNode next]
     (let [nvals (.-vals next)]
-      (.. code (update-fn env roots nodes vals nvals))
+      (.. code (update-fn env nodes vals nvals))
       (set! vals nvals))
     :synced)
 
   p/IDestructible
   (destroy! [this]
     (.remove marker)
-    (dotimes [x (alength nodes)]
-      (let [el (aget nodes x)]
-        (if (satisfies? p/IDestructible el)
-          (p/destroy! el)
-          (.remove el))))
-
-    ;; FIXME: only necessary because of top level text nodes which aren't in nodes
-    ;; might be better to just add them into nodes instead of leaving them out in the first place
-    (dotimes [x (alength roots)]
-      (let [el (aget roots x)]
-        (when-not (satisfies? p/IDestructible el)
-          (.remove el))))
-
-    (set! (.-length roots) 0)
+    (. code (destroy-fn nodes))
     (set! (.-length nodes) 0)))
 
 (deftype FragmentNode [vals element-ns ^FragmentCode code]
   p/IConstruct
   (as-managed [_ env]
     (let [env (cond-> env element-ns (assoc ::element-ns element-ns))
-          state (.. code (create-fn env vals))]
-      (ManagedFragment. env code vals (common/dom-marker env) (aget state 0) (aget state 1))))
+          nodes (.. code (create-fn env vals))]
+      (ManagedFragment. env code vals (common/dom-marker env) nodes)))
 
   IEquiv
   (-equiv [this ^FragmentNode other]
@@ -139,18 +123,24 @@
   [parent child]
   (.appendChild parent child))
 
-(defn create-managed [env other]
+(defn managed-create [env other]
   ;; FIXME: validate that return value implements the proper protocols
   (p/as-managed other env))
 
 ;; called by macro generated code
-(defn append-managed [parent other]
+(defn managed-append [parent other]
   (when-not (satisfies? p/IUpdatable other)
     (throw (ex-info "cannot append-managed" {:parent parent :other other})))
   (p/dom-insert other parent nil))
 
+(defn managed-insert [component parent anchor]
+  (p/dom-insert component parent anchor))
+
+(defn managed-remove [component]
+  (p/destroy! component))
+
 ;; called by macro generated code
-(defn update-managed [env roots nodes idx oval nval]
+(defn update-managed [env nodes idx oval nval]
   ;; FIXME: should this even compare oval/nval?
   ;; comparing the array in fragment handles (which may contain other handles) might become expensive?
   ;; comparing 100 items to find the 99th didn't match
@@ -163,9 +153,7 @@
       (if (p/supports? el nval)
         (p/dom-sync! el nval)
         (let [next (common/replace-managed env el nval)]
-          (array-swap roots el next)
-          (aset nodes idx next)
-          )))))
+          (aset nodes idx next))))))
 
 ;; called by macro generated code
 (defn update-attr [env nodes idx ^not-native attr oval nval]
@@ -173,30 +161,39 @@
     (let [el (aget nodes idx)]
       (set-attr env el attr oval nval))))
 
-(defn component-create [env component attrs]
-  {:pre [(map? attrs)]}
-  (comp/component-create env component attrs))
+(comment
+  ;; only handling managed now, no special component support
+  ;; might need some of this when adding slot support back in
+  (defn component-create [env component attrs]
+    {:pre [(map? attrs)]}
+    (comp/component-create env component attrs))
 
-;; FIXME: does this ever need the old attrs oa?
-(defn component-update [env roots nodes idx oc nc oa na]
-  {:pre [(map? na)]}
-  (let [^not-native comp (aget nodes idx)
-        tmp (comp/->ComponentNode nc na)]
-    (if (p/supports? comp tmp)
-      (p/dom-sync! comp tmp)
-      (let [new (common/replace-managed env oc tmp)]
-        ;; FIXME: rework roots logic, can't be traversing that array all the time
-        (array-swap roots comp new)
-        (aset nodes idx new)
-        ))))
+  ;; FIXME: does this ever need the old attrs oa?
+  (defn component-update [env nodes idx oc nc oa na]
+    {:pre [(map? na)]}
+    (let [^not-native comp (aget nodes idx)
+          tmp (comp/->ComponentNode nc na)]
+      (if (p/supports? comp tmp)
+        (p/dom-sync! comp tmp)
+        (let [new (common/replace-managed env oc tmp)]
+          (aset nodes idx new)
+          ))))
 
-(defn component-append [component child]
-  ;; FIXME: support more slots?
-  ;; FIXME: with hooks this should be cleaner ... feels too hacky
-  (let [slot (p/dom-first (comp/get-slot component :default))]
-    (if-not (satisfies? p/IManageNodes child)
-      (.insertBefore (.-parentNode slot) child slot)
-      (p/dom-insert child (.-parentNode slot) slot))))
+  (defn component-append [component child]
+    ;; FIXME: support more slots?
+    ;; FIXME: with hooks this should be cleaner ... feels too hacky
+    (let [slot (p/dom-first (comp/get-slot component :default))]
+      (if-not (satisfies? p/IManageNodes child)
+        (.insertBefore (.-parentNode slot) child slot)
+        (p/dom-insert child (.-parentNode slot) slot)))))
+
+;; just so the macro doesn't have to use dot interop
+;; will likely be inlined by closure anyways
+(defn dom-insert-before [^js parent node anchor]
+  (.insertBefore parent node anchor))
+
+(defn dom-remove [^js node]
+  (.remove node))
 
 (defn css-join [from-el from-attrs]
   [from-el from-attrs])

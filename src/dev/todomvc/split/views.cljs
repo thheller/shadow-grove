@@ -59,6 +59,7 @@
                                 :on-blur [::m/edit-complete! todo]
                                 :value todo-text}]))]))
 
+
 (defc ui-filter-select []
   [{::m/keys [current-filter]}
    (sg/query [::m/current-filter])
@@ -80,7 +81,13 @@
 (defc ui-todo-list []
   [{::m/keys [filtered-todos] :as query}
    (sg/query [::m/filtered-todos])]
-  (<< [:ul.todo-list (sa/render-seq filtered-todos identity todo-item)]))
+
+  (<< [:ul.todo-list (sa/render-seq filtered-todos identity todo-item)])
+  #_(sa/suspense
+    (<< [:ul.todo-list (sa/render-seq filtered-todos identity todo-item)])
+
+    {:fallback (<< [:div "Loading ..."])
+     :timeout 100}))
 
 (defc ui-root
   {::m/set-filter! sg/tx

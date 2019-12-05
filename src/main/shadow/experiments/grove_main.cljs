@@ -24,7 +24,7 @@
 ;; batch?
 (defn send-to-worker [{::keys [worker ^function transit-str] :as env} msg]
   ;; (js/console.log "worker-write" env msg)
-  (next-tick #(.postMessage worker (transit-str msg))))
+  (.postMessage worker (transit-str msg)))
 
 (defonce query-id-seq (atom 0))
 
@@ -47,10 +47,12 @@
 
   p/IHook
   (hook-init! [this]
-    (let [{::keys [active-queries-ref]} env]
-      ;; FIXME: clear out some fields? probably not necessary, this will be GC'd anyways
-      (swap! active-queries-ref assoc query-id this))
-    (send-to-worker env [:query-init query-id ident query]))
+    (next-tick
+      (fn []
+        (let [{::keys [active-queries-ref]} env]
+          ;; FIXME: clear out some fields? probably not necessary, this will be GC'd anyways
+          (swap! active-queries-ref assoc query-id this))
+        (send-to-worker env [:query-init query-id ident query]))))
 
   ;; FIXME: async queries
   (hook-ready? [this] ready?)

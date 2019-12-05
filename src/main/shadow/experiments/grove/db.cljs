@@ -267,7 +267,7 @@
         (if (contains? result query-part)
           result
           (assoc! result query-part x))
-        (assoc! result query-part (query-calc env db current query-part {}))))
+        (assoc! result query-part (.cljs$core$IFn$_invoke$arity$5 query-calc env db current query-part {}))))
 
     ;; (::foo {:params 1})
     ;; TBD
@@ -291,7 +291,7 @@
                   (if (not= ::missing join-val)
                     join-val
                     ;; might be computed, should check in db schema
-                    (query-calc env db current join-key {}))]
+                    (.cljs$core$IFn$_invoke$arity$5 query-calc env db current join-key {}))]
 
               (cond
                 ;; {:some-prop [:some-other-ident 123]}
@@ -368,7 +368,6 @@
 (defn all-of [db entity-type]
   (->> (all-idents-of db entity-type)
        (map #(get db %))))
-
 
 ;; keep this as the very last thing since we excluded clojure remove
 ;; don't want to write code that assumes it uses core remove

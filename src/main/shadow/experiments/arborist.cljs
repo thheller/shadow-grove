@@ -13,10 +13,21 @@
     [shadow.experiments.arborist.collections :as coll]
     [goog.async.nextTick]))
 
-(deftype TreeScheduler [^:mutable work-set ^:mutable update-pending?]
+(def now
+  (if (exists? js/performance)
+    #(js/performance.now)
+    #(js/Date.now)))
+
+(deftype TreeScheduler [^:mutable work-arr ^:mutable update-pending?]
   p/IScheduleUpdates
+  (did-suspend! [this work-task])
+  (did-finish! [this work-task])
+
   (schedule-update! [this work-task]
-    (set! work-set (conj work-set work-task))
+    ;; FIXME: now possible a task is scheduled multiple times
+    ;; but the assumption is that task will only schedule themselves once
+    ;; doesn't matter if its in the arr multiple times too much
+    (.push work-arr work-task)
 
     ;; schedule was added in some async work
     (when-not update-pending?
@@ -24,7 +35,9 @@
       (js/goog.async.nextTick #(.process-pending! this))))
 
   (unschedule! [this work-task]
-    (set! work-set (disj work-set work-task)))
+    ;; FIXME: might be better to track this in the task itself and just check when processing
+    ;; and just remove it then. the array might get long?
+    (set! work-arr (.filter work-arr (fn [x] (not (identical? x work-task))))))
 
   (run-now! [this callback]
     (set! update-pending? true)
@@ -33,25 +46,35 @@
 
   Object
   (process-pending! [this]
-    ;; FIXME: rewrite this entirely .. this keeps working until all work is done
-    ;; handling updates directly after event completes
-    ;; but it should break work into chunks
-    ;; should also support async/suspend at some point
-    ;; need to figure out how to do that in a smart way
+    ;; FIXME: this now processes in FCFS order
+    ;; should be more intelligent about prioritizing
+    ;; should use requestIdleCallback or something to schedule in batch
+    (let [start (now)
+          done
+          (loop []
+            (if-not (pos? (alength work-arr))
+              true
+              (let [next (aget work-arr 0)]
+                (when-not (p/work-pending? next)
+                  (throw (ex-info "work was scheduled but isn't pending?" {:next next})))
+                (p/work! next)
 
-    ;; keep working on the first task only
-    ;; any work may cause changes in the work-tree
-    ;; FIXME: this now processes in "random" order
-    (loop []
-      (when-some [next (first work-set)]
-        (when-not (p/work-pending? next)
-          (throw (ex-info "work was scheduled but isn't pending?" {:next next})))
-        (p/work! next)
-        (recur)))
+                ;; FIXME: using this causes a lot of intermediate paints
+                ;; which means things take way longer especially when rendering collections
+                ;; so there really needs to be a Suspense style node that can at least delay
+                ;; inserting nodes into the actual DOM until they are actually ready
+                (let [diff (- (now) start)]
+                  ;; FIXME: more logical timeouts
+                  ;; something like IdleTimeout from requestIdleCallback?
+                  ;; dunno if there is a polyfill for that?
+                  ;; not 16 to let the runtime do other stuff
+                  (when (< diff 10)
+                    (recur))))))]
 
-    (set! update-pending? false)
+      (if done
+        (set! update-pending? false)
+        (js/goog.async.nextTick #(.process-pending! this))))
 
-    ;; FIXME: actually schedule things. don't run everything all the time
     ;; FIXME: dom effects
     ))
 
@@ -72,7 +95,7 @@
       (p/destroy! root))))
 
 (defn init [env]
-  (assoc env ::comp/scheduler (TreeScheduler. #{} false)))
+  (assoc env ::comp/scheduler (TreeScheduler. (array) false)))
 
 (defn run-now! [env callback]
   (p/run-now! (::comp/scheduler env) callback))
@@ -135,3 +158,77 @@
 
 (defn watch [the-atom]
   (AtomWatch. the-atom nil nil nil))
+
+(deftype SuspenseRoot
+  [^:mutable vnode
+   opts
+   marker
+   parent-env
+   parent-scheduler
+   ^:mutable child-env
+   ^:mutable fallback-managed
+   ^:mutable managed
+   ^:mutable suspend-set]
+
+  p/IUpdatable
+  (supports? [this next]
+    true)
+  (dom-sync! [this next]
+    (js/console.log "dom-sync suspense" this next))
+
+  p/IManageNodes
+  (dom-insert [this parent anchor]
+    (.insertBefore parent marker anchor)
+    (if fallback-managed
+      (p/dom-insert fallback-managed parent anchor)
+      (p/dom-insert managed parent anchor)))
+  (dom-first [this]
+    marker)
+
+  p/IDestructible
+  (destroyed? [this])
+  (destroy! [this]
+    (.remove marker))
+
+  p/IScheduleUpdates
+  (schedule-update! [this target]
+    (p/schedule-update! parent-scheduler target))
+
+  (unschedule! [this target]
+    (p/unschedule! parent-scheduler target))
+
+  (run-now! [this action]
+    (p/run-now! parent-scheduler action))
+
+  (did-suspend! [this target]
+    (set! suspend-set (conj suspend-set target)))
+
+  (did-finish! [this target]
+    (set! suspend-set (disj suspend-set target))
+    (when (and fallback-managed (empty? suspend-set))
+      (js/goog.async.nextTick #(.maybe-swap! this))))
+
+  Object
+  (init! [this]
+    ;; can't be done in as-managed since it needs the this pointer
+    (let [next-env (assoc parent-env ::comp/scheduler this)
+          next-managed (p/as-managed vnode next-env)]
+      (set! child-env next-env)
+      (set! managed next-managed)
+      ;; FIXME: should check if something suspended first
+      (set! fallback-managed (p/as-managed (:fallback opts) parent-env))))
+
+  (maybe-swap! [this]
+    (when (and fallback-managed (empty? suspend-set))
+      (p/dom-insert managed (.-parentElement marker) marker)
+      (p/destroy! fallback-managed)
+      (set! fallback-managed nil))))
+
+(deftype SuspenseRootNode [vnode opts]
+  p/IConstruct
+  (as-managed [this env]
+    (doto (SuspenseRoot. vnode opts (common/dom-marker env) env (::comp/scheduler env) nil nil nil #{})
+      (.init!))))
+
+(defn suspense [vnode opts]
+  (SuspenseRootNode. vnode opts))
