@@ -33,17 +33,14 @@
    ^FragmentCode code
    ^:mutable vals
    marker
-   ;; FIXME: create-fn returns ALL nodes it created
-   ;; but should only return nodes that are referenced later
-   ;; fragments with lots of static elements can get rather large
-   nodes]
+   exports]
 
   p/IManageNodes
   (dom-first [this] marker)
 
   (dom-insert [this parent anchor]
     (.insertBefore parent marker anchor)
-    (. code (mount-fn nodes parent anchor)))
+    (. code (mount-fn exports parent anchor)))
 
   p/IUpdatable
   (supports? [this ^FragmentNode next]
@@ -52,22 +49,27 @@
 
   (dom-sync! [this ^FragmentNode next]
     (let [nvals (.-vals next)]
-      (.. code (update-fn env nodes vals nvals))
+      (.. code (update-fn env exports vals nvals))
       (set! vals nvals))
     :synced)
 
   p/IDestructible
   (destroy! [this]
     (.remove marker)
-    (. code (destroy-fn nodes))
-    (set! (.-length nodes) 0)))
+    (. code (destroy-fn exports))
+    (set! (.-length exports) 0)))
 
 (deftype FragmentNode [vals element-ns ^FragmentCode code]
   p/IConstruct
   (as-managed [_ env]
     (let [env (cond-> env element-ns (assoc ::element-ns element-ns))
-          nodes (.. code (create-fn env vals))]
-      (ManagedFragment. env code vals (common/dom-marker env) nodes)))
+          ;; create-fn creates all necessary nodes but only exports those that will be accessed later in an array
+          ;; this might be faster if create-fn just closed over locals and returns the callbacks to be used later
+          ;; svelte does this but CLJS doesn't allow to set! locals so it would require ugly js* code to make it work
+          ;; didn't benchmark but the array variant shouldn't be that much slower. maybe even faster since
+          ;; the functions don't need to be recreated for each fragment instance
+          exports (.. code (create-fn env vals))]
+      (ManagedFragment. env code vals (common/dom-marker env) exports)))
 
   IEquiv
   (-equiv [this ^FragmentNode other]

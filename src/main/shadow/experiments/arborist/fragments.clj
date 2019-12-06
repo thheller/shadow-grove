@@ -159,14 +159,14 @@
              (map (fn [[attr-key attr-value]]
                     (if (const? attr-value)
                       {:op :static-attr
-                       :el el-sym
+                       :sym el-sym
                        :element-id id
                        :attr attr-key
                        :value attr-value
                        :src attrs}
 
                       {:op :dynamic-attr
-                       :el el-sym
+                       :sym el-sym
                        :element-id id
                        :attr attr-key
                        :value (make-code env attr-value {})
@@ -234,13 +234,13 @@
 (defn reduce-> [init reduce-fn coll]
   (reduce reduce-fn init coll))
 
-(defn make-build-impl [ast]
+(defn make-build-impl [ast sym->idx]
   (let [this-sym (gensym "this")
         env-sym (with-meta (gensym "env") {:tag 'not-native})
         vals-sym (with-meta (gensym "vals") {:tag 'array})
         element-ns-sym (gensym "element-ns")
 
-        {:keys [bindings mutations return] :as result}
+        {:keys [bindings mutations] :as result}
         (reduce
           (fn step-fn [env {:keys [op sym parent] :as ast}]
             (let [[parent-type parent-sym] parent]
@@ -248,7 +248,6 @@
                 :element
                 (-> env
                     (update :bindings conj sym (with-loc ast `(create-element ~env-sym ~element-ns-sym ~(:tag ast))))
-                    (update :return conj sym)
                     (cond->
                       (and parent-sym (= parent-type :element))
                       (update :mutations conj (with-loc ast `(append-child ~parent-sym ~sym)))
@@ -276,7 +275,6 @@
                 :text
                 (-> env
                     (update :bindings conj sym `(create-text ~env-sym ~(:text ast)))
-                    (update :return conj sym)
                     (cond->
                       parent-sym
                       (update :mutations conj `(append-child ~parent-sym ~sym))))
@@ -286,36 +284,40 @@
                     (update :bindings conj sym (with-loc ast `(managed-create ~env-sym (aget ~vals-sym ~(:ref-id ast)))))
                     (cond->
                       parent-sym
-                      (update :mutations conj (with-loc ast `(managed-append ~parent-sym ~sym))))
-                    (update :return conj sym))
+                      (update :mutations conj (with-loc ast `(managed-append ~parent-sym ~sym)))))
 
                 :static-attr
                 (-> env
-                    (update :mutations conj (with-loc ast `(set-attr ~env-sym ~(:el ast) ~(:attr ast) nil ~(:value ast)))))
+                    (update :mutations conj (with-loc ast `(set-attr ~env-sym ~(:sym ast) ~(:attr ast) nil ~(:value ast)))))
 
                 :dynamic-attr
-                (update env :mutations conj (with-loc ast `(set-attr ~env-sym ~(:el ast) ~(:attr ast) nil (aget ~vals-sym ~(-> ast :value :ref-id)))))
+                (update env :mutations conj (with-loc ast `(set-attr ~env-sym ~(:sym ast) ~(:attr ast) nil (aget ~vals-sym ~(-> ast :value :ref-id)))))
                 )))
           {:bindings [element-ns-sym `(::element-ns ~env-sym)]
-           :mutations []
-           :return []}
-          ast)]
+           :mutations []}
+          ast)
+
+        return
+        (->> sym->idx
+             (map identity)
+             (sort-by second)
+             (map first))]
 
     `(fn [~env-sym ~vals-sym]
        (let [~@bindings]
          ~@mutations
          (cljs.core/array ~@return)))))
 
-(defn make-update-impl [ast]
+(defn make-update-impl [ast sym->idx]
   (let [this-sym (gensym "this")
         env-sym (gensym "env")
-        nodes-sym (gensym "nodes")
+        exports-sym (gensym "exports")
         oldv-sym (gensym "oldv")
         newv-sym (gensym "newv")
 
         mutations
         (reduce
-          (fn step-fn [mutations {:keys [op sym element-id] :as ast}]
+          (fn step-fn [mutations {:keys [op sym] :as ast}]
             (case op
               :element
               (reduce-> mutations step-fn (:children ast))
@@ -326,7 +328,7 @@
                         (with-loc ast
                           `(component-update
                              ~env-sym
-                             ~nodes-sym
+                             ~exports-sym
                              ~(:element-id ast)
                              (aget ~oldv-sym ~(-> ast :component :ref-id))
                              (aget ~newv-sym ~(-> ast :component :ref-id))
@@ -345,8 +347,8 @@
                   (with-loc ast
                     `(update-managed
                        ~env-sym
-                       ~nodes-sym
-                       ~(:element-id ast)
+                       ~exports-sym
+                       ~(get sym->idx sym)
                        (aget ~oldv-sym ~ref-id)
                        (aget ~newv-sym ~ref-id)))))
 
@@ -356,61 +358,61 @@
               :dynamic-attr
               (let [ref-id (-> ast :value :ref-id)
                     form
-                    `(update-attr ~env-sym ~nodes-sym ~element-id ~(:attr ast) (aget ~oldv-sym ~ref-id) (aget ~newv-sym ~ref-id))]
+                    `(update-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) (aget ~oldv-sym ~ref-id) (aget ~newv-sym ~ref-id))]
                 (conj mutations form))))
           []
           ast)]
 
 
-    `(fn [~env-sym ~nodes-sym ~oldv-sym ~newv-sym]
+    `(fn [~env-sym ~exports-sym ~oldv-sym ~newv-sym]
        ~@mutations)))
 
-(defn make-mount-impl [ast]
+(defn make-mount-impl [ast sym->idx]
   (let [this-sym (gensym "this")
-        nodes-sym (gensym "nodes")
+        exports-sym (gensym "exports")
         parent-sym (gensym "parent")
         anchor-sym (gensym "anchor")
 
         mount-calls
         (->> ast
-             (map (fn [{:keys [op element-id]}]
+             (map (fn [{:keys [op sym]}]
                     (case op
                       (:text :element)
-                      `(dom-insert-before ~parent-sym (aget ~nodes-sym ~element-id) ~anchor-sym)
+                      `(dom-insert-before ~parent-sym (aget ~exports-sym ~(get sym->idx sym)) ~anchor-sym)
                       :code-ref
-                      `(managed-insert (aget ~nodes-sym ~element-id) ~parent-sym ~anchor-sym)
+                      `(managed-insert (aget ~exports-sym ~(get sym->idx sym)) ~parent-sym ~anchor-sym)
                       nil)))
              (remove nil?))]
 
-    `(fn [~nodes-sym ~parent-sym ~anchor-sym]
+    `(fn [~exports-sym ~parent-sym ~anchor-sym]
        ~@mount-calls)))
 
-(defn make-destroy-impl [ast]
+(defn make-destroy-impl [ast sym->idx]
   (let [this-sym (gensym "this")
-        nodes-sym (gensym "nodes")
+        exports-sym (gensym "exports")
 
         destroy-calls
         (reduce
-          (fn step-fn [calls {:keys [op sym element-id] :as ast}]
+          (fn step-fn [calls {:keys [op sym] :as ast}]
             (case op
               (:text :element)
               (-> calls
                   (cond->
                     ;; can skip removing nodes when the parent is already removed
                     (nil? (:parent ast))
-                    (conj `(dom-remove (aget ~nodes-sym ~element-id))))
+                    (conj `(dom-remove (aget ~exports-sym ~(get sym->idx sym)))))
                   (reduce-> step-fn (:children ast)))
 
               :code-ref
               (-> calls
-                  (conj `(managed-remove (aget ~nodes-sym ~element-id)))
+                  (conj `(managed-remove (aget ~exports-sym ~(get sym->idx sym))))
                   (reduce-> step-fn (:children ast)))
 
               calls))
           []
           ast)]
 
-    `(fn [~nodes-sym]
+    `(fn [~exports-sym]
        ~@destroy-calls)))
 
 (def shadow-analyze-top
@@ -428,6 +430,34 @@
 
         ast
         (mapv #(analyze-node env %) body)
+
+        ;; collects all symbols that need to be "exported" into the array
+        ;; so that mount/update/destroy can reference them by index later
+        ;; this is done to avoid large arrays for fragments with many static elements
+        ;; don't need to track elements that can't change
+        sym->idx
+        (reduce
+          (fn step-fn [sym->idx {:keys [op parent sym] :as ast}]
+            (case op
+              (:text :element)
+              (-> sym->idx
+                  (cond->
+                    (nil? parent)
+                    (assoc sym (count sym->idx)))
+                  (reduce-> step-fn (:children ast)))
+
+              :code-ref
+              (assoc sym->idx sym (count sym->idx))
+
+              :static-attr
+              sym->idx
+
+              :dynamic-attr
+              (if (contains? sym->idx sym)
+                sym->idx
+                (assoc sym->idx sym (count sym->idx)))))
+          {}
+          ast)
 
         code-snippets
         (->> @(:code-ref env)
@@ -468,12 +498,13 @@
 
         fragment-code
         `(->FragmentCode
-           ~(make-build-impl ast)
-           ~(make-mount-impl ast)
-           ~(make-update-impl ast)
-           ~(make-destroy-impl ast))]
+           ~(make-build-impl ast sym->idx)
+           ~(make-mount-impl ast sym->idx)
+           ~(make-update-impl ast sym->idx)
+           ~(make-destroy-impl ast sym->idx))]
 
-    ;; (clojure.pprint/pprint ast)
+    ;;(clojure.pprint/pprint ast)
+    ;; (clojure.pprint/pprint sym->idx)
 
     ;; skip fragment if someone did `(<< (something))`, no point in wrapping, just call `(something)`
     (if (and (= 1 (count ast))
@@ -495,7 +526,7 @@
 
 (comment
   (require 'clojure.pprint)
-  (do ;; clojure.pprint/pprint
+  (clojure.pprint/pprint
     (make-fragment
       {}
       nil
