@@ -122,7 +122,7 @@
     (assoc attrs :class html-class)
     (assoc attrs :class `(css-join ~html-class ~class))))
 
-(defn analyze-dom-element [env [tag-kw attrs :as el]]
+(defn analyze-dom-element [{:keys [parent] :as env} [tag-kw attrs :as el]]
   (let [[attrs children]
         (if (and attrs (map? attrs))
           [attrs (subvec el 2)]
@@ -165,13 +165,6 @@
                        :value attr-value
                        :src attrs}
 
-                      ;; FIXME: this could be smarter and pre-generate "partially" dynamic attrs
-                      ;; :class ["hello" "world" (when x "foo")]
-                      ;; could build ["hello "world" nil] once
-                      ;; and then (assoc the-const 2 (when x "foo")) before passing it along
-                      ;; :style {:color "red" :font-size x}
-                      ;; (assoc the-const :font-size x)
-                      ;; probably complete overkill but could be fun
                       {:op :dynamic-attr
                        :el el-sym
                        :element-id id
@@ -185,7 +178,7 @@
         (assoc env :parent [:element el-sym])]
 
     {:op :element
-     :parent (:parent env)
+     :parent parent
      :element-id id
      :sym el-sym
      :tag tag
@@ -244,7 +237,7 @@
 (defn make-build-impl [ast]
   (let [this-sym (gensym "this")
         env-sym (with-meta (gensym "env") {:tag 'not-native})
-        vals-sym (with-meta (gensym "vals") {:tag 'not-native})
+        vals-sym (with-meta (gensym "vals") {:tag 'array})
         element-ns-sym (gensym "element-ns")
 
         {:keys [bindings mutations return] :as result}
@@ -433,7 +426,7 @@
     (catch Exception e
       nil)))
 
-(defn make-fragment [macro-env body]
+(defn make-fragment [macro-env macro-form body]
   (let [env
         {:code-ref (atom {})
          :el-seq-ref (atom -1) ;; want 0 to be first id
@@ -487,13 +480,15 @@
            ~(make-update-impl ast)
            ~(make-destroy-impl ast))]
 
+    ;; (clojure.pprint/pprint ast)
+
     ;; skip fragment if someone did `(<< (something))`, no point in wrapping, just call `(something)`
     (if (and (= 1 (count ast))
              (= :code-ref (:op (first ast))))
       (first body)
       (if-let [analyze-top (and (not (false? (::optimize macro-env))) shadow-analyze-top @shadow-analyze-top)]
         ;; optimal variant, best performance, requires special support from compiler
-        (do (analyze-top `(def ~code-id ~fragment-code))
+        (do (analyze-top (with-meta `(def ~code-id ~fragment-code) (meta macro-form)))
             `(fragment-node (cljs.core/array ~@code-snippets) ~ns-hint ~code-id))
 
         ;; fallback, probably good enough, registers fragments to maintain identity
@@ -507,9 +502,15 @@
 
 (comment
   (require 'clojure.pprint)
-  (clojure.pprint/pprint
-    (make-fragment {} '["before" [:div 1 [:div 2]] (yo) [:div [:div 3]] "after"])))
+  (do ;; clojure.pprint/pprint
+    (make-fragment
+      {}
+      nil
+      '["before" [:div {:dyn (foo)} 1 [:div {:foo "bar"} 2]] (yo) [:div [:div 3]] "after"])))
 
 (comment
 
-  (make-fragment {} '[(foo 1 2 3)]))
+  (make-fragment
+    {}
+    nil
+    '[(foo 1 2 3)]))
