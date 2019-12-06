@@ -1,16 +1,15 @@
 (ns shadow.experiments.arborist.collections
   (:require
     [shadow.experiments.arborist.protocols :as p]
-    [shadow.experiments.arborist.fragments :as frag]))
+    [shadow.experiments.arborist.fragments :as frag]
+    [shadow.experiments.arborist.common :as common]))
 
-(declare CollectionNode)
+(declare KeyedNode)
 
 (defn index-map ^not-native [key-vec]
   (persistent! (reduce-kv #(assoc! %1 %3 %2) (transient {}) key-vec)))
 
-(deftype CollectionEntry [data key rendered managed])
-
-(deftype ManagedCollection
+(deftype KeyedCollection
   [env
    ^:mutable coll
    ^:mutable key-fn
@@ -32,9 +31,9 @@
 
   p/IUpdatable
   (supports? [this next]
-    (instance? CollectionNode next))
+    (instance? KeyedNode next))
 
-  (dom-sync! [this ^CollectionNode next]
+  (dom-sync! [this ^KeyedNode next]
     (let [old-coll coll
           new-coll (vec (.-coll next)) ;; FIXME: could use into-array
           dom-parent (.-parentNode marker-after)]
@@ -139,7 +138,7 @@
 ;; FIXME: this shouldn't initialize everything in sync. might take too long
 ;; could do work in chunks, maybe even check if items are visible at all?
 ;; FIXME: with 6x throttle this already takes 150ms for 100 items
-(deftype CollectionNode [coll key-fn render-fn]
+(deftype KeyedNode [coll key-fn render-fn]
   p/IConstruct
   (as-managed [this env]
     (let [coll (vec coll) ;; FIXME: could use into-array, colls are never modified again, only used to look stuff up by index
@@ -147,13 +146,16 @@
           marker-before (js/document.createComment "coll-start")
           marker-after (js/document.createComment "coll-end")]
 
+      ;; FIXME: should find a way to remove the transient/persistent collections
+      ;; they account for at least 50% of the time spent here
+      ;; could maybe use an array and do the key->idx mapping sometime later
       (loop [idx 0
              items (transient {})
              keys (transient [])
              vals (transient {})]
 
         (if (>= idx len)
-          (ManagedCollection.
+          (KeyedCollection.
             env
             coll
             key-fn
@@ -166,7 +168,7 @@
 
           (let [val (nth coll idx)
                 key (key-fn val)
-                rendered (render-fn val #_#_ idx key)
+                rendered (render-fn val #_#_idx key)
                 managed (p/as-managed rendered env)]
 
             (recur
@@ -176,8 +178,8 @@
               (assoc! vals key rendered)))))))
 
   IEquiv
-  (-equiv [this ^CollectionNode other]
-    (and (instance? CollectionNode other)
+  (-equiv [this ^KeyedNode other]
+    (and (instance? KeyedNode other)
          ;; could be a keyword, can't use identical?
          (keyword-identical? key-fn (.-key-fn other))
          ;; FIXME: this makes it never equal if fn is created in :render fn
@@ -185,8 +187,116 @@
          ;; compare coll last since its pointless if the others changed and typically more expensive to compare
          (= coll (.-coll other)))))
 
+(declare SimpleNode)
+
+;; FIXME: verify this is actually faster in a meaningful way to have 2 separate impls
+;; seems like it should be faster but might not be
+(deftype SimpleCollection
+  [env
+   ^:mutable coll
+   ^:mutable render-fn
+   ^:mutable ^array items
+   marker-before
+   marker-after
+   ]
+
+  p/IManageNodes
+  (dom-first [this] marker-before)
+
+  (dom-insert [this parent anchor]
+    (.insertBefore parent marker-before anchor)
+    (run! #(p/dom-insert % parent anchor) items)
+    (.insertBefore parent marker-after anchor))
+
+  p/IUpdatable
+  (supports? [this next]
+    (instance? SimpleNode next))
+
+  (dom-sync! [this ^SimpleNode next]
+    (let [old-coll coll
+          new-coll (vec (.-coll next))
+          dom-parent (.-parentNode marker-after)
+
+          oc (count old-coll)
+          nc (count new-coll)
+
+          max-idx (js/Math.min oc nc)]
+
+      (when-not dom-parent
+        (throw (ex-info "sync while not in dom?" {})))
+
+      (set! coll new-coll)
+      (set! render-fn (.-render-fn next))
+
+      (dotimes [idx max-idx]
+        (let [item (aget items idx)
+              new-val (nth new-coll idx)
+              new-rendered (render-fn new-val)]
+
+          (if (p/supports? item new-rendered)
+            (p/dom-sync! item new-rendered)
+            (aset items idx (common/replace-managed env item new-rendered)))))
+
+      (cond
+        (= oc nc)
+        :done
+
+        ;; old had more items, remove tail
+        ;; FIXME: might be faster to remove in last one first? less node re-ordering
+        (> oc nc)
+        (do (dotimes [idx (- oc nc)]
+              (let [idx (+ max-idx idx)
+                    item (aget items idx)]
+                (p/destroy! item)))
+            (set! (.-length items) max-idx))
+
+        ;; old had fewer items, append at end
+        (< oc nc)
+        (dotimes [idx (- nc oc)]
+          (let [idx (+ max-idx idx)
+                val (nth new-coll idx)
+                rendered (render-fn val)
+                managed (p/as-managed rendered env)]
+            (.push items managed)
+            (p/dom-insert managed dom-parent marker-after)
+            ))))
+
+    :synced)
+
+  p/IDestructible
+  (destroy! [this]
+    (.remove marker-before)
+    (run! #(p/destroy! %) items)
+    (.remove marker-after)))
+
+(deftype SimpleNode [coll render-fn]
+  p/IConstruct
+  (as-managed [this env]
+    (let [coll (vec coll)
+          marker-before (js/document.createComment "coll-start")
+          marker-after (js/document.createComment "coll-end")
+          arr (js/Array.)]
+
+      (reduce
+        (fn [_ val]
+          (.push arr (p/as-managed (render-fn val) env)))
+        nil
+        coll)
+
+      (->SimpleCollection env coll render-fn arr marker-before marker-after)))
+
+  IEquiv
+  (-equiv [this ^SimpleNode other]
+    (and (instance? SimpleNode other)
+         ;; could be a keyword, can't use identical?
+         ;; FIXME: this makes it never equal if fn is created in :render fn
+         (identical? render-fn (.-render-fn other))
+         ;; compare coll last since its pointless if the others changed and typically more expensive to compare
+         (= coll (.-coll other)))))
+
 (defn node [coll key-fn render-fn]
   {:pre [(sequential? coll)
-         (ifn? key-fn)
          (ifn? render-fn)]}
-  (CollectionNode. coll key-fn render-fn))
+  (if-not (nil? key-fn)
+    (KeyedNode. coll key-fn render-fn)
+    (SimpleNode. coll render-fn)))

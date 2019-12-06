@@ -6,7 +6,7 @@
     [todomvc.split.tx :as tx]))
 
 (def init-todos
-  (->> (range 100)
+  (->> (range 10)
        (map (fn [i]
               {::m/todo-id i
                ::m/todo-text (str "item #" i)
@@ -14,7 +14,7 @@
        (vec)))
 
 (defonce data-ref
-  (-> {::m/id-seq 101
+  (-> {::m/id-seq 11
        ::m/editing nil
        ::m/current-filter :all}
       (with-meta {::db/schema (db/configure

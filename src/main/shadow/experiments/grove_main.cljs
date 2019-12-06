@@ -32,8 +32,8 @@
   (swap! query-id-seq inc))
 
 (deftype QueryHook
-  [ident
-   query
+  [^:mutable ident
+   ^:mutable query
    component
    idx
    env
@@ -56,11 +56,22 @@
 
   ;; FIXME: async queries
   (hook-ready? [this] ready?)
-  (hook-value [this] read-result)
+  (hook-value [this]
+    read-result)
 
-  ;; node deps changed, node may have too
-  (hook-deps-update! [this val]
-    true)
+  ;; node deps changed, check if query changed
+  (hook-deps-update! [this ^QueryHook val]
+    (if (and (= ident (.-ident val))
+             (= query (.-query val)))
+      false
+      ;; query changed, remove it entirely and wait for new one
+      (do (set! ident (.-ident val))
+          (set! query (.-query val))
+          (send-to-worker env [:query-destroy query-id])
+          (send-to-worker env [:query-init query-id ident query])
+          (set! ready? false)
+          (set! read-result nil)
+          true)))
 
   ;; node was invalidated and needs update, but its dependencies didn't change
   (hook-update! [this]
@@ -69,7 +80,7 @@
   (hook-destroy! [this]
     (send-to-worker env [:query-destroy query-id])
     (let [{::keys [active-queries-ref]} env]
-      (swap! active-queries-ref dissoc query-id this)))
+      (swap! active-queries-ref dissoc query-id)))
 
   Object
   (set-data! [this data]
@@ -78,15 +89,14 @@
     (if ready?
       (comp/hook-invalidate! component idx)
       (do (comp/hook-ready! component idx)
-          (set! ready? true)))
-    ))
+          (set! ready? true)))))
 
 (defn query
   ([query]
    {:pre [(vector? query)]}
    (QueryHook. nil query nil nil nil nil false nil))
   ([ident query]
-   {:pre [ ;; (db/ident? ident) FIXME: can't access db namespace in main, move to protocols?
+   {:pre [;; (db/ident? ident) FIXME: can't access db namespace in main, move to protocols?
           (vector? query)]}
    (QueryHook. ident query nil nil nil nil false nil)))
 

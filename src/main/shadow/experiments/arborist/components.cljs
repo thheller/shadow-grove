@@ -171,6 +171,7 @@
 
   (work-pending? [this]
     (and (not destroyed?)
+         (not suspended?)
          (or (pos? dirty-hooks) needs-render?)))
 
   (work! [this]
@@ -231,14 +232,13 @@
     (set! suspended? false)
     (.schedule! this))
 
-
   (^clj mark-hooks-dirty! [this dirty-bits]
     (set! dirty-hooks (bit-or dirty-hooks dirty-bits))
     (set! current-idx (find-first-set-bit-idx dirty-hooks)))
 
   (^clj mark-dirty-from-args! [this dirty-bits]
-    (.mark-hooks-dirty! this dirty-bits)
-    )
+    (set! dirty-from-args (bit-or dirty-from-args dirty-bits))
+    (.mark-hooks-dirty! this dirty-bits))
 
   (^clj set-render-required! [this]
     (set! needs-render? true))
@@ -338,14 +338,13 @@
 
   (^clj component-render! [^ComponentInstance this]
     (assert (zero? dirty-hooks) "Got to render while hooks are dirty")
-    ;; (js/console.log "Component:render!" (:component-name config) updated-hooks)
+    ;; (js/console.log "Component:render!" (.-component-name config) updated-hooks needs-render? suspended? destroyed? this)
     (set! updated-hooks (int 0))
     (set! dirty-from-args (int 0))
     (if-not needs-render?
       (p/perf-count! this [::render-skip])
 
-      (let [render-fn (.-render-fn config)
-            frag (render-fn this)]
+      (let [frag (. config (render-fn this))]
 
         (p/perf-count! this [::render])
 

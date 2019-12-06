@@ -7,7 +7,7 @@
     [shadow.experiments.grove-main :as sg]
     [todomvc.model :as m]))
 
-(defc todo-item
+(defc ui-todo-item
   {::m/edit-update!
    (fn [env e todo]
      (case (.-which e)
@@ -22,36 +22,23 @@
    (fn [env e todo]
      (sg/run-tx env ::m/edit-save! {:todo todo :text (.. e -target -value)}))
 
+   ::m/delete! sg/tx
    ::m/toggle-completed! sg/tx
    ::m/edit-start! sg/tx}
   [todo]
   [{::m/keys [completed? editing? todo-text] :as data}
    (sg/query todo [::m/todo-text
                    ::m/editing?
-                   ::m/completed?])
+                   ::m/completed?])]
 
-   test-fx
-   (sfx/make-test-effect {:duration 200})
-
-   ;; FIXME: I want all events to be "declarative"
-   ;; but allowing regular functions would make certain cases easier
-   ;; especially related to hooks that want to act as event handlers
-   ;; doesn't matter in this example since ::delete! works just as well
-   ;; but I think allowing it makes sense? just makes server-side
-   ;; harder should I ever implement that
-   delete!
-   (fn [env e todo]
-     (test-fx #(sg/run-tx env ::m/delete! todo)))]
-
-  (<< [:li {::sfx/effect test-fx
-            :class {:completed completed?
+  (<< [:li {:class {:completed completed?
                     :editing editing?}}
        [:div.view
         [:input.toggle {:type "checkbox"
                         :checked completed?
                         :on-change [::m/toggle-completed! todo]}]
         [:label {:on-dblclick [::m/edit-start! todo]} todo-text]
-        [:button.destroy {:on-click [delete! todo]}]]
+        [:button.destroy {:on-click [::m/delete! todo]}]]
 
        (when editing?
          (<< [:input#edit.edit {:autofocus true
@@ -70,7 +57,7 @@
     {:label "Completed" :value :completed}]]
 
   (<< [:ul.filters
-       (sa/render-seq filter-options :value
+       (sa/render-seq filter-options nil
          (fn [{:keys [label value]}]
            (<< [:li [:a
                      {:class {:selected (= current-filter value)}
@@ -82,9 +69,9 @@
   [{::m/keys [filtered-todos] :as query}
    (sg/query [::m/filtered-todos])]
 
-  (<< [:ul.todo-list (sa/render-seq filtered-todos identity todo-item)])
+  (<< [:ul.todo-list (sa/render-seq filtered-todos identity ui-todo-item)])
   #_(sa/suspense
-    (<< [:ul.todo-list (sa/render-seq filtered-todos identity todo-item)])
+    (<< [:ul.todo-list (sa/render-seq filtered-todos identity ui-todo-item)])
 
     {:fallback (<< [:div "Loading ..."])
      :timeout 100}))
