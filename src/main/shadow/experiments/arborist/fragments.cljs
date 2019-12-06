@@ -33,15 +33,9 @@
    ^FragmentCode code
    ^:mutable vals
    marker
-   ;; FIXME: I wonder how much faster this would be without an array
-   ;; but instead using a create-fn that closes over locals and returns
-   ;; functions that do the mount/update/destroy
-   ;; svelte does that and it certainly seems nicer to not juggle this array
-   ;; we can't do this without hacks in CLJS though since setting locals isn't allowed
-   ;; and I'd rather not js*
-   ;; should measure how much the array costs in comparison sometime though
-   ;; FIXME: in any case the create-fn doesn't need to return all elements
-   ;; could skip over those that'll never update, just requires rewriting index logic in macro
+   ;; FIXME: create-fn returns ALL nodes it created
+   ;; but should only return nodes that are referenced later
+   ;; fragments with lots of static elements can get rather large
    nodes]
 
   p/IManageNodes

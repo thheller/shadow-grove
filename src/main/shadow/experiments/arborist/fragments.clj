@@ -313,14 +313,12 @@
         oldv-sym (gensym "oldv")
         newv-sym (gensym "newv")
 
-        {:keys [bindings mutations return nodes] :as result}
+        mutations
         (reduce
-          (fn step-fn [env {:keys [op sym element-id] :as ast}]
+          (fn step-fn [mutations {:keys [op sym element-id] :as ast}]
             (case op
               :element
-              (-> env
-                  (assoc-in [:sym->id sym] element-id)
-                  (reduce-> step-fn (:children ast)))
+              (reduce-> mutations step-fn (:children ast))
 
               #_#_:component
                   (-> env
@@ -339,33 +337,28 @@
                       (reduce-> step-fn (:children ast)))
 
               :text
-              env
+              mutations
 
               :code-ref
-              (-> env
-                  (update :mutations conj
-                    (let [ref-id (:ref-id ast)]
-                      (with-loc ast
-                        `(update-managed
-                           ~env-sym
-                           ~nodes-sym
-                           ~(:element-id ast)
-                           (aget ~oldv-sym ~ref-id)
-                           (aget ~newv-sym ~ref-id))))))
+              (conj mutations
+                (let [ref-id (:ref-id ast)]
+                  (with-loc ast
+                    `(update-managed
+                       ~env-sym
+                       ~nodes-sym
+                       ~(:element-id ast)
+                       (aget ~oldv-sym ~ref-id)
+                       (aget ~newv-sym ~ref-id)))))
 
               :static-attr
-              env
+              mutations
 
               :dynamic-attr
               (let [ref-id (-> ast :value :ref-id)
                     form
                     `(update-attr ~env-sym ~nodes-sym ~element-id ~(:attr ast) (aget ~oldv-sym ~ref-id) (aget ~newv-sym ~ref-id))]
-
-                (-> env
-                    (update :mutations conj form))))
-            )
-          {:mutations []
-           :sym->id {}}
+                (conj mutations form))))
+          []
           ast)]
 
 
