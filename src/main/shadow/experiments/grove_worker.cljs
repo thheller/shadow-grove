@@ -3,13 +3,13 @@
    a mini re-frame/fulcro hybrid. re-frame event styles + somewhat normalized db"
   (:require
     [clojure.set :as set]
+    [cognitect.transit :as transit]
     [shadow.experiments.grove.db :as db]
-    [shadow.experiments.grove.protocols :as gp]
-    [cognitect.transit :as transit]))
+    [shadow.experiments.grove.protocols :as gp]))
 
 (defn send-to-main [{::keys [transit-str] :as env} msg]
   ;; (js/console.log "main-write" env msg)
-  (js/postMessage (transit-str msg)))
+  (js/self.postMessage (transit-str msg)))
 
 (deftype ObservedData [^:mutable keys-used data]
   IDeref
@@ -46,6 +46,8 @@
    keys-new
    keys-updated
    keys-removed
+   ;; using a ref not a mutable local since it must apply to all created instances of this
+   ;; every "write" creates a new instance
    completed-ref]
 
   IMeta
@@ -190,11 +192,11 @@
     active-queries))
 
 (defn tx*
-  [{::keys [config-ref data-ref active-queries-ref]
-    :as env}
-   ev-id
-   params]
-  ;; (js/console.log ::db-tx env tx-id params)
+  [{::keys [config-ref data-ref active-queries-ref] :as env}
+   [ev-id & params :as tx]]
+  {:pre [(vector? tx)
+         (keyword? ev-id)]}
+  ;; (js/console.log ::db-tx ev-id tx env)
 
   (let [{:keys [interceptors ^function handler-fn] :as event}
         (get-in @config-ref [:events ev-id])]
@@ -206,10 +208,13 @@
             tx-db
             (transacted before)
 
-            {tx-after :db :as result}
-            (handler-fn (assoc env :db tx-db) params)]
+            tx-env
+            (assoc env :db tx-db)
 
-        ;; FIXME: move all of this out to interceptor chain
+            {tx-after :db :as result}
+            (apply handler-fn tx-env params)]
+
+        ;; FIXME: move all of this out to interceptor chain. including DB stuff
 
         (let [config @config-ref]
           (reduce-kv
@@ -217,7 +222,15 @@
               (let [fx-fn (get-in config [:fx key])]
                 (if-not fx-fn
                   (js/console.warn "invalid fx" key value)
-                  (fx-fn env value))))
+                  (let [transact-fn
+                        (fn [fx-tx]
+                          ;; FIXME: should probably track the fx causing this transaction and the original tx
+                          ;; FIXME: should probably prohibit calling this while tx is still processing?
+                          ;; just meant for async events triggered by fx
+                          (tx* env fx-tx))
+                        fx-env
+                        (assoc env :transact! transact-fn)]
+                    (fx-fn fx-env value)))))
             nil
             (dissoc result :db)))
 
@@ -231,8 +244,6 @@
                 keys-to-invalidate
                 (set/union keys-new keys-removed keys-updated)]
 
-            ;; (js/console.log "invalidated keys" keys-to-invalidate @active-queries-ref)
-
             (when-not (identical? @data-ref before)
               (throw (ex-info "someone messed with app-state while in tx" {})))
 
@@ -243,8 +254,10 @@
 
             data))))))
 
-(defn run-tx [env ev-id params]
-  (tx* env ev-id params))
+(defn run-tx [env tx]
+  {:pre [(vector? tx)
+         (keyword? (first tx))]}
+  (tx* env tx))
 
 (defn reg-event-fx [{::keys [config-ref] :as env} ev-id interceptors handler-fn]
   {:pre [(map? env)
@@ -253,10 +266,12 @@
          (fn? handler-fn)]}
   (swap! config-ref assoc-in [:events ev-id]
     {:handler-fn handler-fn
-     :interceptors interceptors}))
+     :interceptors interceptors})
+  env)
 
 (defn reg-fx [{::keys [config-ref] :as env} fx-id handler-fn]
-  (swap! config-ref assoc-in [:fx fx-id] handler-fn))
+  (swap! config-ref assoc-in [:fx fx-id] handler-fn)
+  env)
 
 (defn prepare [env data-ref]
   (assoc env
@@ -272,10 +287,13 @@
    query
    ^:mutable read-keys
    ^:mutable read-result
-   ^:mutable pending?]
+   ^:mutable pending?
+   ^:mutable destroyed?]
 
   Object
   (do-read! [this]
+    (set! pending? false)
+
     (let [{::keys [data-ref]} env
           observed-data (observed @data-ref)
           query (if ident [{ident query}] query)
@@ -306,16 +324,17 @@
             (send-to-main env [:query-result query-id new-result])))))
 
   (actually-refresh! [this]
-    (when pending?
-      (set! pending? false)
+    ;; query might have been destroyed while being queued
+    (when (and pending? (not destroyed?))
       (.do-read! this)))
 
   (refresh! [this]
     ;; this may be called multiple times during one invalidation cycle right now
     ;; so we queue to ensure its only sent out once
     ;; FIXME: fix invalidate-queries! so this isn't necessary
-    (set! pending? true)
-    (.then query-queue #(.actually-refresh! this)))
+    (when (and (not pending?) (not destroyed?))
+      (set! pending? true)
+      (.then query-queue #(.actually-refresh! this))))
 
   (affected-by-key? [this key]
     (contains? read-keys key)))
@@ -341,27 +360,32 @@
           ::transit-read transit-read
           ::transit-str transit-str)]
 
+    #_(set! js/self -onerror
+        (fn [e]
+          ;; FIXME: tell main?
+          (js/console.warn "unhandled error" e)))
+
     (js/self.addEventListener "message"
       (fn [e]
-        (let [start (js/performance.now)
-              [op & args :as msg] (transit-read (.-data e))
-              t (js/performance.now)]
-          ;; (js/console.log "worker-read took" (- t start))
+        (let [[op & args :as msg] (transit-read (.-data e))]
+          ;; (js/console.log "worker-read" op msg)
           (case op
             :query-init
             (let [[query-id ident query] args
-                  q (ActiveQuery. env query-id ident query nil nil true)]
+                  q (ActiveQuery. env query-id ident query nil nil true false)]
               (swap! active-queries-ref assoc query-id q)
               (.do-read! q))
 
-            ;; FIXME: make sure no more work happens for this, might still be in queue
             :query-destroy
             (let [[query-id] args]
-              (swap! active-queries-ref dissoc query-id))
+              (when-some [query (get @active-queries-ref query-id)]
+                (set! (.-destroyed? query) true)
+                (swap! active-queries-ref dissoc query-id)))
 
             :tx
-            (let [[ev-id params] args]
-              (tx* env ev-id params))
+            (let [[tx] args]
+              ;; (js/console.log "worker-tx" (first tx) tx)
+              (tx* env tx))
 
             (js/console.warn "unhandled worker msg" msg)))))
 

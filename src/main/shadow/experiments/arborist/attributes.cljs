@@ -26,16 +26,16 @@
 
 (defn map->class [m]
   (reduce-kv
-    (fn [s ^not-native k v]
+    (fn [s k v]
       (cond
         (not v)
         s
 
         (not s)
-        (-name k)
+        (if (keyword? k) (-name k) k)
 
         :else
-        (str s " " (-name k))))
+        (str s " " (if (keyword? k) (-name k) k))))
     nil
     m))
 

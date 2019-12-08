@@ -4,7 +4,7 @@
   (:require
     [clojure.set :as set]
     [shadow.experiments.arborist.protocols :as p]
-    [shadow.experiments.arborist.components :as comp]
+    [shadow.experiments.grove.components :as comp]
     [shadow.experiments.grove.db :as db]
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.arborist :as sa]))

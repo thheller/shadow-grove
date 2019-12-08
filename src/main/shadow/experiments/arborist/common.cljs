@@ -6,6 +6,7 @@
 
 (defn fragment-replace [old-managed new-managed]
   (let [first-node (p/dom-first old-managed)
+        _ (assert (some? first-node) "fragment replacing a node that isn't in the DOM")
         parent (.-parentNode first-node)]
 
     (p/dom-insert new-managed parent first-node)
@@ -18,17 +19,14 @@
     ))
 
 ;; swappable root
-(deftype ManagedRoot [env ^:mutable marker ^:mutable added-to-dom? ^:mutable ^not-native node ^:mutable val]
+(deftype ManagedRoot [env ^:mutable marker ^:mutable ^not-native node ^:mutable val]
   p/IManageNodes
   (dom-first [this] marker)
 
   (dom-insert [this parent anchor]
-    (set! added-to-dom? true)
-    (if node
-      (p/dom-insert node parent anchor)
-      ;; when nothing was rendered yet just insert a marker element
-      (do (set! marker (dom-marker env))
-          (.insertBefore parent marker anchor))))
+    (.insertBefore parent marker anchor)
+    (when node
+      (p/dom-insert node parent anchor)))
 
   p/IDirectUpdate
   (update! [this next]
@@ -41,8 +39,8 @@
         (let [el (p/as-managed val env)]
           (set! node el)
           ;; root was already added to dom but no node was available at the time
-          (when added-to-dom?
-            (p/dom-insert node (.-parentElement marker) marker)))
+          (when-some [parent (.-parentElement marker)]
+            (p/dom-insert node parent marker)))
 
         (p/supports? node next)
         (p/dom-sync! node next)
@@ -53,13 +51,12 @@
 
   p/IDestructible
   (destroy! [this]
-    (when marker
-      (.remove marker))
+    (.remove marker)
     (when node
       (p/destroy! node))))
 
 (defn managed-root [env node val]
-  (ManagedRoot. env nil false node val))
+  (ManagedRoot. env (dom-marker env) node val))
 
 (deftype ManagedText [env ^:mutable val node]
   p/IManageNodes

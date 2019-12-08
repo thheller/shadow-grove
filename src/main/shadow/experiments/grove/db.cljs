@@ -198,7 +198,8 @@
          (->> coll
               (map (fn [item]
                      (let [id (get item id-attr)]
-                       (assert id "can't import without an id")
+                       (when-not id
+                         (throw (ex-info "can't import item without an id" {:item item :id-attr id-attr})))
                        (make-ident entity-type id))))
               (into []))
 
@@ -294,6 +295,9 @@
                     (.cljs$core$IFn$_invoke$arity$5 query-calc env db current join-key {}))]
 
               (cond
+                (nil? join-val)
+                result
+
                 ;; {:some-prop [:some-other-ident 123]}
                 (ident? join-val)
                 (assoc! result join-key (query env db (get db join-val) join-attrs))

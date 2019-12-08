@@ -2,7 +2,7 @@
   (:require
     [shadow.experiments.arborist.protocols :as p]
     [shadow.experiments.arborist.attributes :as saa]
-    [shadow.experiments.arborist.components :as sac]))
+    [shadow.experiments.grove.components :as sac]))
 
 ;; FIXME: make this actually useful, not just a dummy effect
 

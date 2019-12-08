@@ -3,7 +3,7 @@
     [shadow.experiments.arborist.protocols :as p]
     [shadow.experiments.arborist.attributes :as a]
     [shadow.experiments.arborist.common :as common]
-    [shadow.experiments.arborist.components :as comp]))
+    [shadow.experiments.grove.components :as comp]))
 
 (defn fragment-id
   ;; https://github.com/google/closure-compiler/wiki/Id-Generator-Annotations

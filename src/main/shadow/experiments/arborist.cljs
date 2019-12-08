@@ -8,9 +8,11 @@
     [shadow.experiments.arborist.protocols :as p]
     [shadow.experiments.arborist.fragments :as frag]
     [shadow.experiments.arborist.attributes :as attr]
-    [shadow.experiments.arborist.components :as comp]
     [shadow.experiments.arborist.common :as common]
     [shadow.experiments.arborist.collections :as coll]
+
+    ;; FIXME: move this out of here
+    [shadow.experiments.grove.components :as comp]
     [goog.async.nextTick]))
 
 (def now
@@ -201,9 +203,11 @@
     (p/run-now! parent-scheduler action))
 
   (did-suspend! [this target]
+    ;; (js/console.log "did-suspend!" suspend-set target)
     (set! suspend-set (conj suspend-set target)))
 
   (did-finish! [this target]
+    ;; (js/console.log "did-finish!" suspend-set target)
     (set! suspend-set (disj suspend-set target))
     (when (and fallback-managed (empty? suspend-set))
       (js/goog.async.nextTick #(.maybe-swap! this))))
@@ -215,8 +219,10 @@
           next-managed (p/as-managed vnode next-env)]
       (set! child-env next-env)
       (set! managed next-managed)
-      ;; FIXME: should check if something suspended first
-      (set! fallback-managed (p/as-managed (:fallback opts) parent-env))))
+
+      (when-not (empty? suspend-set)
+        ;; FIXME: should check if something suspended first
+        (set! fallback-managed (p/as-managed (:fallback opts) parent-env)))))
 
   (maybe-swap! [this]
     (when (and fallback-managed (empty? suspend-set))

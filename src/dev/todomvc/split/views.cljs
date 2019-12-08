@@ -14,13 +14,13 @@
        13 ;; enter
        (.. e -target (blur))
        27 ;; escape
-       (sg/run-tx env ::m/edit-cancel! todo)
+       (sg/run-tx env [::m/edit-cancel! todo])
        ;; default do nothing
        nil))
 
    ::m/edit-complete!
    (fn [env e todo]
-     (sg/run-tx env ::m/edit-save! {:todo todo :text (.. e -target -value)}))
+     (sg/run-tx env [::m/edit-save! {:todo todo :text (.. e -target -value)}]))
 
    ::m/delete! sg/tx
    ::m/toggle-completed! sg/tx
@@ -86,13 +86,13 @@
 
          (when (seq text)
            (set! input -value "") ;; FIXME: this triggers a paint so should probably be delayed?
-           (sg/run-tx env ::m/create-new! {::m/todo-text text})))))
+           (sg/run-tx env [::m/create-new! {::m/todo-text text}])))))
 
    ::m/clear-completed! sg/tx
    ::m/shuffle! sg/tx
    ::m/toggle-all!
    (fn [env e]
-     (sg/run-tx env ::m/toggle-all! {:completed? (-> e .-target .-checked)}))}
+     (sg/run-tx env [::m/toggle-all! {:completed? (-> e .-target .-checked)}]))}
 
   []
   [{::m/keys [num-total num-active num-completed] :as query}

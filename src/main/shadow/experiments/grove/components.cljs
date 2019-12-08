@@ -1,5 +1,5 @@
-(ns shadow.experiments.arborist.components
-  (:require-macros [shadow.experiments.arborist.components])
+(ns shadow.experiments.grove.components
+  (:require-macros [shadow.experiments.grove.components])
   (:require
     [goog.object :as gobj]
     [shadow.experiments.arborist.common :as common]
@@ -341,6 +341,7 @@
     ;; (js/console.log "Component:render!" (.-component-name config) updated-hooks needs-render? suspended? destroyed? this)
     (set! updated-hooks (int 0))
     (set! dirty-from-args (int 0))
+
     (if-not needs-render?
       (p/perf-count! this [::render-skip])
 
@@ -373,11 +374,12 @@
 
 (set! *warn-on-infer* true)
 
-(defn component-create [env config args]
+(defn component-create [env ^p/ComponentConfig config args]
   (when ^boolean js/goog.DEBUG
     (when-not (instance? p/ComponentConfig config)
       (throw (ex-info "not a component definition" {:config config :props args}))))
 
+  ;; (js/console.log "component-create" (.-component-name config) args)
   (doto (ManagedComponent.
           ;; FIXME: this is way too many args, there must be a way to simplifiy
           (::scheduler env)
@@ -522,7 +524,7 @@
   (-nth ^not-native (.-args comp) idx))
 
 (defn check-args! [^ManagedComponent comp new-args expected]
-  (assert (>= (count new-args) expected) (str "component expected at least " expected " arguments")))
+  (assert (>= (count new-args) expected) (str "component " (. ^ComponentConfig (. comp -config) -component-name) " expected at least " expected " arguments")))
 
 (defn arg-triggers-hooks! [^ManagedComponent comp idx dirty-bits]
   (.mark-dirty-from-args! comp dirty-bits))

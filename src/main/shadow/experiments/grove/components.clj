@@ -1,4 +1,4 @@
-(ns shadow.experiments.arborist.components
+(ns shadow.experiments.grove.components
   (:require
     [clojure.set :as set]
     [clojure.spec.alpha :as s]

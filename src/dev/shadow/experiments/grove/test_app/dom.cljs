@@ -1,7 +1,7 @@
 (ns shadow.experiments.grove.test-app.dom
   (:require
     [shadow.experiments.arborist :as sa :refer (<<)]
-    [shadow.experiments.arborist.components :as sac :refer (defc)]
+    [shadow.experiments.grove.components :as sac :refer (defc)]
     [clojure.string :as str]
     [shadow.experiments.arborist.protocols :as p]))
 

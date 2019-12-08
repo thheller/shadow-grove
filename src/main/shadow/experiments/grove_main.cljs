@@ -3,7 +3,7 @@
    a mini re-frame/fulcro hybrid. re-frame event styles + somewhat normalized db"
   (:require
     [shadow.experiments.arborist.protocols :as p]
-    [shadow.experiments.arborist.components :as comp]
+    [shadow.experiments.grove.components :as comp]
     [shadow.experiments.arborist :as sa]
     [goog.async.nextTick]
     [goog.async.run]
@@ -101,14 +101,14 @@
    (QueryHook. ident query nil nil nil nil false nil)))
 
 (defn tx*
-  [env ev-id params]
-  (send-to-worker env [:tx ev-id params]))
+  [env tx]
+  (send-to-worker env [:tx tx]))
 
-(defn tx [env e params]
-  (tx* env (::comp/ev-id env) params))
+(defn tx [env e & params]
+  (tx* env (into [(::comp/ev-id env)] params)))
 
-(defn run-tx [env ev-id params]
-  (tx* env ev-id params))
+(defn run-tx [env tx]
+  (tx* env tx))
 
 (defn form [defaults])
 

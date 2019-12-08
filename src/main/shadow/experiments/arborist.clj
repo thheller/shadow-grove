@@ -1,7 +1,7 @@
 (ns shadow.experiments.arborist
   (:require
     [shadow.experiments.arborist.fragments :as fragments]
-    [shadow.experiments.arborist.components :as comp]))
+    [shadow.experiments.grove.components :as comp]))
 
 (defmacro << [& body]
   (fragments/make-fragment &env &form body))

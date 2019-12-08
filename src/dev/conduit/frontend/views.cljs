@@ -1,9 +1,10 @@
 (ns conduit.frontend.views
   (:require
     [clojure.string :as str]
-    [shadow.experiments.arborist :as sa :refer (defc <>)]
-    [shadow.experiments.grove :as sg]
-    [conduit.frontend.env :as env]))
+    [shadow.experiments.arborist :as sa :refer (defc <<)]
+    [shadow.experiments.grove-main :as sg]
+    [conduit.model :as m]
+    ))
 
 ;; initially ported from https://github.com/jacekschae/conduit
 ;; rewritten heavily to adapt to framework, mostly re-used hiccup parts
@@ -24,25 +25,41 @@
 
 (defc tags-list [{:keys [tags]}]
   []
-  (<> [:ul.tag-list
+  (<< [:ul.tag-list
        (sa/render-seq tags identity
          (fn [tag]
-           (<> [:li.tag-default.tag-pill.tag-outline tag])))]))
+           (<< [:li.tag-default.tag-pill.tag-outline tag])))]))
 
-(defc article-meta [{:keys [article]}]
-  [{:keys [user-is-author? user-can-follow? user-is-following-author? author createdAt favoritesCount favorited slug] :as data}
-   (sg/query article
-     [:slug
-      :user-is-author?
-      :user-can-follow?
-      :user-is-following-author?
-      {:author [:username :image]}])
+(def author-join {::m/author [::m/username ::m/image]})
+
+(defn author-image [author]
+  (if ^boolean js/goog.DEBUG
+    ;; annoying to load a bunch of images in dev
+    "https://static.productionready.io/images/smiley-cyrus.jpg"
+    (::m/image author)))
+
+(defc article-meta [article-ident]
+  [{::m/keys
+    [user-is-author?
+     user-can-follow?
+     user-is-following-author?
+     author
+     createdAt
+     favoritesCount
+     favorited
+     slug] :as data}
+   (sg/query article-ident
+     [::m/slug
+      ::m/user-is-article-author?
+      ::m/user-can-follow-author?
+      ::m/user-is-following-author?
+      author-join])
 
    author-name (:username author)]
 
-  (js/console.log "data" data)
+  ;; (js/console.log "data" data)
 
-  (<> [:div.article-meta
+  (<< [:div.article-meta
        [:a {:href (url-for :profile author-name)}
         [:img {:src (:image author)}] " "]
        [:div.info
@@ -51,7 +68,7 @@
 
        (cond
          user-is-author?
-         (<> [:span
+         (<< [:span
               [:a.btn.btn-sm.btn-outline-secondary
                {:href (url-for :editor slug)}
                [:i.ion-edit]
@@ -64,7 +81,7 @@
                [:span " Delete Article "]]])
 
          user-can-follow?
-         (<> [:span
+         (<< [:span
               [:button.btn.btn-sm.action-btn.btn-outline-secondary
                {:on-click [:toggle-follow-user author-name]}
                [:i {:class (if user-is-following-author? "ion-minus-round" "ion-plus-round")}]
@@ -77,46 +94,39 @@
                [:span (if favorited " Unfavorite Post " " Favorite Post ")]
                [:span.counter "(" favoritesCount ")"]]]))]))
 
-(defc articles-preview [article]
-  [{:keys [user-can-favorite? description slug createdAt title author favoritesCount favorited tagList]
-    :as article-data}
-   (sg/query article [:description
-                      :user-can-favorite?
-                      {:author [:username :image]}])
+(defc articles-preview [article-ident]
+  [article-data (sg/query article-ident
+                  [::m/description
+                   ::m/user-can-favorite?
+                   author-join])]
 
-   username (:username author)]
+  (let [{::m/keys [user-can-favorite? description slug created-at title author favorites-count favorited tag-list]}
+        article-data
 
-  (<> [:div.article-preview
-       [:div.article-meta
-        [:a {:href (url-for :profile username)}
-         [:img {:src (:image author)}]]
-        [:div.info
-         [:a.author {:href (url-for :profile username)} username]
-         [:span.date (format-date createdAt)]]
-        (when user-can-favorite?
-          (<> [:button.btn.btn-primary.btn-sm.pull-xs-right {:on-click [:toggle-favorite-article slug]
-                                                             :class (when (not favorited) "btn-outline-primary")}
-               [:i.ion-heart " "]
-               [:span favoritesCount]]))]
-       [:a.preview-link {:href (url-for :article slug)}
-        [:h1 title]
-        [:p description]
-        [:span "Read more ..."]
-        (tags-list {:tags tagList})]]))
+        username (::m/username author)]
 
-(defn articles-list [articles]
-  (<> [:div
-       (cond
-         (empty? articles)
-         (<> [:div.article-preview
-              [:p "No articles are here... yet."]])
-
-         :else
-         (sa/render-seq articles identity articles-preview))]))
+    (<< [:div.article-preview
+         [:div.article-meta
+          [:a {:href (url-for :profile username)}
+           [:img {:src (author-image author)}]]
+          [:div.info
+           [:a.author {:href (url-for :profile username)} username]
+           [:span.date (format-date created-at)]]
+          (when user-can-favorite?
+            (<< [:button.btn.btn-primary.btn-sm.pull-xs-right
+                 {:on-click [:toggle-favorite-article slug]
+                  :class (when (not favorited) "btn-outline-primary")}
+                 [:i.ion-heart " "]
+                 [:span favorites-count]]))]
+         [:a.preview-link {:href (url-for :article slug)}
+          [:h1 title]
+          [:p description]
+          [:span "Read more ..."]
+          (tags-list {:tags tag-list})]])))
 
 (defn errors-list
   [errors]
-  (<> [:ul.error-messages
+  (<< [:ul.error-messages
        (pr-str errors)
 
        #_(for [[key [val]] errors]
@@ -124,11 +134,11 @@
 
 ;; -- Header ------------------------------------------------------------------
 ;;
-(defc ui-header [props]
+(defc ui-header []
   [{:keys [active-page user]}
    (sg/query [:user :active-page])]
 
-  (<> [:nav.navbar.navbar-light
+  (<< [:nav.navbar.navbar-light
        [:div.container
         [:svg {:style {:width "40px" :height "40px"} :viewBox "0 0 68.4 68.4"}
          [:g {:fill "none"}
@@ -141,14 +151,14 @@
         [:a.navbar-brand {:href (url-for :home)}
          "conduit"]
         (if (empty? user)
-          (<> [:ul.nav.navbar-nav.pull-xs-right
+          (<< [:ul.nav.navbar-nav.pull-xs-right
                [:li.nav-item
                 [:a.nav-link {:href (url-for :home) :class (when (= active-page :home) "active")} "Home"]]
                [:li.nav-item
                 [:a.nav-link {:href (url-for :login) :class (when (= active-page :login) "active")} "Sign in"]]
                [:li.nav-item
                 [:a.nav-link {:href (url-for :register) :class (when (= active-page :register) "active")} "Sign up"]]])
-          (<> [:ul.nav.navbar-nav.pull-xs-right
+          (<< [:ul.nav.navbar-nav.pull-xs-right
                [:li.nav-item
                 [:a.nav-link {:href (url-for :home) :class (when (= active-page :home) "active")} "Home"]]
                [:li.nav-item
@@ -163,9 +173,9 @@
 
 ;; -- Footer ------------------------------------------------------------------
 ;;
-(defc ui-footer [props]
+(defc ui-footer []
   []
-  (<> [:footer
+  (<< [:footer
        [:div.container
         [:a.logo-font {:href (url-for :home)} "conduit"]
         [:span.attribution
@@ -175,13 +185,23 @@
 
 ;; -- Home --------------------------------------------------------------------
 ;;
-(defc ui-home [props]
-  [{:keys [filter tags articles articles-count user] :as data}
-   (sg/query [:filter :tags :articles :articles-count :user])]
+(defc ui-home []
+  [{::m/keys [home-articles articles-count]
+    :keys [filter tags user] :as data}
+   (sg/query
+     [:filter
+      :tags
+      ::m/home-articles
+      ::m/articles-count
+      :user])]
 
-  (<> [:div.home-page
+  ;; FIXME: this query completes once before home-articles are actually loaded
+  ;; this prevents suspense from working since this claims to be ready
+  ;; should somehow handle this in the worker so that it doesn't answer with an unfinished query
+
+  (<< [:div.home-page
        (when (empty? user)
-         (<> [:div.banner
+         (<< [:div.banner
               [:div.container
                [:h1.logo-font "conduit"]
                [:p "A place to share your knowledge."]]]))
@@ -192,7 +212,7 @@
           [:div.feed-toggle
            [:ul.nav.nav-pills.outline-active
             (when-not (empty? user)
-              (<> [:li.nav-item
+              (<< [:li.nav-item
                    [:a.nav-link {:href (url-for :home)
                                  :class (when (:feed filter) "active")
                                  :on-click [:get-feed-articles {:offset 0 :limit 10}]} "Your Feed"]]))
@@ -201,19 +221,19 @@
                            :class (when-not (or (:tag filter) (:feed filter)) "active")
                            :on-click [:get-articles {:offset 0 :limit 10}]} "Global Feed"]]
             (when (:tag filter)
-              (<> [:li.nav-item
+              (<< [:li.nav-item
                    [:a.nav-link.active
                     [:i.ion-pound] (str " " (:tag filter))]]))]]
 
-          (articles-list articles)
+          (sa/render-seq home-articles identity articles-preview)
 
           (when-not (< articles-count 10)
-            (<> [:ul.pagination
+            (<< [:ul.pagination
                  (sa/render-seq
                    (range (/ articles-count 10))
                    identity
                    (fn [offset]
-                     (<> [:li.page-item
+                     (<< [:li.page-item
                           {:class (when (= (* offset 10) (:offset filter)) "active")
                            :on-click [:get-articles (if (:tag filter)
                                                       {:offset (* offset 10)
@@ -229,7 +249,7 @@
            [:div.tag-list
             (sa/render-seq tags identity
               (fn [tag]
-                (<> [:a.tag-pill.tag-default
+                (<< [:a.tag-pill.tag-default
                      {:href (url-for :home)
                       :on-click [:get-articles {:tag tag
                                                 :limit 10
@@ -238,7 +258,7 @@
 
 ;; -- Login -------------------------------------------------------------------
 ;;
-(defc ui-login [props]
+(defc ui-login []
   [form
    (sg/form {:email "" :password ""})
 
@@ -252,7 +272,7 @@
    (fn [env e]
      (js/console.log "login-user" form))]
 
-  (<> [:div.auth-page
+  (<< [:div.auth-page
        [:div.container.page
         [:div.row
          [:div.col-md-6.offset-md-3.col-xs-12
@@ -279,14 +299,14 @@
 
 ;; -- Register ----------------------------------------------------------------
 ;;
-(defc ui-register [props]
+(defc ui-register []
   [form (sg/form {:username "" :email "" :password ""})
 
    :register-user
    (fn [env e]
      (js/console.log "register-user" form))]
 
-  (<> [:div.auth-page
+  (<< [:div.auth-page
        [:div.container.page
         [:div.row
          [:div.col-md-6.offset-md-3.col-xs-12
@@ -317,7 +337,7 @@
 
 ;; -- Profile -----------------------------------------------------------------
 ;;
-(defc ui-page-profile [props]
+(defc ui-page-profile []
   [{profile :active-profile}
    (sg/query [{:active-profile
                [:written-articles
@@ -328,7 +348,7 @@
    {:keys [username image bio user-is-following?]}
    profile]
 
-  (<> [:div.profile-page
+  (<< [:div.profile-page
        [:div.user-info
         [:div.container
          [:div.row
@@ -337,9 +357,9 @@
            [:h4 username]
            [:p bio]
            (if (:is-own-profile? profile)
-             (<> [:a.btn.btn-sm.btn-outline-secondary.action-btn {:href (url-for :settings)}
+             (<< [:a.btn.btn-sm.btn-outline-secondary.action-btn {:href (url-for :settings)}
                   [:i.ion-gear-a] " Edit Profile Settings"])
-             (<> [:button.btn.btn-sm.action-btn.btn-outline-secondary {:on-click [:toggle-follow-user username]}
+             (<< [:button.btn.btn-sm.action-btn.btn-outline-secondary {:on-click [:toggle-follow-user username]}
                   [:i {:class (if user-is-following? "ion-minus-round" "ion-plus-round")}]
                   [:span (if user-is-following? (str " Unfollow " username) (str " Follow " username))]]))]]]]
        [:div.container
@@ -351,17 +371,19 @@
              [:a.nav-link {:href (url-for :profile username) :class (when (seq (:articles profile)) "active")} "My Articles"]]
             [:li.nav-item
              [:a.nav-link {:href (url-for :favorited username) :class (when (seq (:favorites profile)) "active")} "Favorited Articles"]]]]
-          (articles-list (:articles profile))]]]]))
+
+          "FIXME: profile articles"
+          #_ (articles-list (:articles profile))]]]]))
 
 ;; -- Settings ----------------------------------------------------------------
 ;;
-(defc ui-settings [props]
+(defc ui-settings []
   [form (sg/form {})]
   #_[{:keys [bio email image username] :as user} @(subscribe [:user])
      default {:bio bio :email email :image image :username username}
      user-update (reagent/atom default)]
 
-  (<> [:div.settings-page
+  (<< [:div.settings-page
        [:div.container.page
         [:div.row
          [:div.col-md-6.offset-md-3.col-xs-12
@@ -403,7 +425,7 @@
 
 ;; -- Editor ------------------------------------------------------------------
 ;;
-(defc ui-editor [props]
+(defc ui-editor []
   [form (sg/form {})
    active-article nil]
   #_[{:keys [title description body tagList slug] :as active-article} @(subscribe [:active-article])
@@ -421,7 +443,7 @@
                                                  :tagList (str/split (:tagList content) #" ")}}))
      ]
 
-  (<> [:div.editor-page
+  (<< [:div.editor-page
        [:div.container.page
         [:div.row
          [:div.col-md-10.offset-md-1.col-xs-12
@@ -456,12 +478,15 @@
                "Publish Article")]]]]]]]))
 
 (defc ui-comment [comment]
-  [{:keys [id createdAt body author]}
-   (sg/query comment [:id])
+  [{:keys [id createdAt body author user-is-comment-author?]}
+   (sg/query comment
+     [:id
+      :createdAt
+      :body
+      {:author [:username :image]}
+      :user-is-comment-author?])]
 
-   {:keys [user]}
-   (sg/query [:user])]
-  (<> [:div.card
+  (<< [:div.card
        [:div.card-block
         [:p.card-text body]]
        [:div.card-footer
@@ -470,19 +495,19 @@
         " "
         [:a.comment-author {:href (url-for :profile (:username author))} (:username author)]
         [:span.date-posted (format-date createdAt)]
-        (when (= (:username user) (:username author))
+        (when user-is-comment-author?
           [:span.mod-options {:on-click [:delete-comment id]}
            [:i.ion-trash-a]])]]))
 
 ;; -- Article -----------------------------------------------------------------
 ;;
-(defc ui-article [{:keys [article] :as props}]
+(defc ui-article [article]
   [form (sg/form {})
 
    :post-comment
    (fn [env event]
      (.preventDefault event)
-     (sg/run-tx env :post-comment @form)
+     (sg/run-tx env [:post-comment @form])
      (sg/form-reset! form))
 
    article-data
@@ -491,13 +516,11 @@
    {:keys [user]}
    (sg/query [:user])]
 
-  (<> [:div.article-page
+  (<< [:div.article-page
        [:div.banner
         [:div.container
          [:h1 (:title article-data)]
-         (article-meta {:article article})]]
-
-
+         (article-meta article)]]
 
        [:div.container.page
         [:div.row.article-content
@@ -506,13 +529,13 @@
         (tags-list {:tags (:tagList article-data)})
         [:hr]
         [:div.article-actions
-         (article-meta {:article article})]
+         (article-meta article)]
         [:div.row
          [:div.col-xs-12.col-md-8.offset-md-2
           #_(when (:comments errors)
               (errors-list {:errors (:comments errors)}))
           (if-not (empty? user)
-            (<> [:form.card.comment-form
+            (<< [:form.card.comment-form
                  [:div.card-block
                   [:textarea.form-control
                    {:placeholder "Write a comment..."
@@ -522,7 +545,7 @@
                   [:img.comment-author-img {:src (:image user)}]
                   [:button.btn.btn-sm.btn-primary
                    {:on-click [:post-comment]} "Post Comment"]]])
-            (<> [:p
+            (<< [:p
                  [:a {:href (url-for :register)} "Sign up"]
                  " or "
                  [:a {:href (url-for :login)} "Sign in"]
@@ -531,21 +554,26 @@
           (sa/render-seq (:comments article-data) identity ui-comment)
           ]]]]))
 
-(defc ui-page-article [props]
+(defc ui-page-article []
   [{:keys [active-article]} (sg/query [:active-article])]
-  (ui-article {:article active-article}))
+  (ui-article active-article))
 
-(defc ui-root [props]
+(defc ui-root []
   [{:keys [active-page]} (sg/query [:active-page])]
-  (<> (ui-header)
+  (<< (ui-header)
 
-      (case active-page
-        :home (ui-home)
-        :login (ui-login)
-        :register (ui-register)
-        :profile (ui-page-profile)
-        :settings (ui-settings)
-        :editor (ui-editor)
-        :article (ui-page-article)
-        (ui-home))
+      (sa/suspense
+
+        (case active-page
+          :home (ui-home)
+          :login (ui-login)
+          :register (ui-register)
+          :profile (ui-page-profile)
+          :settings (ui-settings)
+          :editor (ui-editor)
+          :article (ui-page-article)
+          (ui-home))
+
+        {:fallback "yo"
+         :timeout 1000})
       (ui-footer)))

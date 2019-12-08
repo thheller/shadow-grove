@@ -9,9 +9,10 @@
 
  :version "2.8.81"
 
- ;; for benchmark purposes, not actually a dependency
  :dependencies
- [[reagent "0.9.0-rc3"]]
+ [[com.wsscode/pathom "2.2.28"]
+  ;; for benchmark purposes, not actually a dependency
+  [reagent "0.9.0-rc3"]]
 
  :dev-http
  {3005 "public"
@@ -59,9 +60,19 @@
   :conduit
   {:target :browser
    :output-dir "examples/conduit/js"
-   :modules {:main {:init-fn conduit.frontend/init
-                    :preloads [shadow.experiments.grove.dev-support
-                               shadow.remote.runtime.cljs.browser]}}}
+   :modules
+   {:shared
+    {:entries []}
+    :main
+    {:init-fn conduit.frontend.main/init
+     :preloads [shadow.experiments.grove.dev-support
+                shadow.remote.runtime.cljs.browser]
+     :depends-on #{:shared}}
+    :worker
+    {:init-fn conduit.frontend.worker/init
+     :web-worker true
+     :depends-on #{:shared}}}
+   :devtools {:browser-inject :main}}
 
   :bench-db
   {:target :node-script

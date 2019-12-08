@@ -3,7 +3,7 @@
     [clojure.core.protocols :as cp]
     [shadow.debug :refer (?> ?-> ?->>)]
     [shadow.experiments.arborist.protocols :as p]
-    [shadow.experiments.arborist.components :as comp]
+    [shadow.experiments.grove.components :as comp]
     [shadow.remote.runtime.api :as rapi]
     [shadow.experiments.grove :as sg]
     [shadow.experiments.grove.protocols :as sp]
