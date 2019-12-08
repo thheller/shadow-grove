@@ -264,11 +264,17 @@
     ;; simple attr
     (keyword? query-part)
     (let [x (get current query-part ::missing)]
-      (if (not= ::missing x)
+      (cond
+        (keyword-identical? ::loading x)
+        x
+
+        (keyword-identical? ::missing x)
+        (assoc! result query-part (.cljs$core$IFn$_invoke$arity$5 query-calc env db current query-part {}))
+
+        :else
         (if (contains? result query-part)
           result
-          (assoc! result query-part x))
-        (assoc! result query-part (.cljs$core$IFn$_invoke$arity$5 query-calc env db current query-part {}))))
+          (assoc! result query-part x))))
 
     ;; (::foo {:params 1})
     ;; TBD
@@ -295,6 +301,9 @@
                     (.cljs$core$IFn$_invoke$arity$5 query-calc env db current join-key {}))]
 
               (cond
+                (keyword-identical? join-val ::loading)
+                join-val
+
                 (nil? join-val)
                 result
 
@@ -363,7 +372,9 @@
          (persistent! result)
          (let [query-part (nth query-data i)
                result (process-query-part env db current result query-part)]
-           (recur current result (inc i))))))))
+           (if (keyword-identical? result ::loading)
+             result
+             (recur current result (inc i)))))))))
 
 (defn all-idents-of [db entity-type]
   ;; FIXME: check in schema if entity-type is actually declared

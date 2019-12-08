@@ -184,13 +184,18 @@
     (if fallback-managed
       (p/dom-insert fallback-managed parent anchor)
       (p/dom-insert managed parent anchor)))
+
   (dom-first [this]
     marker)
 
   p/IDestructible
   (destroyed? [this])
   (destroy! [this]
-    (.remove marker))
+    (.remove marker)
+    (when fallback-managed
+      (p/destroy! fallback-managed))
+    (when managed
+      (p/destroy! managed)))
 
   p/IScheduleUpdates
   (schedule-update! [this target]

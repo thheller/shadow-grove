@@ -195,17 +195,13 @@
       ::m/articles-count
       :user])]
 
-  ;; FIXME: this query completes once before home-articles are actually loaded
-  ;; this prevents suspense from working since this claims to be ready
-  ;; should somehow handle this in the worker so that it doesn't answer with an unfinished query
-
   (<< [:div.home-page
-       (when (empty? user)
-         (<< [:div.banner
-              [:div.container
-               [:h1.logo-font "conduit"]
-               [:p "A place to share your knowledge."]]]))
+       [:div.banner
+        [:div.container
+         [:h1.logo-font "conduit"]
+         [:p "A place to share your knowledge."]]]]
 
+      [:div.home-page
        [:div.container.page
         [:div.row
          [:div.col-md-9
@@ -558,10 +554,17 @@
   [{:keys [active-article]} (sg/query [:active-article])]
   (ui-article active-article))
 
+(def loading-banner
+  (<< [:div.home-page
+       [:div.banner
+        [:div.container
+         [:h1.logo-font "conduit"]
+         [:p "A place to share your knowledge."]]]
+       [:p "Loading ..."]]))
+
 (defc ui-root []
   [{:keys [active-page]} (sg/query [:active-page])]
   (<< (ui-header)
-
       (sa/suspense
 
         (case active-page
@@ -574,6 +577,8 @@
           :article (ui-page-article)
           (ui-home))
 
-        {:fallback "yo"
+        {:fallback loading-banner
          :timeout 1000})
       (ui-footer)))
+
+

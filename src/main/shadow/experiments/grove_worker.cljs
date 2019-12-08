@@ -297,31 +297,31 @@
     (let [{::keys [data-ref]} env
           observed-data (observed @data-ref)
           query (if ident [{ident query}] query)
-          result (db/query env observed-data query)
-
-          new-result
-          (if ident (get result ident) result)]
+          result (db/query env observed-data query)]
 
       (set! read-keys @observed-data)
 
-      (cond
-        (and ident (nil? new-result))
-        ;; FIXME: if an ident is deleted the query is still active in main
-        ;; so it would receive a nil update. we shouldn't send that out and instead
-        ;; give the frontend a chance to realize that the query is invalid and remove itself
-        ;; FIXME: not sure how to handle this properly. async makes this hard. should the worker be allowed to tell the frontend?
-        ;; or just let it work itself out?
-        (js/console.warn "ident seems to be deleted, query invalid" this)
+      (if (keyword-identical? result ::db/loading)
+        (js/console.log "query has loading part, suspending till later" this)
+        (let [new-result (if ident (get result ident) result)]
+          (cond
+            (and ident (nil? new-result))
+            ;; FIXME: if an ident is deleted the query is still active in main
+            ;; so it would receive a nil update. we shouldn't send that out and instead
+            ;; give the frontend a chance to realize that the query is invalid and remove itself
+            ;; FIXME: not sure how to handle this properly. async makes this hard. should the worker be allowed to tell the frontend?
+            ;; or just let it work itself out?
+            (js/console.warn "ident seems to be deleted, query invalid" this)
 
-        (nil? new-result)
-        (js/console.warn "query result was nil" this)
+            (nil? new-result)
+            (js/console.warn "query result was nil" this)
 
-        (not= new-result read-result)
-        (do (set! read-result new-result)
-            ;; (js/console.log "did-read" read-keys read-result @data-ref)
-            ;; FIXME: we know which data the client already had. could skip over those parts
-            ;; but computing that might be more expensive than just replacing it?
-            (send-to-main env [:query-result query-id new-result])))))
+            (not= new-result read-result)
+            (do (set! read-result new-result)
+                ;; (js/console.log "did-read" read-keys read-result @data-ref)
+                ;; FIXME: we know which data the client already had. could skip over those parts
+                ;; but computing that might be more expensive than just replacing it?
+                (send-to-main env [:query-result query-id new-result])))))))
 
   (actually-refresh! [this]
     ;; query might have been destroyed while being queued

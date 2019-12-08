@@ -57,7 +57,8 @@
         "home"
         {:http {:uri [api-base "/articles"]
                 :on-success [:home-articles-loaded]}
-         :db (assoc db :active-page :home)}
+         :db (assoc db :active-page :home
+                       ::m/home-articles ::db/loading)}
 
         "register"
         {:db (assoc db :active-page :register)}
