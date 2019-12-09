@@ -1,7 +1,11 @@
-(ns shadow.experiments.arborist
-  (:require
-    [shadow.experiments.arborist.fragments :as fragments]
-    [shadow.experiments.grove.components :as comp]))
+(ns shadow.experiments.grove-main
+  (:require [shadow.experiments.grove.components :as comp]
+            [shadow.experiments.arborist.fragments :as fragments]))
+
+;; just for convenience, less imports for the user
+
+(defmacro defc [& args]
+  `(comp/defc ~@args))
 
 (defmacro << [& body]
   (fragments/make-fragment &env &form body))
@@ -19,7 +23,3 @@
 
 (defmacro svg [& body]
   (fragments/make-fragment (assoc &env ::fragments/svg true) &form body))
-
-;; only here for bench-fragment, do not use directly.
-(defmacro fragment-fallback [& body]
-  (fragments/make-fragment (assoc &env ::fragments/optimize false) &form body))

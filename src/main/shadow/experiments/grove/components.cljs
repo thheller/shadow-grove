@@ -5,6 +5,7 @@
     [shadow.experiments.arborist.common :as common]
     [shadow.experiments.arborist.protocols :as p]
     [shadow.experiments.arborist.attributes :as a]
+    [shadow.experiments.arborist :as sa]
     ))
 
 ;; this file is an exercise in writing the least idiomatic clojure code possible
@@ -382,7 +383,7 @@
   ;; (js/console.log "component-create" (.-component-name config) args)
   (doto (ManagedComponent.
           ;; FIXME: this is way too many args, there must be a way to simplifiy
-          (::scheduler env)
+          (::sa/scheduler env)
           env ;; parent-env
           nil ;; component-env (created in component-init! since it needs this pointer)
           args

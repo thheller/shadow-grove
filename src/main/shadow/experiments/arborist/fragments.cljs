@@ -2,8 +2,7 @@
   (:require
     [shadow.experiments.arborist.protocols :as p]
     [shadow.experiments.arborist.attributes :as a]
-    [shadow.experiments.arborist.common :as common]
-    [shadow.experiments.grove.components :as comp]))
+    [shadow.experiments.arborist.common :as common]))
 
 (defn fragment-id
   ;; https://github.com/google/closure-compiler/wiki/Id-Generator-Annotations
@@ -14,9 +13,11 @@
 (defn array-equiv [a b]
   (let [al (alength a)
         bl (alength b)]
+    ;; FIXME: identical? wouldn't work in CLJ, but = is slower in CLJS
     (when (identical? al bl)
       (loop [i 0]
-        (when (< i al)
+        (if (identical? i al)
+          true
           (when (= (aget a i) (aget b i))
             (recur (inc i))))))))
 
@@ -156,32 +157,6 @@
   (when (not= oval nval)
     (let [el (aget nodes idx)]
       (set-attr env el attr oval nval))))
-
-(comment
-  ;; only handling managed now, no special component support
-  ;; might need some of this when adding slot support back in
-  (defn component-create [env component attrs]
-    {:pre [(map? attrs)]}
-    (comp/component-create env component attrs))
-
-  ;; FIXME: does this ever need the old attrs oa?
-  (defn component-update [env nodes idx oc nc oa na]
-    {:pre [(map? na)]}
-    (let [^not-native comp (aget nodes idx)
-          tmp (comp/->ComponentNode nc na)]
-      (if (p/supports? comp tmp)
-        (p/dom-sync! comp tmp)
-        (let [new (common/replace-managed env oc tmp)]
-          (aset nodes idx new)
-          ))))
-
-  (defn component-append [component child]
-    ;; FIXME: support more slots?
-    ;; FIXME: with hooks this should be cleaner ... feels too hacky
-    (let [slot (p/dom-first (comp/get-slot component :default))]
-      (if-not (satisfies? p/IManageNodes child)
-        (.insertBefore (.-parentNode slot) child slot)
-        (p/dom-insert child (.-parentNode slot) slot)))))
 
 ;; just so the macro doesn't have to use dot interop
 ;; will likely be inlined by closure anyways

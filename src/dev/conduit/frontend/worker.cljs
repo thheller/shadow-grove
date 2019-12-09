@@ -38,8 +38,6 @@
 (sg/reg-event-fx app-env ::m/route!
   []
   (fn [{:keys [db] :as env} token]
-    (js/console.log ::m/route! env token)
-
     (let [[main & more :as tokens] (str/split token #"/")
           db (assoc db :route-tokens tokens)]
       (case main
@@ -85,5 +83,4 @@
                         (json/to-clj (js/JSON.parse (.-responseText xhr-req))
                           {:key-fn (memoize json-key-fn)})))
                     (sg/init)))
-  (js/console.log "init-env" app-env)
   (start))

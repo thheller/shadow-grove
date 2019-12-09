@@ -9,6 +9,8 @@
 
  :version "2.8.81"
 
+ :nrepl {:write-port-file true}
+
  :dependencies
  [[com.wsscode/pathom "2.2.28"]
   ;; for benchmark purposes, not actually a dependency
