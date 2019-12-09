@@ -29,24 +29,21 @@
 
   p/IDirectUpdate
   (update! [this next]
-    ;; FIXME: should this even compare?
-    ;; unlikely to be called with identical fragments right?
-    (when (not= next val)
-      (set! val next)
-      (cond
-        (not node)
-        (let [el (p/as-managed val env)]
-          (set! node el)
-          ;; root was already added to dom but no node was available at the time
-          (when-some [parent (.-parentElement marker)]
-            (p/dom-insert node parent marker)))
+    (set! val next)
+    (cond
+      (not node)
+      (let [el (p/as-managed val env)]
+        (set! node el)
+        ;; root was already added to dom but no node was available at the time
+        (when-some [parent (.-parentElement marker)]
+          (p/dom-insert node parent marker)))
 
-        (p/supports? node next)
-        (p/dom-sync! node next)
+      (p/supports? node next)
+      (p/dom-sync! node next)
 
-        :else
-        (let [new (replace-managed env node next)]
-          (set! node new)))))
+      :else
+      (let [new (replace-managed env node next)]
+        (set! node new))))
 
   p/IDestructible
   (destroy! [this]
