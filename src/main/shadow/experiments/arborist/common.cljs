@@ -10,13 +10,12 @@
         parent (.-parentNode first-node)]
 
     (p/dom-insert new-managed parent first-node)
-    (p/destroy! old-managed)))
+    (p/destroy! old-managed)
+    new-managed))
 
 (defn replace-managed [env old nval]
   (let [new (p/as-managed nval env)]
-    (fragment-replace old new)
-    new
-    ))
+    (fragment-replace old new)))
 
 ;; swappable root
 (deftype ManagedRoot [env ^:mutable marker ^:mutable ^not-native node ^:mutable val]

@@ -578,7 +578,7 @@
           (ui-home))
 
         {:fallback loading-banner
-         :timeout 1000})
+         :timeout 500})
       (ui-footer)))
 
 

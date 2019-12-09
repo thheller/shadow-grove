@@ -60,4 +60,4 @@
 
     (setup-history history)
 
-    (start)))
+    (js/setTimeout start 0)))

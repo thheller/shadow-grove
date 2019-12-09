@@ -161,6 +161,8 @@
 (defn watch [the-atom]
   (AtomWatch. the-atom nil nil nil))
 
+(declare SuspenseRootNode)
+
 (deftype SuspenseRoot
   [^:mutable vnode
    opts
@@ -168,22 +170,41 @@
    parent-env
    parent-scheduler
    ^:mutable child-env
-   ^:mutable fallback-managed
-   ^:mutable managed
-   ^:mutable suspend-set]
+   ^:mutable display
+   ^:mutable offscreen
+   ^:mutable suspend-set
+   ^:mutable timeout]
 
   p/IUpdatable
   (supports? [this next]
-    true)
-  (dom-sync! [this next]
-    (js/console.log "dom-sync suspense" this next))
+    (instance? SuspenseRootNode next))
+
+  (dom-sync! [this ^SuspenseRootNode next]
+    ;; FIXME: figure out strategy for this?
+    ;; if displaying fallback start rendering in background
+    ;; if displaying managed and supported, just sync
+    ;; if displaying managed and not supported, start rendering in background and swap when ready
+    ;; when rendering in background display fallback after timeout?
+    (when (or offscreen timeout)
+      (throw (ex-info "syncing while not even finished yet" {:this this :offscreen offscreen :timeout timeout})))
+
+    (let [next (.-vnode next)]
+      ;; FIXME: what about changed opts?
+
+      (if (p/supports? display next)
+        (p/dom-sync! display next)
+        (let [new (p/as-managed next child-env)]
+          (if (empty? suspend-set)
+            (do (common/fragment-replace display new)
+                (set! display new))
+            (do (set! offscreen new)
+                (.schedule-timeout! this)
+                ))))))
 
   p/IManageNodes
   (dom-insert [this parent anchor]
     (.insertBefore parent marker anchor)
-    (if fallback-managed
-      (p/dom-insert fallback-managed parent anchor)
-      (p/dom-insert managed parent anchor)))
+    (p/dom-insert display parent anchor))
 
   (dom-first [this]
     marker)
@@ -191,11 +212,13 @@
   p/IDestructible
   (destroyed? [this])
   (destroy! [this]
+    (when timeout
+      (js/clearTimeout timeout))
     (.remove marker)
-    (when fallback-managed
-      (p/destroy! fallback-managed))
-    (when managed
-      (p/destroy! managed)))
+    (when display
+      (p/destroy! display))
+    (when offscreen
+      (p/destroy! offscreen)))
 
   p/IScheduleUpdates
   (schedule-update! [this target]
@@ -214,7 +237,7 @@
   (did-finish! [this target]
     ;; (js/console.log "did-finish!" suspend-set target)
     (set! suspend-set (disj suspend-set target))
-    (when (and fallback-managed (empty? suspend-set))
+    (when (and offscreen (empty? suspend-set))
       (js/goog.async.nextTick #(.maybe-swap! this))))
 
   Object
@@ -223,22 +246,41 @@
     (let [next-env (assoc parent-env ::comp/scheduler this)
           next-managed (p/as-managed vnode next-env)]
       (set! child-env next-env)
-      (set! managed next-managed)
+      (if (empty? suspend-set)
+        (set! display next-managed)
+        (do (set! offscreen next-managed)
+            (set! display (p/as-managed (:fallback opts) parent-env))))))
 
-      (when-not (empty? suspend-set)
-        ;; FIXME: should check if something suspended first
-        (set! fallback-managed (p/as-managed (:fallback opts) parent-env)))))
+  (schedule-timeout! [this]
+    (when-not timeout
+      (let [timeout-ms (:timeout opts 500)]
+        (set! timeout (js/setTimeout #(.did-timeout! this) timeout-ms)))))
+
+  (did-timeout! [this]
+    (set! timeout nil)
+    (when offscreen
+      (let [fallback (p/as-managed (:fallback opts) child-env)
+            old-display display]
+        ;; (js/console.log "using fallback after timeout")
+        (set! display (common/fragment-replace old-display fallback))
+        )))
 
   (maybe-swap! [this]
-    (when (and fallback-managed (empty? suspend-set))
-      (p/dom-insert managed (.-parentElement marker) marker)
-      (p/destroy! fallback-managed)
-      (set! fallback-managed nil))))
+    (when (and offscreen (empty? suspend-set))
+      (p/dom-insert offscreen (.-parentElement marker) marker)
+      (p/destroy! display)
+      (set! display offscreen)
+      (set! offscreen nil)
+
+      (when timeout
+        (js/clearTimeout timeout)
+        (set! timeout nil)
+        ))))
 
 (deftype SuspenseRootNode [vnode opts]
   p/IConstruct
   (as-managed [this env]
-    (doto (SuspenseRoot. vnode opts (common/dom-marker env) env (::comp/scheduler env) nil nil nil #{})
+    (doto (SuspenseRoot. vnode opts (common/dom-marker env) env (::comp/scheduler env) nil nil nil #{} nil)
       (.init!))))
 
 (defn suspense [vnode opts]
