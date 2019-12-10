@@ -4,8 +4,7 @@
   (:require
     [clojure.set :as set]
     [cognitect.transit :as transit]
-    [shadow.experiments.grove.db :as db]
-    [shadow.experiments.grove.protocols :as gp]))
+    [shadow.experiments.grove.db :as db]))
 
 (defn send-to-main [{::keys [transit-str] :as env} msg]
   ;; (js/console.log "main-write" env msg)
@@ -53,14 +52,6 @@
   IMeta
   (-meta [_]
     (-meta data))
-
-  gp/TxData
-  (commit! [_]
-    (vreset! completed-ref true)
-    {:data data
-     :keys-new (persistent! keys-new)
-     :keys-updated (persistent! keys-updated)
-     :keys-removed (persistent! keys-removed)})
 
   ILookup
   (-lookup [this key]
@@ -167,8 +158,14 @@
   Object
   (^clj check-completed! [this]
     (when @completed-ref
-      (throw (ex-info "transaction concluded, don't hold on to db while in tx" {})))
-    ))
+      (throw (ex-info "transaction concluded, don't hold on to db while in tx" {}))))
+
+  (commit! [_]
+    (vreset! completed-ref true)
+    {:data data
+     :keys-new (persistent! keys-new)
+     :keys-updated (persistent! keys-updated)
+     :keys-removed (persistent! keys-removed)}))
 
 (defn transacted [data]
   (TransactedData.
@@ -239,7 +236,7 @@
 
         (when tx-after
           (let [{:keys [data keys-new keys-removed keys-updated] :as result}
-                (gp/commit! tx-after)
+                (.commit! tx-after)
 
                 keys-to-invalidate
                 (set/union keys-new keys-removed keys-updated)]

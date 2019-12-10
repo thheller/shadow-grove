@@ -1,7 +1,5 @@
 (ns shadow.experiments.grove.protocols)
 
-(defprotocol TxData
-  (commit! [_]))
 
 ;; not using record since they shouldn't act as maps
 ;; also does a bunch of other stuff I don't want

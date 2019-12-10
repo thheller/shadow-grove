@@ -1,7 +1,5 @@
 (ns shadow.experiments.grove.db
-  (:refer-clojure :exclude #{ident? remove})
-  (:require
-    [shadow.experiments.grove.protocols :as p]))
+  (:refer-clojure :exclude #{ident? remove}))
 
 (defn parse-entity-spec [entity-type {:keys [attrs] :as config}]
   {:pre [(keyword? entity-type)

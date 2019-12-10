@@ -1,17 +1,17 @@
-(ns shadow.experiments.arborist.effects
+(ns shadow.experiments.grove.effects
   (:require
-    [shadow.experiments.arborist.protocols :as p]
     [shadow.experiments.arborist.attributes :as saa]
-    [shadow.experiments.grove.components :as sac]))
+    [shadow.experiments.grove.components :as comp]
+    [shadow.experiments.grove.protocols :as gp]))
 
 ;; FIXME: make this actually useful, not just a dummy effect
 
 (deftype EffectHook [^:mutable dom-node component idx]
-  p/IBuildHook
+  gp/IBuildHook
   (hook-build [this c i]
     (EffectHook. dom-node c i))
 
-  p/IHook
+  gp/IHook
   (hook-init! [this])
   (hook-ready? [this] true)
   (hook-value [this] this)
@@ -28,7 +28,7 @@
     (.trigger! this))
   (-invoke [this after]
     (.trigger! this)
-    (js/setTimeout #(p/run-now! (sac/get-scheduler component) after) 200))
+    (js/setTimeout #(gp/run-now! (comp/get-scheduler component) after) 200))
 
   Object
   (trigger! [this after]

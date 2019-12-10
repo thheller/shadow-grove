@@ -138,22 +138,16 @@
 
 ;; called by macro generated code
 (defn update-managed [env nodes idx oval nval]
-  ;; FIXME: should this even compare oval/nval?
-  ;; comparing the array in fragment handles (which may contain other handles) might become expensive?
-  ;; comparing 100 items to find the 99th didn't match
-  ;; will compare 99 items again individually later in the code?
-  ;; if everything is equal however a bunch of code can be skipped?
-
-  ;; FIXME: actually benchmark in an actual app
-  (when (not= oval nval)
-    (let [^not-native el (aget nodes idx)]
-      (if (p/supports? el nval)
-        (p/dom-sync! el nval)
-        (let [next (common/replace-managed env el nval)]
-          (aset nodes idx next))))))
+  ;; not comparing oval/nval because impls can do that if needed
+  (let [^not-native el (aget nodes idx)]
+    (if (p/supports? el nval)
+      (p/dom-sync! el nval)
+      (let [next (common/replace-managed env el nval)]
+        (aset nodes idx next)))))
 
 ;; called by macro generated code
 (defn update-attr [env nodes idx ^not-native attr oval nval]
+  ;; FIXME: should maybe move the comparisons to the actual impls?
   (when (not= oval nval)
     (let [el (aget nodes idx)]
       (set-attr env el attr oval nval))))

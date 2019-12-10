@@ -3,7 +3,7 @@
    a mini re-frame/fulcro hybrid. re-frame event styles + somewhat normalized db"
   (:require-macros [shadow.experiments.grove-main])
   (:require
-    [shadow.experiments.arborist.protocols :as p]
+    [shadow.experiments.arborist.protocols :as ap]
     [shadow.experiments.arborist.common :as common]
     [shadow.experiments.arborist.fragments] ;; util macro references this
     [shadow.experiments.arborist :as sa]
@@ -18,7 +18,6 @@
 (defn next-tick [callback]
   ;; FIXME: should be smarter about when/where to schedule
   (js/goog.async.nextTick callback))
-
 
 (def now
   (if (exists? js/performance)
@@ -39,7 +38,7 @@
     ;; schedule was added in some async work
     (when-not update-pending?
       (set! update-pending? true)
-      (js/goog.async.nextTick #(.process-pending! this))))
+      (next-tick #(.process-pending! this))))
 
   (unschedule! [this work-task]
     ;; FIXME: might be better to track this in the task itself and just check when processing
@@ -261,7 +260,7 @@
 (defn stop [root-el]
   (when-let [{::keys [app-root] :as env} (get @active-roots-ref root-el)]
     (swap! active-roots-ref dissoc root-el)
-    (p/destroy! app-root)
+    (ap/destroy! app-root)
     (dissoc env ::app-root ::root-el)))
 
 (deftype AtomWatch [the-atom ^:mutable val component idx]
@@ -350,7 +349,7 @@
    ^:mutable suspend-set
    ^:mutable timeout]
 
-  p/IUpdatable
+  ap/IUpdatable
   (supports? [this next]
     (instance? SuspenseRootNode next))
 
@@ -366,9 +365,9 @@
     (let [next (.-vnode next)]
       ;; FIXME: what about changed opts?
 
-      (if (p/supports? display next)
-        (p/dom-sync! display next)
-        (let [new (p/as-managed next child-env)]
+      (if (ap/supports? display next)
+        (ap/dom-sync! display next)
+        (let [new (ap/as-managed next child-env)]
           (if (empty? suspend-set)
             (do (common/fragment-replace display new)
                 (set! display new))
@@ -377,23 +376,23 @@
                 (.schedule-timeout! this)
                 ))))))
 
-  p/IManageNodes
+  ap/IManageNodes
   (dom-insert [this parent anchor]
     (.insertBefore parent marker anchor)
-    (p/dom-insert display parent anchor))
+    (ap/dom-insert display parent anchor))
 
   (dom-first [this]
     marker)
 
-  p/IDestructible
+  ap/IDestructible
   (destroy! [this]
     (when timeout
       (js/clearTimeout timeout))
     (.remove marker)
     (when display
-      (p/destroy! display))
+      (ap/destroy! display))
     (when offscreen
-      (p/destroy! offscreen)))
+      (ap/destroy! offscreen)))
 
   gp/IScheduleUpdates
   (schedule-update! [this target]
@@ -420,13 +419,13 @@
   (init! [this]
     ;; can't be done in as-managed since it needs the this pointer
     (let [next-env (assoc parent-env ::gp/scheduler this)
-          next-managed (p/as-managed vnode next-env)]
+          next-managed (ap/as-managed vnode next-env)]
       (set! child-env next-env)
       (if (empty? suspend-set)
         (set! display next-managed)
         (do (set! offscreen next-managed)
             (.start-offscreen! this)
-            (set! display (p/as-managed (:fallback opts) parent-env))))))
+            (set! display (ap/as-managed (:fallback opts) parent-env))))))
 
   (schedule-timeout! [this]
     (when-not timeout
@@ -440,7 +439,7 @@
   (did-timeout! [this]
     (set! timeout nil)
     (when offscreen
-      (let [fallback (p/as-managed (:fallback opts) child-env)
+      (let [fallback (ap/as-managed (:fallback opts) child-env)
             old-display display]
         ;; (js/console.log "using fallback after timeout")
         (set! display (common/fragment-replace old-display fallback))
@@ -448,8 +447,8 @@
 
   (maybe-swap! [this]
     (when (and offscreen (empty? suspend-set))
-      (p/dom-insert offscreen (.-parentElement marker) marker)
-      (p/destroy! display)
+      (ap/dom-insert offscreen (.-parentElement marker) marker)
+      (ap/destroy! display)
       (set! display offscreen)
       (set! offscreen nil)
 
@@ -462,7 +461,7 @@
         ))))
 
 (deftype SuspenseRootNode [vnode opts]
-  p/IConstruct
+  ap/IConstruct
   (as-managed [this env]
     (doto (SuspenseRoot. vnode opts (common/dom-marker env) env (::gp/scheduler env) nil nil nil #{} nil)
       (.init!))))
