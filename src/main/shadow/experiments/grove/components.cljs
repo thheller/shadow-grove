@@ -6,7 +6,7 @@
     [shadow.experiments.arborist.protocols :as p]
     [shadow.experiments.arborist.attributes :as a]
     [shadow.experiments.arborist :as sa]
-    ))
+    [shadow.experiments.grove.protocols :as gp]))
 
 ;; this file is an exercise in writing the least idiomatic clojure code possible
 ;; shield your eyes and beware!
@@ -21,7 +21,7 @@
   {:pre [(vector? args)]}
   (->ComponentNode component args))
 
-(extend-type p/ComponentConfig
+(extend-type gp/ComponentConfig
   cljs.core/IFn
   (-invoke
     ([this]
@@ -42,7 +42,7 @@
     ))
 
 (defn component-config? [x]
-  (instance? p/ComponentConfig x))
+  (instance? gp/ComponentConfig x))
 
 (defn safe-inc [x]
   (if (nil? x)
@@ -110,12 +110,12 @@
   (dom-sync! [this ^ComponentNode next]
     (. config (check-args-fn this args (.-args next)))
     (set! args (.-args next))
-    (when (p/work-pending? this)
+    (when (gp/work-pending? this)
       (.schedule! this)))
 
   ;; FIXME: figure out default event handler
   ;; don't want to declare all events all the time
-  p/IHandleEvents
+  gp/IHandleEvents
   (handle-event! [this ev-id e ev-args]
     (let [handler
           (cond
@@ -145,27 +145,24 @@
     ;; fn events always run directly in the component that triggered it
     (when (keyword? ev-id)
       (if-let [parent (::component parent-env)]
-        (p/handle-event! parent ev-id e ev-args)
+        (gp/handle-event! parent ev-id e ev-args)
         (when-not (gobj/get e "shadow$handled")
           (js/console.warn "event not handled" ev-id e ev-args)))))
 
   p/IDestructible
-  (destroyed? [this]
-    destroyed?)
-
   (destroy! [this]
     (.unschedule! this)
     (set! destroyed? true)
     (run!
       (fn [hook]
         (when hook
-          (p/hook-destroy! hook)))
+          (gp/hook-destroy! hook)))
       hooks)
     (p/destroy! root)
 
-    (p/perf-destroy! this))
+    (gp/perf-destroy! this))
 
-  p/IWork
+  gp/IWork
   (work-priority [this] 10) ;; FIXME: could allow setting this via config
   (work-depth [this] (::depth component-env))
   (work-id [this] (::component-id component-env))
@@ -178,10 +175,10 @@
   (work! [this]
     (.run-next! this)
 
-    (when-not (p/work-pending? this)
-      (p/unschedule! scheduler this)))
+    (when-not (gp/work-pending? this)
+      (gp/unschedule! scheduler this)))
 
-  p/IProfile
+  gp/IProfile
   (perf-count! [this counter-id])
   (perf-start! [this])
   (perf-destroy! [this])
@@ -198,7 +195,7 @@
               ;; (assoc ::component-id (str (.-component-name config) "@" (next-component-id)))
               (assoc ::component this))]
 
-      (p/perf-start! this)
+      (gp/perf-start! this)
 
       (set! component-env child-env)
       (set! root (common/managed-root child-env nil nil))
@@ -207,13 +204,13 @@
 
       ;; FIXME: should this schedule instead?
       ;; doing as much work as possible in as-managed removes a bunch of overhead though
-      (while (and (false? suspended?) (p/work-pending? this))
-        (p/work! this))
+      (while (and (false? suspended?) (gp/work-pending? this))
+        (gp/work! this))
 
       true))
 
   (^clj get-hook-value [this idx]
-    (p/hook-value (aget hooks idx)))
+    (gp/hook-value (aget hooks idx)))
 
   (^clj invalidate-hook! [this idx]
     ;; (js/console.log "invalidate-hook!" idx (:component-name config) this)
@@ -259,21 +256,21 @@
           (not hook)
           (let [^function run-fn (-> (.-hooks config) (aget current-idx) (.-run))
                 val (run-fn this)
-                hook (p/hook-build val this current-idx)]
+                hook (gp/hook-build val this current-idx)]
 
             ;; (js/console.log "Component:init-hook!" (:component-name config) current-idx val hook)
 
             (aset hooks current-idx hook)
 
-            (p/hook-init! hook)
-            (p/perf-count! this [::hook-init! current-idx])
+            (gp/hook-init! hook)
+            (gp/perf-count! this [::hook-init! current-idx])
 
             (set! updated-hooks (bit-set updated-hooks current-idx))
 
             (when (bit-test (.-render-deps config) current-idx)
               (set! needs-render? true))
 
-            (if (p/hook-ready? hook)
+            (if (gp/hook-ready? hook)
               (set! current-idx (inc current-idx))
               (.suspend! this)))
 
@@ -292,15 +289,15 @@
 
                 did-update? ;; checks if hook deps changed as well, calling init again
                 (if deps-updated?
-                  (p/hook-deps-update! hook (run this))
-                  (p/hook-update! hook))]
+                  (gp/hook-deps-update! hook (run this))
+                  (gp/hook-update! hook))]
 
             (if deps-updated?
-              (p/perf-count! this [::hook-deps-update! current-idx])
-              (p/perf-count! this [::hook-update! current-idx]))
+              (gp/perf-count! this [::hook-deps-update! current-idx])
+              (gp/perf-count! this [::hook-update! current-idx]))
 
             (when did-update?
-              (p/perf-count! this [::hook-did-update! current-idx]))
+              (gp/perf-count! this [::hook-did-update! current-idx]))
 
             #_(js/console.log "Component:hook-update!"
                 (:component-name config)
@@ -318,7 +315,7 @@
               (when (bit-test (.-render-deps config) current-idx)
                 (set! needs-render? true)))
 
-            (if (p/hook-ready? hook)
+            (if (gp/hook-ready? hook)
               (set! current-idx (inc current-idx))
               (.suspend! this)))
 
@@ -326,16 +323,16 @@
           (set! current-idx (inc current-idx))))))
 
   (^clj unschedule! [this]
-    (p/unschedule! scheduler this))
+    (gp/unschedule! scheduler this))
 
   (^clj suspend! [this hook-causing-suspend]
     ;; just in case we were already scheduled. should really track this more efficiently
     (.unschedule! this)
-    (p/did-suspend! scheduler this)
+    (gp/did-suspend! scheduler this)
     (set! suspended? true))
 
   (^clj schedule! [this]
-    (p/schedule-update! scheduler this))
+    (gp/schedule-update! scheduler this))
 
   (^clj component-render! [^ComponentInstance this]
     (assert (zero? dirty-hooks) "Got to render while hooks are dirty")
@@ -344,11 +341,11 @@
     (set! dirty-from-args (int 0))
 
     (if-not needs-render?
-      (p/perf-count! this [::render-skip])
+      (gp/perf-count! this [::render-skip])
 
       (let [frag (. config (render-fn this))]
 
-        (p/perf-count! this [::render])
+        (gp/perf-count! this [::render])
 
         (set! rendered-args args)
         (set! needs-render? false)
@@ -359,7 +356,7 @@
         ;; FIXME: run dom after effects
         ))
 
-    (p/did-finish! scheduler this))
+    (gp/did-finish! scheduler this))
 
   (^clj register-event! [this event-id callback]
     (set! events (assoc events event-id callback)))
@@ -375,15 +372,15 @@
 
 (set! *warn-on-infer* true)
 
-(defn component-create [env ^p/ComponentConfig config args]
+(defn component-create [env ^gp/ComponentConfig config args]
   (when ^boolean js/goog.DEBUG
-    (when-not (instance? p/ComponentConfig config)
+    (when-not (instance? gp/ComponentConfig config)
       (throw (ex-info "not a component definition" {:config config :props args}))))
 
   ;; (js/console.log "component-create" (.-component-name config) args)
   (doto (ManagedComponent.
           ;; FIXME: this is way too many args, there must be a way to simplifiy
-          (::sa/scheduler env)
+          (::gp/scheduler env)
           env ;; parent-env
           nil ;; component-env (created in component-init! since it needs this pointer)
           args
@@ -421,7 +418,7 @@
   (when-not component
     (throw (ex-info "event handlers can only be used in components" {:env env :ev-id ev-id :e e :ev-args ev-args})))
 
-  (p/run-now! (.-scheduler component) #(p/handle-event! component ev-id e ev-args)))
+  (gp/run-now! (.-scheduler component) #(gp/handle-event! component ev-id e ev-args)))
 
 (defn event-attr [env node event oval [ev-id & ev-args :as nval]]
 
@@ -508,7 +505,7 @@
          (fn? render-fn)]}
 
   (let [cfg
-        (p/ComponentConfig.
+        (gp/ComponentConfig.
           component-name
           hooks
           opts
@@ -561,11 +558,11 @@
    ^ManagedComponent component
    idx
    ^:mutable callback]
-  p/IBuildHook
+  gp/IBuildHook
   (hook-build [this c i]
     (EventHook. event-id c i callback))
 
-  p/IHook
+  gp/IHook
   (hook-init! [this]
     (.register-event! component event-id callback))
   (hook-ready? [this]
@@ -587,7 +584,7 @@
   (EventHook. ev-id nil nil callback))
 
 (deftype SimpleVal [^:mutable val]
-  p/IHook
+  gp/IHook
   (hook-init! [this])
   (hook-ready? [this] true)
   (hook-value [this] val)
@@ -598,14 +595,14 @@
       updated?))
   (hook-destroy! [this]))
 
-(extend-protocol p/IBuildHook
+(extend-protocol gp/IBuildHook
   default
   (hook-build [val component idx]
     (SimpleVal. val)))
 
 (deftype SlotHook
   [slot-id ^ManagedComponent component idx node]
-  p/IBuildHook
+  gp/IBuildHook
   (hook-build [this c i]
     (SlotHook. slot-id c i (common/dom-marker (get-env c))))
 
@@ -632,7 +629,7 @@
   (destroy! [this]
     (.remove node))
 
-  p/IHook
+  gp/IHook
   (hook-init! [this]
     (.set-slot! component slot-id this))
   (hook-ready? [this] true)

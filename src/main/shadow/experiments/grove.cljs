@@ -7,7 +7,8 @@
     [shadow.experiments.grove.components :as comp]
     [shadow.experiments.grove.db :as db]
     [shadow.experiments.grove.protocols :as gp]
-    [shadow.experiments.arborist :as sa]))
+    [shadow.experiments.arborist :as sa]
+    [shadow.experiments.grove.protocols :as gp]))
 
 (defonce active-roots-ref (atom {}))
 
@@ -81,11 +82,11 @@
    ^:mutable read-keys
    ^:mutable read-result]
 
-  p/IBuildHook
+  gp/IBuildHook
   (hook-build [this c i]
     (QueryHook. ident query c i (comp/get-env c) nil nil))
 
-  p/IHook
+  gp/IHook
   (hook-init! [this]
     (.do-read! this))
 

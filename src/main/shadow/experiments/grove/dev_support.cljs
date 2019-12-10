@@ -7,7 +7,8 @@
     [shadow.remote.runtime.api :as rapi]
     [shadow.experiments.grove :as sg]
     [shadow.experiments.grove.protocols :as sp]
-    [shadow.experiments.arborist :as sa]))
+    [shadow.experiments.arborist :as sa]
+    [shadow.experiments.grove.protocols :as gp]))
 
 ;; sketch of some of the development support might work
 
@@ -54,7 +55,7 @@
   ;; perf tracking should have no overhead in release builds
   ;; default impl does nothing but preload provides impl that actually does stuff
   ;; this way in :advanced builds all perf calls get removed entirely by closure
-  p/IProfile
+  gp/IProfile
   (perf-count! [component key]
     (swap! perf-data-ref update-in (into [component] key) safe-inc))
 
@@ -67,7 +68,7 @@
     (let [data (get @perf-data-ref component)]
       (swap! perf-data-ref dissoc component))))
 
-(extend-type p/ComponentConfig
+(extend-type gp/ComponentConfig
   cp/Datafiable
   (datafy [this]
     {:component-name (.-component-name this)

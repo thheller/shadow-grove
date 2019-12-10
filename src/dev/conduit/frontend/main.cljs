@@ -7,12 +7,12 @@
     [conduit.frontend.views :as views])
   (:import [goog.history Html5History]))
 
-(defonce app-env (sa/init {}))
+(defonce app-env {})
 
 (defonce root-el (.getElementById js/document "app"))
 
 (defn navigate-to-token! [token]
-  (sa/run-now! app-env #(sg/run-tx app-env [::m/route! token])))
+  (sg/run-now! app-env #(sg/run-tx app-env [::m/route! token])))
 
 (defn setup-history [^goog history]
   (let [start-token "dashboard"

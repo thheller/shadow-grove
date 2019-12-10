@@ -9,6 +9,7 @@
     [shadow.experiments.arborist :as sa]
     [goog.async.nextTick]
     [cognitect.transit :as transit]
+    [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.components :as comp]
     ))
 
@@ -17,6 +18,75 @@
 (defn next-tick [callback]
   ;; FIXME: should be smarter about when/where to schedule
   (js/goog.async.nextTick callback))
+
+
+(def now
+  (if (exists? js/performance)
+    #(js/performance.now)
+    #(js/Date.now)))
+
+(deftype TreeScheduler [^:mutable work-arr ^:mutable update-pending?]
+  gp/IScheduleUpdates
+  (did-suspend! [this work-task])
+  (did-finish! [this work-task])
+
+  (schedule-update! [this work-task]
+    ;; FIXME: now possible a task is scheduled multiple times
+    ;; but the assumption is that task will only schedule themselves once
+    ;; doesn't matter if its in the arr multiple times too much
+    (.push work-arr work-task)
+
+    ;; schedule was added in some async work
+    (when-not update-pending?
+      (set! update-pending? true)
+      (js/goog.async.nextTick #(.process-pending! this))))
+
+  (unschedule! [this work-task]
+    ;; FIXME: might be better to track this in the task itself and just check when processing
+    ;; and just remove it then. the array might get long?
+    (set! work-arr (.filter work-arr (fn [x] (not (identical? x work-task))))))
+
+  (run-now! [this callback]
+    (set! update-pending? true)
+    (callback)
+    (.process-pending! this))
+
+  Object
+  (process-pending! [this]
+    ;; FIXME: this now processes in FCFS order
+    ;; should be more intelligent about prioritizing
+    ;; should use requestIdleCallback or something to schedule in batch
+    (let [start (now)
+          done
+          (loop []
+            (if-not (pos? (alength work-arr))
+              true
+              (let [next (aget work-arr 0)]
+                (when-not (gp/work-pending? next)
+                  (throw (ex-info "work was scheduled but isn't pending?" {:next next})))
+                (gp/work! next)
+
+                ;; FIXME: using this causes a lot of intermediate paints
+                ;; which means things take way longer especially when rendering collections
+                ;; so there really needs to be a Suspense style node that can at least delay
+                ;; inserting nodes into the actual DOM until they are actually ready
+                (let [diff (- (now) start)]
+                  ;; FIXME: more logical timeouts
+                  ;; something like IdleTimeout from requestIdleCallback?
+                  ;; dunno if there is a polyfill for that?
+                  ;; not 16 to let the runtime do other stuff
+                  (when (< diff 10)
+                    (recur))))))]
+
+      (if done
+        (set! update-pending? false)
+        (js/goog.async.nextTick #(.process-pending! this))))
+
+    ;; FIXME: dom effects
+    ))
+
+(defn run-now! [env callback]
+  (gp/run-now! (::gp/scheduler env) callback))
 
 ;; batch?
 (defn send-to-worker [{::keys [worker ^function transit-str] :as env} msg]
@@ -38,11 +108,11 @@
    ^:mutable ready?
    ^:mutable read-result]
 
-  p/IBuildHook
+  gp/IBuildHook
   (hook-build [this c i]
     (QueryHook. ident query c i (comp/get-env c) (make-query-id) false nil))
 
-  p/IHook
+  gp/IHook
   (hook-init! [this]
     (next-tick
       (fn []
@@ -118,7 +188,7 @@
 ;; a node in the tree can modify it for its children but only on create.
 
 (defn init
-  [{::sa/keys [scheduler] :as env} app-id worker]
+  [env app-id worker]
   ;; FIXME: take reader-opts/writer-opts from env if set?
   (let [tr (transit/reader :json)
         tw (transit/writer :json)
@@ -134,10 +204,14 @@
         active-queries-ref
         (atom {})
 
+        scheduler
+        (TreeScheduler. (array) false)
+
         env
         (assoc env
           ::app-id app-id
           ::worker worker
+          ::gp/scheduler scheduler
           ::transit-read transit-read
           ::transit-str transit-str
           ::active-queries-ref active-queries-ref
@@ -165,7 +239,7 @@
                         ^QueryHook q (get @active-queries-ref query-id)]
                     (when q
                       ;; FIXME: actually schedule, shouldn't run now thats just the only one implemented currently
-                      (p/run-now! scheduler #(.set-data! q result))))
+                      (gp/run-now! scheduler #(.set-data! q result))))
 
                   (js/console.warn "unhandled main msg" op msg))))))))
     env))
@@ -191,11 +265,11 @@
     (dissoc env ::app-root ::root-el)))
 
 (deftype AtomWatch [the-atom ^:mutable val component idx]
-  p/IBuildHook
+  gp/IBuildHook
   (hook-build [this c i]
     (AtomWatch. the-atom nil c i))
 
-  p/IHook
+  gp/IHook
   (hook-init! [this]
     (set! val @the-atom)
     (add-watch the-atom this
@@ -222,14 +296,14 @@
   (AtomWatch. the-atom nil nil nil))
 
 (deftype EnvWatch [key-to-atom path default the-atom ^:mutable val component idx]
-  p/IBuildHook
+  gp/IBuildHook
   (hook-build [this c i]
     (let [atom (get (comp/get-env c) key-to-atom)]
       (when-not atom
         (throw (ex-info "no atom found under key" {:key key-to-atom :path path})))
       (EnvWatch. key-to-atom path default atom nil c i)))
 
-  p/IHook
+  gp/IHook
   (hook-init! [this]
     (set! val (get-in @the-atom path default))
     (add-watch the-atom this
@@ -312,7 +386,6 @@
     marker)
 
   p/IDestructible
-  (destroyed? [this])
   (destroy! [this]
     (when timeout
       (js/clearTimeout timeout))
@@ -322,15 +395,15 @@
     (when offscreen
       (p/destroy! offscreen)))
 
-  p/IScheduleUpdates
+  gp/IScheduleUpdates
   (schedule-update! [this target]
-    (p/schedule-update! parent-scheduler target))
+    (gp/schedule-update! parent-scheduler target))
 
   (unschedule! [this target]
-    (p/unschedule! parent-scheduler target))
+    (gp/unschedule! parent-scheduler target))
 
   (run-now! [this action]
-    (p/run-now! parent-scheduler action))
+    (gp/run-now! parent-scheduler action))
 
   (did-suspend! [this target]
     ;; (js/console.log "did-suspend!" suspend-set target)
@@ -346,7 +419,7 @@
   Object
   (init! [this]
     ;; can't be done in as-managed since it needs the this pointer
-    (let [next-env (assoc parent-env ::sa/scheduler this)
+    (let [next-env (assoc parent-env ::gp/scheduler this)
           next-managed (p/as-managed vnode next-env)]
       (set! child-env next-env)
       (if (empty? suspend-set)
@@ -391,7 +464,7 @@
 (deftype SuspenseRootNode [vnode opts]
   p/IConstruct
   (as-managed [this env]
-    (doto (SuspenseRoot. vnode opts (common/dom-marker env) env (::sa/scheduler env) nil nil nil #{} nil)
+    (doto (SuspenseRoot. vnode opts (common/dom-marker env) env (::gp/scheduler env) nil nil nil #{} nil)
       (.init!))))
 
 (defn suspense [vnode opts]
