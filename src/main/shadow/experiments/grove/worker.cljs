@@ -51,10 +51,10 @@
 
         (let [config @config-ref]
           (reduce-kv
-            (fn [_ key value]
-              (let [fx-fn (get-in config [:fx key])]
+            (fn [_ fx-key value]
+              (let [fx-fn (get-in config [:fx fx-key])]
                 (if-not fx-fn
-                  (js/console.warn "invalid fx" key value)
+                  (js/console.warn "invalid fx" fx-key value)
                   (let [transact-fn
                         (fn [fx-tx]
                           ;; FIXME: should probably track the fx causing this transaction and the original tx

@@ -9,8 +9,6 @@
     [conduit.model :as m])
   (:import [goog.history Html5History]))
 
-(def api-base "https://conduit.productionready.io/api")
-
 (defonce data-ref
   (-> {:active-page :home
        :tags ["butt" "test" "dragons" "training" "tags" "as" "coffee" "animation" "baby" "cars" "flowers" "caramel" "japan" "money" "happiness" "sugar" "clean" "sushi" "well" "cookies"]
@@ -37,24 +35,19 @@
 
 (sg/reg-event-fx app-env :active-profile-loaded
   []
-  (fn [{:keys [db] :as env} profile-ident {::m/keys [profile] :as result}]
-    ;; this is horrible .. should send out both requests at once and coordinate when both complete
-    ;; this should not be done sequentially
-    {:db (assoc db profile-ident (assoc profile :written-articles ::db/loading))
-     :http {:uri [api-base "/articles" {:author (db/ident-val profile-ident)}]
-            :on-success [:active-profile-articles-loaded profile-ident]}}))
-
-(sg/reg-event-fx app-env :active-profile-articles-loaded
-  []
-  (fn [{:keys [db] :as env} profile-ident {::m/keys [articles articles-count] :as result}]
-    {:db (-> db
-             (assoc-in [profile-ident :written-articles-count] articles-count)
-             (db/merge-seq ::m/article articles [profile-ident :written-articles]))}))
+  (fn [{:keys [db] :as env} profile-ident {:keys [articles profile] :as result}]
+    ;; annoying nesting in the api
+    ;; one level from request-many one level from http responses
+    (let [{::m/keys [articles articles-count]} articles
+          profile (::m/profile profile)]
+      {:db (-> db
+               (assoc profile-ident (assoc profile :written-articles-count articles-count))
+               (db/merge-seq ::m/article articles [profile-ident :written-articles]))
+       })))
 
 (sg/reg-event-fx app-env ::m/route!
   []
   (fn [{:keys [db] :as env} token]
-    (tap> [::m/route! token env])
     (let [[main & more :as tokens] (str/split token #"/")
           db (assoc db :route-tokens tokens)]
       (case main
@@ -73,18 +66,27 @@
                              :active-profile profile-ident)}
 
               (cond->
-                (not (get db profile-ident))
+                (or (not (get db profile-ident))
+                    ;; we already might have a profile but no articles
+                    ;; FIXME: should probably instead display the profile and load articles async
+                    (not (get-in db [profile-ident :written-articles])))
                 (-> (update :db assoc profile-ident ::db/loading)
-                    (assoc :http {:uri [api-base "/profiles" username]
-                                  :on-success [:active-profile-loaded profile-ident]})
-                    ))))
+                    (assoc :conduit-api
+                           {:request-many
+                            {:profile ["/profiles" username]
+                             :articles ["/articles" {:author username}]}
+                            :on-success [:active-profile-loaded profile-ident]}))
+                )))
 
         ;; FIXME: should this always request articles? we might have some?
         "home"
-        {:http {:uri [api-base "/articles"]
-                :on-success [:home-articles-loaded]}
-         :db (assoc db :active-page :home
-                       ::m/home-articles ::db/loading)}
+        {:conduit-api
+         {:request ["/articles"]
+          :on-success [:home-articles-loaded]}
+
+         :db
+         (assoc db :active-page :home
+                   ::m/home-articles ::db/loading)}
 
         "register"
         {:db (assoc db :active-page :register)}
@@ -102,13 +104,17 @@
 
 (defn init []
   (set! app-env (-> app-env
-                    ;; FIXME: add http-fx/init fn that does all the setup
-                    (assoc ::http-fx/on-error [::request-error!])
-                    (sg/reg-fx :http http-fx/handler)
-                    (http-fx/with-default-formats)
-                    (assoc-in [::http-fx/response-formats "application/json"]
-                      (fn [env xhr-req]
-                        (json/to-clj (js/JSON.parse (.-responseText xhr-req))
-                          {:key-fn (memoize json-key-fn)})))
+                    (sg/reg-fx :conduit-api
+                      (http-fx/make-handler
+                        {:on-error [::request-error!]
+                         :base-url "https://conduit.productionready.io/api"
+                         :request-format
+                         (fn [env body opts]
+                           (json/write-str body))
+                         :response-formats
+                         {"application/json"
+                          (fn [env xhr-req]
+                            (json/to-clj (js/JSON.parse (.-responseText xhr-req))
+                              {:key-fn (memoize json-key-fn)}))}}))
                     (sg/init)))
   (start))

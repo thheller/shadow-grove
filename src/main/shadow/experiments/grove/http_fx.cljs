@@ -7,21 +7,18 @@
 ;; or some other node-specific APIs
 
 (defn transform-request-body
-  [env request]
+  [config env body opts]
   (let [request-format
-        (or (:request-format request)
+        (or (:request-format opts)
+            (:request-format config)
             (::request-format env))]
 
     (when-not request-format
-      (throw (ex-info "no request-format configured" {:env env :request request})))
+      (throw (ex-info "no request-format configured but :body provided" {:env env :config config :body body :opts opts})))
 
-    ;; not allowing this via request since that would make it not-data
-    (let [request-formatter (get-in env [::request-formatters request-format])]
-      (when-not request-format
-        (throw (ex-info "no request-format configured" {:env env :request request :request-format request-format})))
-      (request-formatter env request))))
+    (request-format env body opts)))
 
-(defn body-transform [env request ^js xhr-req]
+(defn body-transform [config env request ^js xhr-req]
   (let [content-type
         ;; FIXME: don't just drop off encoding, actually handle it
         (let [ct (str/lower-case (.getResponseHeader xhr-req "content-type"))
@@ -33,7 +30,7 @@
         ;; FIXME: allow custom format handler in request map?
         ;; adding a function would make it not-data so unlikely
         transform-fn
-        (get-in env [::response-formats content-type])]
+        (get-in config [:response-formats content-type])]
 
     (if (nil? transform-fn)
       (throw (ex-info "unsupported content-type" {:env env :req xhr-req :content-type content-type}))
@@ -51,7 +48,7 @@
     ""
     m))
 
-(defn as-url [env input]
+(defn as-uri [env input]
   (cond
     (string? input)
     input
@@ -61,9 +58,10 @@
       (fn [url idx part]
         (cond
           (map? part)
-          (str url
-               (if (str/includes? url "?") "&" "?")
-               (query-params->str env part))
+          (reduced ;; FIXME: should probably hard fail if there is something left after a map, this just drops it
+            (str url
+                 (if (str/includes? url "?") "&" "?")
+                 (query-params->str env part)))
 
           ;; don't mess with first part since it may be url base
           (zero? idx)
@@ -87,15 +85,29 @@
   (transact! tx))
 
 (defn do-request
-  [env
-   {:keys [method uri body timeout]
-    :as request
-    :or {method :GET}}]
-  (let [body? (and (not= :GET method) body)
+  [{:keys [base-url] :as config}
+   env
+   request
+   ^function callback]
+  (let [[method uri body opts]
+        (cond
+          (vector? request)
+          [:GET request nil {}]
+
+          (map? request)
+          [(get request :method :GET)
+           (or (get request :uri) (throw (ex-info "missing :uri in request map" {:request request})))
+           (:body request)
+           request])
+
+        {:keys [timeout]}
+        opts
+
+        body? (some? body)
 
         [content-type body]
         (if body?
-          (transform-request-body env request)
+          (transform-request-body config env body opts)
           [nil nil])
 
         ;; FIXME: validate valid :GET, :POST, ...
@@ -103,14 +115,20 @@
         (name method)
 
         req-url
-        (as-url env uri)
+        (as-uri env uri)
+
+        req-url
+        (if base-url
+          (str base-url req-url)
+          req-url)
 
         xhr-req (js/XMLHttpRequest.)
 
-        ;; FIXME: undecided whether this should include xhr-req, makes it not-data
-        ;; but this should never leave the local scope anyways. might make things easier to debug/inspect?
         sent-request
-        (assoc request ::uri req-url ::method request-method ::content-type content-type ::body body)]
+        {:uri req-url
+         :method request-method
+         :content-type content-type
+         :body body}]
 
     (try
       ;; FIXME: last 2 args, from either env or request?
@@ -137,28 +155,20 @@
       (set! xhr-req -onload
         (fn [e]
           (let [status (.-status xhr-req)
-                body (body-transform env request xhr-req)]
-            (if (request-error? status)
-              (let [on-error
-                    (or (:on-error request)
-                        (::on-error env))]
-                (if-not on-error
-                  (js/console.warn "request result in error response without handler" env request xhr-req e status)
-                  (trigger env (conj on-error body status sent-request))))
-              (let [on-success (:on-success request)]
-                (trigger env (conj on-success body status sent-request))
-                )))))
+                body (body-transform config env request xhr-req)]
+            (callback body status sent-request xhr-req)
+            )))
 
       (when timeout
         (set! xhr-req -timeout timeout)
         (set! xhr-req -ontimeout
           (fn [e]
+            ;; FIXME: callback with 409 status (client timeout), stricly speaking not the correct code but close enough
             (js/console.log "request actually timed out" xhr-req request)
             )))
 
       (set! (.-responseType xhr-req) "text")
-      ;; FIXME: bad for CORS! but who uses http auth for anything serious?
-      (set! (.-withCredentials xhr-req) (not (false? (:with-credentials request))))
+      (set! (.-withCredentials xhr-req) (not (false? (:with-credentials opts))))
 
       (when body?
         (.setRequestHeader xhr-req "content-type" content-type))
@@ -171,37 +181,19 @@
         (js/console.warn "failed to setup request" request xhr-req e)
         (throw e)))))
 
-(defn handler [env request]
-  (when request
-    (cond
-      (map? request)
-      (do-request env request)
-
-      (sequential? request)
-      (reduce
-        (fn [_ request]
-          (do-request env request))
-        nil
-        request)
-
-      :else
-      (throw (ex-info "invalid http request" {:env env :request request}))))
-  env)
-
 (defn just-response-text [env ^js xhr-req]
   (.-responseText xhr-req))
 
-;; FIXME: this shouldn't be tied to grove-worker ns. need some kind of API ns
 ;; taking the read-fns from env so this ns doesn't depend on either cljs.reader nor transit
 ;; there are also several other places that will require these fns anyways
 (defn parse-edn [env ^js xhr-req]
-  (let [read-fn (:shadow.experiments.grove-worker/edn-read env)]
+  (let [read-fn (:shadow.experiments.grove/edn-read env)]
     (when-not read-fn
       (throw (ex-info "received a EDN response but didn't have edn-read fn" {})))
     (read-fn (.-responseText xhr-req))))
 
 (defn parse-transit [env ^js xhr-req]
-  (let [read-fn (:shadow.experiments.grove-worker/transit-read env)]
+  (let [read-fn (:shadow.experiments.grove/transit-read env)]
     (when-not read-fn
       (throw (ex-info "received a transit response but didn't have transit-read fn" {})))
     (read-fn (.-responseText xhr-req))))
@@ -210,16 +202,68 @@
   ;; FIXME: should take a fn from the env to convert to CLJS data, not by default though
   (js/JSON.parse (.-responseText xhr-req)))
 
-(defn with-default-formats [env]
-  (update env ::response-formats
-    (fn [current]
-      (merge
-        {"text/plain" just-response-text
-         "text/html" just-response-text
-         "application/json" parse-json
-         "application/edn" parse-edn
-         "application/transit+json" parse-transit}
-        current))))
+(def default-response-formats
+  {"text/plain" just-response-text
+   "text/html" just-response-text
+   "application/json" parse-json
+   "application/edn" parse-edn
+   "application/transit+json" parse-transit})
+
+(defn handle-error [config env request-def result status sent-request xhr-req]
+  (let [on-error
+        (or (:on-error request-def)
+            (:on-error config)
+            (::on-error env))]
+    (if-not on-error
+      (js/console.warn "request result in error response without handler" env request-def xhr-req status)
+      (trigger env (conj on-error result status sent-request)))))
+
+(defn handle-success [config env request result]
+  (let [on-success (:on-success request)]
+    (trigger env (conj on-success result))))
+
+(defn merge-right [left right]
+  (merge right left))
+
+(defn make-handler [config]
+  ;; FIXME: deep-merge, so maps are merged properly
+  (let [config (update config :response-formats merge-right default-response-formats)]
+    (fn http-fx-handler [env request-def]
+      (when request-def
+        (let [{:keys [request request-many]} request-def]
+          (cond
+            (and request request-many)
+            (throw (ex-info "can only use :request OR :request-many, not both" {:request-def request-def}))
+
+            request
+            (do-request config env request
+              (fn [result status sent-request xhr-req]
+                (if (request-error? status)
+                  (handle-error config env request-def result status sent-request xhr-req)
+                  (handle-success config env request-def result))))
+
+            request-many
+            (let [results-ref (atom {})]
+              (reduce-kv
+                (fn [_ key request]
+                  (do-request config env request
+                    (fn [result status sent-request xhr-req]
+                      (if (request-error? status)
+                        ;; FIXME: should also support :on-partial-success (when at least on of the requests succeeds)
+                        (handle-error config env request-def result status sent-request xhr-req)
+                        (do (swap! results-ref assoc key result)
+                            ;; FIXME: should also support :on-progress (for intermediate completion)
+                            (when (= (count request-many)
+                                     (count @results-ref))
+                              (handle-success config env request-def @results-ref)))))
+                    ))
+                nil
+                request-many))
+
+            :else
+            (throw (ex-info "missing :request OR :request-many, need one" {:request-def request-def}))
+            )))
+      env)))
 
 (comment
   (handler
