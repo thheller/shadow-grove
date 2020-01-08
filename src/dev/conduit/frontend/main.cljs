@@ -1,7 +1,8 @@
 (ns conduit.frontend.main
   (:require
     [clojure.string :as str]
-    [shadow.experiments.grove-main :as sg]
+    [shadow.experiments.grove :as sg]
+    [shadow.experiments.grove.worker-engine :as worker-eng]
     [shadow.experiments.arborist :as sa]
     [conduit.model :as m]
     [conduit.frontend.views :as views])
@@ -55,8 +56,10 @@
           (.setPathPrefix "/")
           (.setUseFragment false))]
 
-    (set! app-env (assoc app-env :history history))
-    (set! app-env (sg/init app-env ::conduit js/SHADOW_WORKER))
+    (set! app-env (-> app-env
+                      (assoc :history history)
+                      (sg/init ::conduit)
+                      (worker-eng/init js/SHADOW_WORKER)))
 
     (setup-history history)
 

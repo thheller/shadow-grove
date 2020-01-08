@@ -1,4 +1,4 @@
-(ns shadow.experiments.grove-main
+(ns shadow.experiments.grove
   (:require [shadow.experiments.grove.components :as comp]
             [shadow.experiments.arborist.fragments :as fragments]))
 

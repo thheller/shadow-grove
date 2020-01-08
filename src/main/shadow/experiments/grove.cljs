@@ -1,27 +1,214 @@
 (ns shadow.experiments.grove
   "grove - a small wood or forested area (ie. trees)
    a mini re-frame/fulcro hybrid. re-frame event styles + somewhat normalized db"
+  (:require-macros [shadow.experiments.grove])
   (:require
-    [clojure.set :as set]
-    [shadow.experiments.arborist.protocols :as p]
-    [shadow.experiments.grove.components :as comp]
-    [shadow.experiments.grove.db :as db]
-    [shadow.experiments.grove.protocols :as gp]
+    [shadow.experiments.arborist.protocols :as ap]
+    [shadow.experiments.arborist.common :as common]
+    [shadow.experiments.arborist.fragments] ;; util macro references this
     [shadow.experiments.arborist :as sa]
-    [shadow.experiments.grove.protocols :as gp]))
+    [goog.async.nextTick]
+    [cognitect.transit :as transit]
+    [shadow.experiments.grove.protocols :as gp]
+    [shadow.experiments.grove.components :as comp]
+    ))
 
 (defonce active-roots-ref (atom {}))
 
-;; not using an atom as env to make it clearer that it is to be treated as immutable
-;; can put mutable atoms in it but env once created cannot be changed.
-;; a node in the tree can modify it for its children but only on create.
+(defn next-tick [callback]
+  ;; FIXME: should be smarter about when/where to schedule
+  (js/goog.async.nextTick callback))
 
-(defn env [init app-id data-ref]
-  (assoc init
-    ::app-id app-id
-    ::data-ref data-ref
-    ::active-queries-ref (atom #{})
-    ::config-ref (atom {:events {}})))
+(def now
+  (if (exists? js/performance)
+    #(js/performance.now)
+    #(js/Date.now)))
+
+(deftype TreeScheduler [^:mutable work-arr ^:mutable update-pending?]
+  gp/IScheduleUpdates
+  (did-suspend! [this work-task])
+  (did-finish! [this work-task])
+
+  (schedule-update! [this work-task]
+    ;; FIXME: now possible a task is scheduled multiple times
+    ;; but the assumption is that task will only schedule themselves once
+    ;; doesn't matter if its in the arr multiple times too much
+    (.push work-arr work-task)
+
+    ;; schedule was added in some async work
+    (when-not update-pending?
+      (set! update-pending? true)
+      (next-tick #(.process-pending! this))))
+
+  (unschedule! [this work-task]
+    ;; FIXME: might be better to track this in the task itself and just check when processing
+    ;; and just remove it then. the array might get long?
+    (set! work-arr (.filter work-arr (fn [x] (not (identical? x work-task))))))
+
+  (run-now! [this callback]
+    (set! update-pending? true)
+    (callback)
+    (.process-pending! this))
+
+  Object
+  (process-pending! [this]
+    ;; FIXME: this now processes in FCFS order
+    ;; should be more intelligent about prioritizing
+    ;; should use requestIdleCallback or something to schedule in batch
+    (let [start (now)
+          done
+          (loop []
+            (if-not (pos? (alength work-arr))
+              true
+              (let [next (aget work-arr 0)]
+                (when-not (gp/work-pending? next)
+                  (throw (ex-info "work was scheduled but isn't pending?" {:next next})))
+                (gp/work! next)
+
+                ;; FIXME: using this causes a lot of intermediate paints
+                ;; which means things take way longer especially when rendering collections
+                ;; so there really needs to be a Suspense style node that can at least delay
+                ;; inserting nodes into the actual DOM until they are actually ready
+                (let [diff (- (now) start)]
+                  ;; FIXME: more logical timeouts
+                  ;; something like IdleTimeout from requestIdleCallback?
+                  ;; dunno if there is a polyfill for that?
+                  ;; not 16 to let the runtime do other stuff
+                  (when (< diff 10)
+                    (recur))))))]
+
+      (if done
+        (set! update-pending? false)
+        (js/goog.async.nextTick #(.process-pending! this))))
+
+    ;; FIXME: dom effects
+    ))
+
+(defn run-now! [env callback]
+  (gp/run-now! (::gp/scheduler env) callback))
+
+(defonce query-id-seq (atom 0))
+
+(defn make-query-id []
+  (swap! query-id-seq inc))
+
+(deftype QueryHook
+  [^:mutable ident
+   ^:mutable query
+   ^:mutable config
+   component
+   idx
+   env
+   query-engine
+   query-id
+   ^:mutable ready?
+   ^:mutable read-result]
+
+  gp/IBuildHook
+  (hook-build [this c i]
+    (let [{::gp/keys [query-engine] :as env} (comp/get-env c)]
+      (assert query-engine "no query engine in env")
+      (QueryHook. ident query config c i env query-engine (make-query-id) false nil)))
+
+  gp/IHook
+  (hook-init! [this]
+    (.set-loading! this)
+    (.register-query! this))
+
+  (hook-ready? [this]
+    (or (false? (:suspend config)) ready?))
+
+  (hook-value [this]
+    read-result)
+
+  ;; node deps changed, check if query changed
+  (hook-deps-update! [this ^QueryHook val]
+    (if (and (= ident (.-ident val))
+             (= query (.-query val))
+             (= config (.-config val)))
+      false
+      ;; query changed, remove it entirely and wait for new one
+      (do (.unregister-query! this)
+          (set! ident (.-ident val))
+          (set! query (.-query val))
+          (set! config (.-config val))
+          (.set-loading! this)
+          (.register-query! this)
+          true)))
+
+  ;; node was invalidated and needs update, but its dependencies didn't change
+  (hook-update! [this]
+    true)
+
+  (hook-destroy! [this]
+    (.unregister-query! this))
+
+  Object
+  (register-query! [this]
+    (gp/register-query query-engine env query-id (if ident [{ident query}] query) config
+      (fn [result]
+        (.set-data! this result))))
+
+  (unregister-query! [this]
+    (gp/unregister-query query-engine query-id))
+
+  (set-loading! [this]
+    (set! ready? (false? (:suspend config)))
+    (set! read-result (assoc (:default config {}) ::loading-state :loading)))
+
+  (set-data! [this data]
+    (let [data (if ident (get data ident) data)]
+      (set! read-result (assoc data ::loading-state :ready))
+      ;; on query update just invalidate. might be useful to bypass certain suspend logic?
+      (if ready?
+        (comp/hook-invalidate! component idx)
+        (do (comp/hook-ready! component idx)
+            (set! ready? true))))))
+
+(defn query-ident
+  ([ident query]
+   {:pre [;; (db/ident? ident) FIXME: can't access db namespace in main, move to protocols?
+          (vector? query)]}
+   (QueryHook. ident query {} nil nil nil nil nil false nil))
+  ([ident query config]
+   {:pre [;; (db/ident? ident) FIXME: can't access db namespace in main, move to protocols?
+          (vector? query)
+          (map? config)]}
+   (QueryHook. ident query config nil nil nil nil nil false nil)))
+
+(defn query-root
+  ([query]
+   {:pre [(vector? query)]}
+   (QueryHook. nil query {} nil nil nil nil nil false nil))
+  ([query config]
+   {:pre [(vector? query)
+          (map? config)]}
+   (QueryHook. nil query config nil nil nil nil nil false nil)))
+
+(defn tx*
+  [{::gp/keys [query-engine] :as env} tx]
+  (assert query-engine "missing query-engine in env")
+  (gp/transact! query-engine env tx))
+
+(defn tx [env e & params]
+  (tx* env (into [(::comp/ev-id env)] params)))
+
+(defn run-tx [env tx]
+  (tx* env tx))
+
+(defn form [defaults])
+
+(defn form-values [form])
+
+(defn form-reset! [form])
+
+(defn init
+  [env app-id]
+  (let [scheduler (TreeScheduler. (array) false)]
+    (assoc env
+      ::app-id app-id
+      ::gp/scheduler scheduler
+      ::suspense-keys (atom {}))))
 
 (defn start [env root-el root-node]
   (let [active (get @active-roots-ref root-el)]
@@ -40,329 +227,213 @@
 (defn stop [root-el]
   (when-let [{::keys [app-root] :as env} (get @active-roots-ref root-el)]
     (swap! active-roots-ref dissoc root-el)
-    (p/destroy! app-root)
+    (ap/destroy! app-root)
     (dissoc env ::app-root ::root-el)))
 
-(deftype ObservedData [^:mutable keys-used data]
-  IDeref
-  (-deref [_]
-    (persistent! keys-used))
-
-  IMeta
-  (-meta [_]
-    (-meta data))
-
-  ;; map? predicate checks for this protocol
-  IMap
-  (-dissoc [coll k]
-    (throw (ex-info "observed data is read-only" {})))
-
-  ILookup
-  (-lookup [_ key]
-    (when (nil? key)
-      (throw (ex-info "cannot read nil key" {})))
-    (set! keys-used (conj! keys-used key))
-    (-lookup data key))
-
-  (-lookup [_ key default]
-    (when (nil? key)
-      (throw (ex-info "cannot read nil key" {})))
-    (set! keys-used (conj! keys-used key))
-    (-lookup data key default)))
-
-(defn observed [data]
-  (ObservedData. (transient #{}) data))
-
-(deftype QueryHook
-  [ident
-   query
-   component
-   idx
-   env
-   ^:mutable read-keys
-   ^:mutable read-result]
-
+(deftype AtomWatch [the-atom ^:mutable val component idx]
   gp/IBuildHook
   (hook-build [this c i]
-    (QueryHook. ident query c i (comp/get-env c) nil nil))
+    (AtomWatch. the-atom nil c i))
 
   gp/IHook
   (hook-init! [this]
-    (.do-read! this))
+    (set! val @the-atom)
+    (add-watch the-atom this
+      (fn [_ _ _ next-val]
+        ;; check immediately and only invalidate if actually changed
+        ;; avoids kicking off too much work
+        ;; FIXME: maybe shouldn't check equiv? only identical?
+        ;; pretty likely that something changed after all
+        (when (not= val next-val)
+          (set! val next-val)
+          (comp/hook-invalidate! component idx)))))
 
-  ;; FIXME: async queries
-  (hook-ready? [this] true)
-  (hook-value [this] read-result)
-
-  ;; node deps changed, node may have too
-  (hook-deps-update! [this val]
-    (js/console.log "QueryHook:node-deps-update!" idx this val)
-    false)
-
-  ;; node was invalidated and needs update, but its dependencies didn't change
+  (hook-ready? [this] true) ;; born ready
+  (hook-value [this] val)
   (hook-update! [this]
-    (let [before read-result]
-      (.do-read! this)
-
-      ;; FIXME: compare actual query fields only, result may contain other fields
-      ;; but should only trigger further updates when actually changed
-      (not= before read-result)))
-
+    ;; only gets here if value changed
+    true)
+  (hook-deps-update! [this new-val]
+    (throw (ex-info "shouldn't have changing deps?" {})))
   (hook-destroy! [this]
-    (let [{::keys [active-queries-ref]} env]
-      ;; FIXME: clear out some fields? probably not necessary, this will be GC'd anyways
-      (swap! active-queries-ref disj this)))
+    (remove-watch the-atom this)))
+
+(defn watch [the-atom]
+  (AtomWatch. the-atom nil nil nil))
+
+(deftype EnvWatch [key-to-atom path default the-atom ^:mutable val component idx]
+  gp/IBuildHook
+  (hook-build [this c i]
+    (let [atom (get (comp/get-env c) key-to-atom)]
+      (when-not atom
+        (throw (ex-info "no atom found under key" {:key key-to-atom :path path})))
+      (EnvWatch. key-to-atom path default atom nil c i)))
+
+  gp/IHook
+  (hook-init! [this]
+    (set! val (get-in @the-atom path default))
+    (add-watch the-atom this
+      (fn [_ _ _ new-value]
+        ;; check immediately and only invalidate if actually changed
+        ;; avoids kicking off too much work
+        (let [next-val (get-in new-value path default)]
+          (when (not= val next-val)
+            (set! val next-val)
+            (comp/hook-invalidate! component idx))))))
+
+  (hook-ready? [this] true) ;; born ready
+  (hook-value [this] val)
+  (hook-update! [this]
+    ;; only gets here if val actually changed
+    true)
+
+  (hook-deps-update! [this new-val]
+    (throw (ex-info "shouldn't have changing deps?" {})))
+  (hook-destroy! [this]
+    (remove-watch the-atom this)))
+
+(defn env-watch
+  ([key-to-atom]
+   (env-watch key-to-atom [] nil))
+  ([key-to-atom path]
+   (env-watch key-to-atom path nil))
+  ([key-to-atom path default]
+   {:pre [(keyword? key-to-atom)
+          (vector? path)]}
+   (EnvWatch. key-to-atom path default nil nil nil nil)))
+
+(declare SuspenseRootNode)
+
+(deftype SuspenseRoot
+  [^:mutable opts
+   ^:mutable vnode
+   marker
+   parent-env
+   parent-scheduler
+   ^:mutable child-env
+   ^:mutable display
+   ^:mutable offscreen
+   ^:mutable suspend-set
+   ^:mutable timeout]
+
+  ap/IUpdatable
+  (supports? [this next]
+    (instance? SuspenseRootNode next))
+
+  (dom-sync! [this ^SuspenseRootNode next]
+    ;; FIXME: figure out strategy for this?
+    ;; if displaying fallback start rendering in background
+    ;; if displaying managed and supported, just sync
+    ;; if displaying managed and not supported, start rendering in background and swap when ready
+    ;; when rendering in background display fallback after timeout?
+    (when (or offscreen timeout)
+      (throw (ex-info "syncing while not even finished yet" {:this this :offscreen offscreen :timeout timeout})))
+
+    (let [next (.-vnode next)]
+      (set! vnode next)
+      (set! opts (.-opts next))
+
+      (if (ap/supports? display next)
+        (ap/dom-sync! display next)
+        (let [new (ap/as-managed next child-env)]
+          (if (empty? suspend-set)
+            (do (common/fragment-replace display new)
+                (set! display new))
+            (do (set! offscreen new)
+                (.start-offscreen! this)
+                (.schedule-timeout! this)
+                ))))))
+
+  ap/IManageNodes
+  (dom-insert [this parent anchor]
+    (.insertBefore parent marker anchor)
+    (ap/dom-insert display parent anchor))
+
+  (dom-first [this]
+    marker)
+
+  ap/IDestructible
+  (destroy! [this]
+    (when timeout
+      (js/clearTimeout timeout))
+    (.remove marker)
+    (when display
+      (ap/destroy! display))
+    (when offscreen
+      (ap/destroy! offscreen)))
+
+  gp/IScheduleUpdates
+  (schedule-update! [this target]
+    (gp/schedule-update! parent-scheduler target))
+
+  (unschedule! [this target]
+    (gp/unschedule! parent-scheduler target))
+
+  (run-now! [this action]
+    (gp/run-now! parent-scheduler action))
+
+  (did-suspend! [this target]
+    ;; (js/console.log "did-suspend!" suspend-set target)
+    ;; FIXME: suspend parent scheduler when going offscreen?
+    (set! suspend-set (conj suspend-set target)))
+
+  (did-finish! [this target]
+    ;; (js/console.log "did-finish!" suspend-set target)
+    (set! suspend-set (disj suspend-set target))
+    (when (and offscreen (empty? suspend-set))
+      (js/goog.async.nextTick #(.maybe-swap! this))))
 
   Object
-  (do-read! [this]
-    (let [{::keys [data-ref active-queries-ref]} env
-          observed-data (observed @data-ref)
-          query (if ident [{ident query}] query)
-          result (db/query env observed-data query)]
+  (init! [this]
+    ;; can't be done in as-managed since it needs the this pointer
+    (let [next-env (assoc parent-env ::gp/scheduler this)
+          next-managed (ap/as-managed vnode next-env)]
+      (set! child-env next-env)
+      (if (empty? suspend-set)
+        (set! display next-managed)
+        (do (set! offscreen next-managed)
+            (.start-offscreen! this)
+            (set! display (ap/as-managed (:fallback opts) parent-env))))))
 
-      (set! read-keys @observed-data)
-      ;; (js/console.log "node query" ident query result read-keys)
-      (set! read-result (if ident (get result ident) result))
-      (swap! active-queries-ref conj this)))
+  (schedule-timeout! [this]
+    (when-not timeout
+      (let [timeout-ms (:timeout opts 500)]
+        (set! timeout (js/setTimeout #(.did-timeout! this) timeout-ms)))))
 
-  (refresh! [this]
-    ;; don't read here, just invalidate the component
-    ;; other updates may cause this query to be destroyed
-    ;; wait till its our turn to actually run again
-    (comp/hook-invalidate! component idx))
+  (start-offscreen! [this]
+    (when-some [key (:key opts)]
+      (swap! (::suspense-keys parent-env) assoc key (js/Date.now))))
 
-  (affected-by-key? [this key]
-    (contains? read-keys key)))
+  (did-timeout! [this]
+    (set! timeout nil)
+    (when offscreen
+      (let [fallback (ap/as-managed (:fallback opts) child-env)
+            old-display display]
+        ;; (js/console.log "using fallback after timeout")
+        (set! display (common/fragment-replace old-display fallback))
+        )))
 
-(defn query
-  ([query]
-   {:pre [(vector? query)]}
-   (QueryHook. nil query nil nil nil nil nil))
-  ([ident query]
-   {:pre [(db/ident? ident)
-          (vector? query)]}
-   (QueryHook. ident query nil nil nil nil nil)))
+  (maybe-swap! [this]
+    (when (and offscreen (empty? suspend-set))
+      (ap/dom-insert offscreen (.-parentElement marker) marker)
+      (ap/destroy! display)
+      (set! display offscreen)
+      (set! offscreen nil)
 
-(deftype TransactedData
-  [^not-native data
-   keys-new
-   keys-updated
-   keys-removed
-   completed-ref]
+      (when-some [key (:key opts)]
+        (swap! (::suspense-keys parent-env) dissoc key))
 
-  IMeta
-  (-meta [_]
-    (-meta data))
+      (when timeout
+        (js/clearTimeout timeout)
+        (set! timeout nil)
+        ))))
 
-  gp/TxData
-  (commit! [_]
-    (vreset! completed-ref true)
-    {:data data
-     :keys-new (persistent! keys-new)
-     :keys-updated (persistent! keys-updated)
-     :keys-removed (persistent! keys-removed)})
+(deftype SuspenseRootNode [opts vnode]
+  ap/IConstruct
+  (as-managed [this env]
+    (doto (SuspenseRoot. opts vnode (common/dom-marker env) env (::gp/scheduler env) nil nil nil #{} nil)
+      (.init!))))
 
-  ILookup
-  (-lookup [this key]
-    (.check-completed! this)
-    (-lookup data key))
+(defn suspense [opts vnode]
+  (SuspenseRootNode. opts vnode))
 
-  (-lookup [this key default]
-    (.check-completed! this)
-    (-lookup data key default))
-
-  ICounted
-  (-count [this]
-    (.check-completed! this)
-    (-count data))
-
-  IMap
-  (-dissoc [this key]
-    (.check-completed! this)
-
-    (let [key-is-ident?
-          (db/ident? key)
-
-          next-data
-          (-> data
-              (cond->
-                key-is-ident?
-                (-> (-dissoc key)
-                    (update (db/coll-key key) disj key))))
-
-          next-removed
-          (-> keys-removed
-              (conj! key)
-              (cond->
-                key-is-ident?
-                (conj! (db/coll-key key))))]
-
-      (TransactedData.
-        next-data
-        keys-new
-        keys-updated
-        next-removed
-        completed-ref)))
-
-  IAssociative
-  (-assoc [this key value]
-    (.check-completed! this)
-
-    (when (nil? key)
-      (throw (ex-info "nil key not allowed" {:value value})))
-
-    ;; FIXME: should it really check each write if anything changed?
-    ;; FIXME: enforce that ident keys have a map value with ::ident key?
-    (let [prev-val
-          (-lookup data key ::not-found)
-
-          key-is-ident?
-          (db/ident? key)]
-
-      (if (identical? prev-val value)
-        this
-        (if (= ::not-found prev-val)
-          ;; new
-          (if-not key-is-ident?
-            ;; new non-ident key
-            (TransactedData.
-              (-assoc data key value)
-              (conj! keys-new key)
-              keys-updated
-              keys-removed
-              completed-ref)
-
-            ;; new ident
-            (TransactedData.
-              (-> data
-                  (-assoc key value)
-                  (update (db/coll-key key) db/set-conj key))
-              (conj! keys-new key)
-              (conj! keys-updated (db/coll-key key))
-              keys-removed
-              completed-ref))
-
-          ;; update, non-ident key
-          (if-not key-is-ident?
-            (TransactedData.
-              (-assoc data key value)
-              keys-new
-              (conj! keys-updated key)
-              keys-removed
-              completed-ref)
-
-            ;; FIXME: no need to track (ident-key key) since it should be present?
-            (TransactedData.
-              (-assoc data key value)
-              keys-new
-              (-> keys-updated
-                  (conj! key)
-                  ;; need to update the entity-type collection since some queries might change if one in the list changes
-                  ;; FIXME: this makes any update potentially expensive, maybe should leave this to the user?
-                  (conj! (db/coll-key key)))
-              keys-removed
-              completed-ref))
-          ))))
-
-  Object
-  (^clj check-completed! [this]
-    (when @completed-ref
-      (throw (ex-info "transaction concluded, don't hold on to db while in tx" {})))
-    ))
-
-(defn transacted [data]
-  (TransactedData.
-    data
-    (transient #{})
-    (transient #{})
-    (transient #{})
-    (volatile! false)))
-
-;; FIXME: very inefficient, maybe worth maintaining an index
-(defn invalidate-queries! [active-queries keys-to-invalidate]
-  (run!
-    (fn [^QueryHook query]
-      (run!
-        (fn [key]
-          (when (.affected-by-key? query key)
-            (.refresh! query)))
-        keys-to-invalidate))
-    active-queries))
-
-(defn tx*
-  [{::keys [config-ref data-ref active-queries-ref]
-    ::comp/keys [ev-id]
-    :as env}
-   params]
-  ;; (js/console.log ::db-tx env tx-id params)
-
-  (let [{:keys [interceptors ^function handler-fn] :as event}
-        (get-in @config-ref [:events ev-id])]
-
-    (if-not event
-      (js/console.warn "no event handler for" ev-id params)
-      (let [before @data-ref
-
-            tx-db
-            (transacted before)
-
-            {tx-after :db :as result}
-            (handler-fn (assoc env :db tx-db) params)]
-
-        ;; FIXME: move all of this out to interceptor chain
-
-        (let [config @config-ref]
-          (reduce-kv
-            (fn [_ key value]
-              (let [fx-fn (get-in config [:fx key])]
-                (if-not fx-fn
-                  (js/console.warn "invalid fx" key value)
-                  (fx-fn env value))))
-            nil
-            (dissoc result :db)))
-
-        (when (seq interceptors)
-          (js/console.warn "TBD, ignored interceptors for event" ev-id))
-
-        (when tx-after
-          (let [{:keys [data keys-new keys-removed keys-updated] :as result}
-                (gp/commit! tx-after)
-
-                keys-to-invalidate
-                (set/union keys-new keys-removed keys-updated)]
-
-            ;; (js/console.log "invalidated keys" keys-to-invalidate @active-queries-ref)
-
-            (when-not (identical? @data-ref before)
-              (throw (ex-info "someone messed with app-state while in tx" {})))
-
-            (reset! data-ref data)
-
-            (when-not (identical? before data)
-              (invalidate-queries! @active-queries-ref keys-to-invalidate))
-
-            data))))))
-
-(defn tx [env e params]
-  (tx* env params))
-
-(defn run-tx [env other params]
-  (tx* (assoc env ::comp/ev-id other) params))
-
-(defn reg-event-fx [{::keys [config-ref] :as env} ev-id interceptors handler-fn]
-  {:pre [(map? env)
-         (keyword? ev-id)
-         (vector? interceptors)
-         (fn? handler-fn)]}
-  (swap! config-ref assoc-in [:events ev-id]
-    {:handler-fn handler-fn
-     :interceptors interceptors}))
-
-(defn reg-fx [{::keys [config-ref] :as env} fx-id handler-fn]
-  (swap! config-ref assoc-in [:fx fx-id] handler-fn))
-
-(defn form [defaults])
-
-(defn form-values [form])
-
-(defn form-reset! [form])

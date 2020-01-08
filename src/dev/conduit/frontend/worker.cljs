@@ -2,7 +2,7 @@
   (:require
     [clojure.string :as str]
     [goog.string :as gstr]
-    [shadow.experiments.grove-worker :as sg]
+    [shadow.experiments.grove.worker :as sg]
     [shadow.experiments.grove.db :as db]
     [shadow.experiments.grove.http-fx :as http-fx]
     [shadow.json :as json]
@@ -35,9 +35,26 @@
              (assoc ::m/articles-count articles-count)
              (db/merge-seq ::m/article articles [::m/home-articles]))}))
 
+(sg/reg-event-fx app-env :active-profile-loaded
+  []
+  (fn [{:keys [db] :as env} profile-ident {::m/keys [profile] :as result}]
+    ;; this is horrible .. should send out both requests at once and coordinate when both complete
+    ;; this should not be done sequentially
+    {:db (assoc db profile-ident (assoc profile :written-articles ::db/loading))
+     :http {:uri [api-base "/articles" {:author (db/ident-val profile-ident)}]
+            :on-success [:active-profile-articles-loaded profile-ident]}}))
+
+(sg/reg-event-fx app-env :active-profile-articles-loaded
+  []
+  (fn [{:keys [db] :as env} profile-ident {::m/keys [articles articles-count] :as result}]
+    {:db (-> db
+             (assoc-in [profile-ident :written-articles-count] articles-count)
+             (db/merge-seq ::m/article articles [profile-ident :written-articles]))}))
+
 (sg/reg-event-fx app-env ::m/route!
   []
   (fn [{:keys [db] :as env} token]
+    (tap> [::m/route! token env])
     (let [[main & more :as tokens] (str/split token #"/")
           db (assoc db :route-tokens tokens)]
       (case main
@@ -47,9 +64,20 @@
                          :active-article (db/make-ident ::m/article slug))})
 
         "profile"
-        (let [[username & more] more]
-          {:db (assoc db :active-page :profile
-                         :active-profile (db/make-ident ::m/user username))})
+        (let [[username & more] more
+
+              profile-ident
+              (db/make-ident ::m/user username)]
+
+          (-> {:db (assoc db :active-page :profile
+                             :active-profile profile-ident)}
+
+              (cond->
+                (not (get db profile-ident))
+                (-> (update :db assoc profile-ident ::db/loading)
+                    (assoc :http {:uri [api-base "/profiles" username]
+                                  :on-success [:active-profile-loaded profile-ident]})
+                    ))))
 
         ;; FIXME: should this always request articles? we might have some?
         "home"

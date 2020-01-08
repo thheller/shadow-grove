@@ -1,7 +1,7 @@
 (ns todomvc.split.main
   (:require
     [shadow.experiments.arborist :as sa]
-    [shadow.experiments.grove-main :as sg]
+    [shadow.experiments.grove :as sg]
     [todomvc.split.views :as views]
     ))
 

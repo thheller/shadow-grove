@@ -256,6 +256,7 @@
 (defmethod query-calc ::default [_ _ _ _ _]
   nil)
 
+;; FIXME: this tracking of ::loading is really annoying, should probably just throw instead?
 (defn- process-query-part
   [env db current result query-part]
   (cond
@@ -307,7 +308,23 @@
 
                 ;; {:some-prop [:some-other-ident 123]}
                 (ident? join-val)
-                (assoc! result join-key (query env db (get db join-val) join-attrs))
+                (let [val (get db join-val ::missing)]
+                  (cond
+                    (keyword-identical? ::missing val)
+                    (assoc! result join-key ::not-found)
+
+                    (keyword-identical? ::loading val)
+                    val
+
+                    ;; FIXME: check more possible vals?
+                    :else
+                    (let [query-val (query env db val join-attrs)]
+                      (cond
+                        (keyword-identical? ::loading query-val)
+                        query-val
+
+                        :else
+                        (assoc! result join-key query-val)))))
 
                 ;; {:some-prop [[:some-other-ident 123] [:some-other-ident 456]]}
                 (coll? join-val)
@@ -331,16 +348,33 @@
 
                 ;; non-normalized nested-map
                 (map? join-val)
-                (assoc! result join-key (query env db join-val join-attrs))
+                (let [query-val (query env db join-val join-attrs)]
+                  (cond
+                    (keyword-identical? query-val ::loading)
+                    query-val
+                    :else
+                    (assoc! result join-key query-val)))
 
                 :else
                 (throw (ex-info "don't know how to join" {:query-part query-part :join-val join-val :join-key join-key}))))
 
             ;; from root
             (ident? join-key)
-            (if-some [join-val (get db join-key)]
-              (assoc! result join-key (query env db join-val join-attrs))
-              result)
+            (let [join-val (get db join-key)]
+              (cond
+                (keyword-identical? ::loading join-val)
+                join-val
+
+                (nil? join-val)
+                result
+
+                :else
+                (let [query-val (query env db join-val join-attrs)]
+                  (cond
+                    (keyword-identical? ::loading query-val)
+                    query-val
+                    :else
+                    (assoc! result join-key query-val)))))
 
             :else
             (throw (ex-info "failed to join" {:query-part query-part})))))
@@ -394,3 +428,174 @@
 
     :else
     (throw (ex-info "don't know how to remove thing" {:thing thing}))))
+
+
+(deftype ObservedData [^:mutable keys-used data]
+  IDeref
+  (-deref [_]
+    (persistent! keys-used))
+
+  IMeta
+  (-meta [_]
+    (-meta data))
+
+  ;; map? predicate checks for this protocol
+  IMap
+  (-dissoc [coll k]
+    (throw (ex-info "observed data is read-only" {})))
+
+  ILookup
+  (-lookup [_ key]
+    (when (nil? key)
+      (throw (ex-info "cannot read nil key" {})))
+    (set! keys-used (conj! keys-used key))
+    (-lookup data key))
+
+  (-lookup [_ key default]
+    (when (nil? key)
+      (throw (ex-info "cannot read nil key" {})))
+    (set! keys-used (conj! keys-used key))
+    (-lookup data key default)))
+
+(defn observed [data]
+  (ObservedData. (transient #{}) data))
+
+(deftype TransactedData
+  [^not-native data
+   keys-new
+   keys-updated
+   keys-removed
+   ;; using a ref not a mutable local since it must apply to all created instances of this
+   ;; every "write" creates a new instance
+   completed-ref]
+
+  ;; useful for debugging purposes that want the actual data
+  IDeref
+  (-deref [_]
+    data)
+
+  IMeta
+  (-meta [_]
+    (-meta data))
+
+  ILookup
+  (-lookup [this key]
+    (.check-completed! this)
+    (-lookup data key))
+
+  (-lookup [this key default]
+    (.check-completed! this)
+    (-lookup data key default))
+
+  ICounted
+  (-count [this]
+    (.check-completed! this)
+    (-count data))
+
+  IMap
+  (-dissoc [this key]
+    (.check-completed! this)
+
+    (let [key-is-ident?
+          (ident? key)
+
+          next-data
+          (-> data
+              (cond->
+                key-is-ident?
+                (-> (-dissoc key)
+                    (update (coll-key key) disj key))))
+
+          next-removed
+          (-> keys-removed
+              (conj! key)
+              (cond->
+                key-is-ident?
+                (conj! (coll-key key))))]
+
+      (TransactedData.
+        next-data
+        keys-new
+        keys-updated
+        next-removed
+        completed-ref)))
+
+  IAssociative
+  (-assoc [this key value]
+    (.check-completed! this)
+
+    (when (nil? key)
+      (throw (ex-info "nil key not allowed" {:value value})))
+
+    ;; FIXME: should it really check each write if anything changed?
+    ;; FIXME: enforce that ident keys have a map value with ::ident key?
+    (let [prev-val
+          (-lookup data key ::not-found)
+
+          key-is-ident?
+          (ident? key)]
+
+      (if (identical? prev-val value)
+        this
+        (if (= ::not-found prev-val)
+          ;; new
+          (if-not key-is-ident?
+            ;; new non-ident key
+            (TransactedData.
+              (-assoc data key value)
+              (conj! keys-new key)
+              keys-updated
+              keys-removed
+              completed-ref)
+
+            ;; new ident
+            (TransactedData.
+              (-> data
+                  (-assoc key value)
+                  (update (coll-key key) set-conj key))
+              (conj! keys-new key)
+              (conj! keys-updated (coll-key key))
+              keys-removed
+              completed-ref))
+
+          ;; update, non-ident key
+          (if-not key-is-ident?
+            (TransactedData.
+              (-assoc data key value)
+              keys-new
+              (conj! keys-updated key)
+              keys-removed
+              completed-ref)
+
+            ;; FIXME: no need to track (ident-key key) since it should be present?
+            (TransactedData.
+              (-assoc data key value)
+              keys-new
+              (-> keys-updated
+                  (conj! key)
+                  ;; need to update the entity-type collection since some queries might change if one in the list changes
+                  ;; FIXME: this makes any update potentially expensive, maybe should leave this to the user?
+                  (conj! (coll-key key)))
+              keys-removed
+              completed-ref))
+          ))))
+
+  Object
+  (^clj check-completed! [this]
+    (when @completed-ref
+      (throw (ex-info "transaction concluded, don't hold on to db while in tx" {}))))
+
+  (commit! [_]
+    (vreset! completed-ref true)
+    {:data data
+     :keys-new (persistent! keys-new)
+     :keys-updated (persistent! keys-updated)
+     :keys-removed (persistent! keys-removed)}))
+
+(defn transacted [data]
+  (TransactedData.
+    data
+    (transient #{})
+    (transient #{})
+    (transient #{})
+    (volatile! false)))

@@ -4,7 +4,7 @@
   (:require
     [shadow.experiments.arborist :as sa :refer (<< defc)]
     [shadow.experiments.arborist.effects :as sfx]
-    [shadow.experiments.grove-main :as sg]
+    [shadow.experiments.grove :as sg]
     [todomvc.model :as m]))
 
 (defc ui-todo-item
@@ -27,9 +27,9 @@
    ::m/edit-start! sg/tx}
   [todo]
   [{::m/keys [completed? editing? todo-text] :as data}
-   (sg/query todo [::m/todo-text
-                   ::m/editing?
-                   ::m/completed?])]
+   (sg/query-ident todo [::m/todo-text
+                         ::m/editing?
+                         ::m/completed?])]
 
   (<< [:li {:class {:completed completed?
                     :editing editing?}}
@@ -49,7 +49,7 @@
 
 (defc ui-filter-select []
   [{::m/keys [current-filter]}
-   (sg/query [::m/current-filter])
+   (sg/query-root [::m/current-filter])
 
    filter-options
    [{:label "All" :value :all}
@@ -67,14 +67,14 @@
 
 (defc ui-todo-list []
   [{::m/keys [filtered-todos] :as query}
-   (sg/query [::m/filtered-todos])]
+   (sg/query-root [::m/filtered-todos])]
 
   (<< [:ul.todo-list (sa/render-seq filtered-todos identity ui-todo-item)])
   #_(sa/suspense
-    (<< [:ul.todo-list (sa/render-seq filtered-todos identity ui-todo-item)])
+      (<< [:ul.todo-list (sa/render-seq filtered-todos identity ui-todo-item)])
 
-    {:fallback (<< [:div "Loading ..."])
-     :timeout 100}))
+      {:fallback (<< [:div "Loading ..."])
+       :timeout 100}))
 
 (defc ui-root
   {::m/set-filter! sg/tx
@@ -96,10 +96,11 @@
 
   []
   [{::m/keys [num-total num-active num-completed] :as query}
-   (sg/query [::m/editing
-              ::m/num-total
-              ::m/num-active
-              ::m/num-completed])]
+   (sg/query-root
+     [::m/editing
+      ::m/num-total
+      ::m/num-active
+      ::m/num-completed])]
 
   (<< [:div {:on-click [::m/shuffle!]} "shuffle todos"]
       [:header.header

@@ -67,14 +67,15 @@
     {:entries []}
     :main
     {:init-fn conduit.frontend.main/init
-     :preloads [#_shadow.experiments.grove.dev-support
-                shadow.remote.runtime.cljs.browser]
+     :preloads [#_shadow.experiments.grove.dev-support]
      :depends-on #{:shared}}
     :worker
     {:init-fn conduit.frontend.worker/init
      :web-worker true
      :depends-on #{:shared}}}
-   :devtools {:browser-inject :main}}
+   :devtools
+   {:browser-inject :main
+    :preloads [shadow.remote.runtime.cljs.browser]}}
 
   :bench-db
   {:target :node-script

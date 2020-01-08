@@ -2,7 +2,7 @@
   (:require
     [clojure.string :as str]
     [shadow.experiments.arborist :as sa]
-    [shadow.experiments.grove-main :as sg :refer (defc <<)]
+    [shadow.experiments.grove :as sg :refer (defc <<)]
     [conduit.model :as m]
     ))
 
@@ -48,7 +48,7 @@
      favoritesCount
      favorited
      slug] :as data}
-   (sg/query article-ident
+   (sg/query-ident article-ident
      [::m/slug
       ::m/user-is-article-author?
       ::m/user-can-follow-author?
@@ -95,7 +95,7 @@
                [:span.counter "(" favoritesCount ")"]]]))]))
 
 (defc articles-preview [article-ident]
-  [article-data (sg/query article-ident
+  [article-data (sg/query-ident article-ident
                   [::m/description
                    ::m/user-can-favorite?
                    author-join])]
@@ -136,7 +136,7 @@
 ;;
 (defc ui-header []
   [{:keys [active-page user]}
-   (sg/query [:user :active-page])
+   (sg/query-root [:user :active-page])
 
    main-suspense
    (sg/env-watch ::sg/suspense-keys [::main])]
@@ -184,65 +184,67 @@
 ;; -- Home --------------------------------------------------------------------
 ;;
 (defc ui-home []
-  [{::m/keys [home-articles articles-count]
-    :keys [filter tags user] :as data}
-   (sg/query
+  [data
+   (sg/query-root
      [:filter
       :tags
       ::m/home-articles
       ::m/articles-count
       :user])]
 
-  (<< [:div.home-page
-       [:div.container.page
-        [:div.row
-         [:div.col-md-9
-          [:div.feed-toggle
-           [:ul.nav.nav-pills.outline-active
-            (when-not (empty? user)
-              (<< [:li.nav-item
-                   [:a.nav-link {:href (url-for :home)
-                                 :class (when (:feed filter) "active")
-                                 :on-click [:get-feed-articles {:offset 0 :limit 10}]} "Your Feed"]]))
-            [:li.nav-item
-             [:a.nav-link {:href (url-for :home)
-                           :class (when-not (or (:tag filter) (:feed filter)) "active")
-                           :on-click [:get-articles {:offset 0 :limit 10}]} "Global Feed"]]
-            (when (:tag filter)
-              (<< [:li.nav-item
-                   [:a.nav-link.active
-                    [:i.ion-pound] (str " " (:tag filter))]]))]]
+  (let [{:keys [filter tags user]
+         ::m/keys [home-articles articles-count]}
+        data]
+    (<< [:div.home-page
+         [:div.container.page
+          [:div.row
+           [:div.col-md-9
+            [:div.feed-toggle
+             [:ul.nav.nav-pills.outline-active
+              (when-not (empty? user)
+                (<< [:li.nav-item
+                     [:a.nav-link {:href (url-for :home)
+                                   :class (when (:feed filter) "active")
+                                   :on-click [:get-feed-articles {:offset 0 :limit 10}]} "Your Feed"]]))
+              [:li.nav-item
+               [:a.nav-link {:href (url-for :home)
+                             :class (when-not (or (:tag filter) (:feed filter)) "active")
+                             :on-click [:get-articles {:offset 0 :limit 10}]} "Global Feed"]]
+              (when (:tag filter)
+                (<< [:li.nav-item
+                     [:a.nav-link.active
+                      [:i.ion-pound] (str " " (:tag filter))]]))]]
 
-          (sa/render-seq home-articles identity articles-preview)
+            (sa/render-seq home-articles identity articles-preview)
 
-          (when-not (< articles-count 10)
-            (<< [:ul.pagination
-                 (sa/render-seq
-                   (range (/ articles-count 10))
-                   identity
-                   (fn [offset]
-                     (<< [:li.page-item
-                          {:class (when (= (* offset 10) (:offset filter)) "active")
-                           :on-click [:get-articles (if (:tag filter)
-                                                      {:offset (* offset 10)
-                                                       :tag (:tag filter)
-                                                       :limit 10}
-                                                      {:offset (* offset 10)
-                                                       :limit 10})]}
-                          [:a.page-link {:href (url-for :home)} (+ 1 offset)]])))]))]
+            (when-not (< articles-count 10)
+              (<< [:ul.pagination
+                   (sa/render-seq
+                     (range (/ articles-count 10))
+                     identity
+                     (fn [offset]
+                       (<< [:li.page-item
+                            {:class (when (= (* offset 10) (:offset filter)) "active")
+                             :on-click [:get-articles (if (:tag filter)
+                                                        {:offset (* offset 10)
+                                                         :tag (:tag filter)
+                                                         :limit 10}
+                                                        {:offset (* offset 10)
+                                                         :limit 10})]}
+                            [:a.page-link {:href (url-for :home)} (+ 1 offset)]])))]))]
 
-         [:div.col-md-3
-          [:div.sidebar
-           [:p "Popular Tags"]
-           [:div.tag-list
-            (sa/render-seq tags identity
-              (fn [tag]
-                (<< [:a.tag-pill.tag-default
-                     {:href (url-for :home)
-                      :on-click [:get-articles {:tag tag
-                                                :limit 10
-                                                :offset 0}]}
-                     tag])))]]]]]]))
+           [:div.col-md-3
+            [:div.sidebar
+             [:p "Popular Tags"]
+             [:div.tag-list
+              (sa/render-seq tags identity
+                (fn [tag]
+                  (<< [:a.tag-pill.tag-default
+                       {:href (url-for :home)
+                        :on-click [:get-articles {:tag tag
+                                                  :limit 10
+                                                  :offset 0}]}
+                       tag])))]]]]]])))
 
 (defn ui-page-home []
   (<< [:div.home-page
@@ -251,11 +253,11 @@
          [:h1.logo-font "conduit"]
          [:p "A place to share your knowledge."]]]]
 
-    (sg/suspense
-      (ui-home)
-      {:fallback "Loading ..."
-       :key ::home
-       :timeout 500})))
+      (sg/suspense
+        {:fallback "Loading Articles ..."
+         :key ::home
+         :timeout 500}
+        (ui-home))))
 
 ;; -- Login -------------------------------------------------------------------
 ;;
@@ -267,7 +269,7 @@
    (sg/form-values form)
 
    {:keys [errors]}
-   (sg/query [:errors])
+   (sg/query-root [:errors])
 
    :login-user
    (fn [env e]
@@ -339,42 +341,43 @@
 ;; -- Profile -----------------------------------------------------------------
 ;;
 (defc ui-page-profile []
-  [{profile :active-profile}
-   (sg/query [{:active-profile
-               [:written-articles
-                :is-own-profile?
-                :user-is-following?
-                :favorites]}])
+  [{profile :active-profile :as data}
+   (sg/query-root
+     [{:active-profile
+       [:written-articles
+        :is-own-profile?
+        :user-is-following?
+        :favorites]}])]
 
-   {:keys [username image bio user-is-following?]}
-   profile]
+  (let [{:keys [username image bio user-is-following?]} profile]
 
-  (<< [:div.profile-page
-       [:div.user-info
-        [:div.container
-         [:div.row
-          [:div.col-xs-12.col-md-10.offset-md-1
-           [:img.user-img {:src image}]
-           [:h4 username]
-           [:p bio]
-           (if (:is-own-profile? profile)
-             (<< [:a.btn.btn-sm.btn-outline-secondary.action-btn {:href (url-for :settings)}
-                  [:i.ion-gear-a] " Edit Profile Settings"])
-             (<< [:button.btn.btn-sm.action-btn.btn-outline-secondary {:on-click [:toggle-follow-user username]}
-                  [:i {:class (if user-is-following? "ion-minus-round" "ion-plus-round")}]
-                  [:span (if user-is-following? (str " Unfollow " username) (str " Follow " username))]]))]]]]
-       [:div.container
-        [:div.row
-         [:div.col-xs-12.col-md-10.offset-md-1
-          [:div.articles-toggle
-           [:ul.nav.nav-pills.outline-active
-            [:li.nav-item
-             [:a.nav-link {:href (url-for :profile username) :class (when (seq (:articles profile)) "active")} "My Articles"]]
-            [:li.nav-item
-             [:a.nav-link {:href (url-for :favorited username) :class (when (seq (:favorites profile)) "active")} "Favorited Articles"]]]]
+    (<< [:div (pr-str data)]
+        [:div.profile-page
+         [:div.user-info
+          [:div.container
+           [:div.row
+            [:div.col-xs-12.col-md-10.offset-md-1
+             [:img.user-img {:src image}]
+             [:h4 username]
+             [:p bio]
+             (if (:is-own-profile? profile)
+               (<< [:a.btn.btn-sm.btn-outline-secondary.action-btn {:href (url-for :settings)}
+                    [:i.ion-gear-a] " Edit Profile Settings"])
+               (<< [:button.btn.btn-sm.action-btn.btn-outline-secondary {:on-click [:toggle-follow-user username]}
+                    [:i {:class (if user-is-following? "ion-minus-round" "ion-plus-round")}]
+                    [:span (if user-is-following? (str " Unfollow " username) (str " Follow " username))]]))]]]]
+         [:div.container
+          [:div.row
+           [:div.col-xs-12.col-md-10.offset-md-1
+            [:div.articles-toggle
+             [:ul.nav.nav-pills.outline-active
+              [:li.nav-item
+               [:a.nav-link {:href (url-for :profile username) :class (when (seq (:articles profile)) "active")} "My Articles"]]
+              [:li.nav-item
+               [:a.nav-link {:href (url-for :favorited username) :class (when (seq (:favorites profile)) "active")} "Favorited Articles"]]]]
 
-          "FIXME: profile articles"
-          #_(articles-list (:articles profile))]]]]))
+            "FIXME: profile articles"
+            #_(articles-list (:articles profile))]]]])))
 
 ;; -- Settings ----------------------------------------------------------------
 ;;
@@ -480,7 +483,7 @@
 
 (defc ui-comment [comment]
   [{:keys [id createdAt body author user-is-comment-author?]}
-   (sg/query comment
+   (sg/query-ident comment
      [:id
       :createdAt
       :body
@@ -512,10 +515,10 @@
      (sg/form-reset! form))
 
    article-data
-   (sg/query article [:title :body :comments])
+   (sg/query-ident article [:title :body :comments])
 
    {:keys [user]}
-   (sg/query [:user])]
+   (sg/query-root [:user])]
 
   (<< [:div.article-page
        [:div.banner
@@ -556,13 +559,16 @@
           ]]]]))
 
 (defc ui-page-article []
-  [{:keys [active-article]} (sg/query [:active-article])]
+  [{:keys [active-article]} (sg/query-root [:active-article])]
   (ui-article active-article))
 
 (defc ui-root []
-  [{:keys [active-page]} (sg/query [:active-page])]
+  [{:keys [active-page]} (sg/query-root [:active-page])]
   (<< (ui-header)
       (sg/suspense
+        {:fallback "Loading ..."
+         :key ::main
+         :timeout 500}
         (case active-page
           :home (ui-page-home)
           :login (ui-login)
@@ -571,10 +577,7 @@
           :settings (ui-settings)
           :editor (ui-editor)
           :article (ui-page-article)
-          (ui-page-home))
-        {:fallback "Loading ..."
-         :key ::main
-         :timeout 500})
+          (ui-page-home)))
       (ui-footer)))
 
 
