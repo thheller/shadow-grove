@@ -67,7 +67,7 @@
     {:entries []}
     :main
     {:init-fn conduit.frontend.main/init
-     :preloads [#_shadow.experiments.grove.dev-support]
+     :preloads [shadow.experiments.grove.dev-support]
      :depends-on #{:shared}}
     :worker
     {:init-fn conduit.frontend.worker/init

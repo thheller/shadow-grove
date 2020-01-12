@@ -6,26 +6,36 @@
     [cognitect.transit :as transit]
     [shadow.experiments.grove.db :as db]))
 
+(defn set-conj [x y]
+  (if (nil? x) #{y} (conj x y)))
+
+(defn vec-conj [x y]
+  (if (nil? x) [y] (conj x y)))
+
 (defn send-to-main [{::keys [transit-str] :as env} msg]
   ;; (js/console.log "main-write" env msg)
   (js/self.postMessage (transit-str msg)))
-
 
 ;; FIXME: very inefficient, maybe worth maintaining an index
 (defn invalidate-queries! [active-queries keys-to-invalidate]
   (reduce-kv
     (fn [_ query-id ^ActiveQuery query]
-      (run!
-        (fn [key]
-          (when (.affected-by-key? query key)
-            (.refresh! query)))
-        keys-to-invalidate)
+      ;; don't need to check if already pending
+      (when-not (.-pending? query)
+        (run!
+          (fn [key]
+            (when (.affected-by-key? query key)
+              (.refresh! query)))
+          keys-to-invalidate))
       nil)
     nil
     active-queries))
 
+(defn invalidate-keys! [{::keys [active-queries-ref invalidate-keys-ref] :as env}]
+  (invalidate-queries! @active-queries-ref @invalidate-keys-ref))
+
 (defn tx*
-  [{::keys [config-ref data-ref active-queries-ref] :as env}
+  [{::keys [config-ref data-ref invalidate-keys-ref] :as env}
    [ev-id & params :as tx]]
   {:pre [(vector? tx)
          (keyword? ev-id)]}
@@ -44,7 +54,7 @@
             tx-env
             (assoc env :db tx-db)
 
-            {tx-after :db :as result}
+            {^clj tx-after :db :as result}
             (apply handler-fn tx-env params)]
 
         ;; FIXME: move all of this out to interceptor chain. including DB stuff
@@ -83,7 +93,13 @@
             (reset! data-ref data)
 
             (when-not (identical? before data)
-              (invalidate-queries! @active-queries-ref keys-to-invalidate))
+              ;; instead of invalidating queries for every processed tx
+              ;; they are batched to update at most once in a certain interval
+              ;; FIXME: make this configurable, benchmark
+              (when (empty? @invalidate-keys-ref)
+                (js/setTimeout #(invalidate-keys! env) 10))
+
+              (swap! invalidate-keys-ref set/union keys-to-invalidate))
 
             data))))))
 
@@ -161,6 +177,36 @@
   (affected-by-key? [this key]
     (contains? read-keys key)))
 
+(defmulti worker-message (fn [env msg] (first msg)) :default ::default)
+
+(defmethod worker-message ::default [env msg]
+  (js/console.warn "unhandled worker msg" msg))
+
+(defmethod worker-message :query-init
+  [{::keys [active-queries-ref] :as env} [_ query-id query opts]]
+  (let [q (ActiveQuery. env query-id query nil nil true false)]
+    (swap! active-queries-ref assoc query-id q)
+    (.do-read! q)))
+
+(defmethod worker-message :query-destroy
+  [{::keys [active-queries-ref] :as env} [_ query-id]]
+  (when-some [query (get @active-queries-ref query-id)]
+    (set! (.-destroyed? query) true)
+    (swap! active-queries-ref dissoc query-id)))
+
+(defmethod worker-message :tx [env [_ tx]]
+  (tx* env tx))
+
+(defmethod worker-message :stream-init
+  [{::keys [active-streams-ref] :as env} [_ stream-id sub-id]]
+  (let [{:keys [items] :as stream-info} (get @active-streams-ref stream-id)]
+    (if-not stream-info
+      (js/console.warn "stream not found, can't init" stream-id)
+      (do (swap! active-streams-ref update-in [stream-id :subs] set-conj sub-id)
+          (send-to-main env
+            [:stream-info stream-id sub-id {:item-count (count items)}]
+            )))))
+
 (defn init [env]
   (let [tr (transit/reader :json)
         tw (transit/writer :json)
@@ -176,9 +222,14 @@
         active-queries-ref
         (atom {})
 
+        active-streams-ref
+        (atom {})
+
         env
         (assoc env
           ::active-queries-ref active-queries-ref
+          ::active-streams-ref active-streams-ref
+          ::invalidate-keys-ref (atom #{})
           ::transit-read transit-read
           ::transit-str transit-str)]
 
@@ -187,29 +238,26 @@
           ;; FIXME: tell main?
           (js/console.warn "unhandled error" e)))
 
+    (reg-fx env :stream-add
+      (fn [{:keys [] :as env} items]
+        (reduce
+          (fn [_ [stream-id stream-item]]
+            (if-not (get @active-streams-ref stream-id)
+              (js/console.warn "stream not found, can't add" stream-id stream-item)
+              (do (swap! active-streams-ref update-in [stream-id :items] vec-conj stream-item)
+                  (let [subs (get-in @active-streams-ref [stream-id :subs])]
+                    (reduce
+                      (fn [_ sub-id]
+                        (send-to-main env [:stream-add sub-id stream-id stream-item]))
+                      nil
+                      subs)))))
+          nil
+          items)))
+
     (js/self.addEventListener "message"
       (fn [e]
-        (let [[op & args :as msg] (transit-read (.-data e))]
-          ;; (js/console.log "worker-read" op msg)
-          (case op
-            :query-init
-            (let [[query-id query] args
-                  q (ActiveQuery. env query-id query nil nil true false)]
-              (swap! active-queries-ref assoc query-id q)
-              (.do-read! q))
-
-            :query-destroy
-            (let [[query-id] args]
-              (when-some [query (get @active-queries-ref query-id)]
-                (set! (.-destroyed? query) true)
-                (swap! active-queries-ref dissoc query-id)))
-
-            :tx
-            (let [[tx] args]
-              ;; (js/console.log "worker-tx" (first tx) tx)
-              (tx* env tx))
-
-            (js/console.warn "unhandled worker msg" msg)))))
+        (let [msg (transit-read (.-data e))]
+          (worker-message env msg))))
 
     (js/postMessage (transit-str [:worker-ready]))
 

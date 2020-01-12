@@ -22,45 +22,48 @@
   (transact! [this env tx]
     (send-to-worker worker transit-str [:tx tx])))
 
-(defn init [env worker]
-  (let [tr (transit/reader :json)
-        tw (transit/writer :json)
+(defn init
+  ([env worker]
+   (init env worker ::gp/query-engine))
+  ([env worker engine-key]
+   (let [tr (transit/reader :json)
+         tw (transit/writer :json)
 
-        transit-read
-        (fn transit-read [data]
-          (transit/read tr data))
+         transit-read
+         (fn transit-read [data]
+           (transit/read tr data))
 
-        transit-str
-        (fn transit-str [obj]
-          (transit/write tw obj))
+         transit-str
+         (fn transit-str [obj]
+           (transit/write tw obj))
 
-        active-queries-ref
-        (atom {})
+         active-queries-ref
+         (atom {})
 
-        env
-        (assoc env
-          ::worker worker
-          ::gp/query-engine (->WorkerEngine worker active-queries-ref transit-str)
-          ::transit-read transit-read
-          ::transit-str transit-str)]
+         env
+         (assoc env
+           ::worker worker
+           engine-key (->WorkerEngine worker active-queries-ref transit-str)
+           ::transit-read transit-read
+           ::transit-str transit-str)]
 
-    (.addEventListener worker "message"
-      (fn [e]
-        (js/performance.mark "transit-read-start")
-        (let [msg (transit-read (.-data e))]
-          (js/performance.measure "transit-read" "transit-read-start")
-          (let [[op & args] msg]
+     (.addEventListener worker "message"
+       (fn [e]
+         (js/performance.mark "transit-read-start")
+         (let [msg (transit-read (.-data e))]
+           (js/performance.measure "transit-read" "transit-read-start")
+           (let [[op & args] msg]
 
-            ;; (js/console.log "main read took" (- t start))
-            (case op
-              :worker-ready
-              (js/console.log "worker is ready")
+             ;; (js/console.log "main read took" (- t start))
+             (case op
+               :worker-ready
+               (js/console.log "worker is ready")
 
-              :query-result
-              (let [[query-id result] args
-                    ^function callback (get @active-queries-ref query-id)]
-                (when (some? callback)
-                  (callback result)))
+               :query-result
+               (let [[query-id result] args
+                     ^function callback (get @active-queries-ref query-id)]
+                 (when (some? callback)
+                   (callback result)))
 
-              (js/console.warn "unhandled main msg" op msg))))))
-    env))
+               (js/console.warn "unhandled main msg" op msg))))))
+     env)))

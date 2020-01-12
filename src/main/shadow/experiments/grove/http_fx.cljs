@@ -266,12 +266,10 @@
       env)))
 
 (comment
-  (handler
-    (-> {:transact!
-         (fn [tx]
-           (js/console.log "fake fx" tx))}
-        (with-default-formats))
+  (let [handler (make-handler {})
+        env {:transact! (fn [tx] (js/console.log "fake fx" tx))}]
 
-    {:uri ["foo" {:id 1}]
-     :on-error [::error!]
-     :on-success [::success!]}))
+    (handler env
+      {:request ["foo" {:id 1}]
+       :on-error [::error!]
+       :on-success [::success!]})))

@@ -23,12 +23,12 @@
                          (str x))))
                 (str/join "/"))))
 
-(defc tags-list [{:keys [tags]}]
-  []
-  (<< [:ul.tag-list
-       (sa/render-seq tags identity
-         (fn [tag]
-           (<< [:li.tag-default.tag-pill.tag-outline tag])))]))
+(defn tags-list [tags]
+  (when (seq tags)
+    (<< [:ul.tag-list
+         (sa/render-seq tags identity
+           (fn [tag]
+             (<< [:li.tag-default.tag-pill.tag-outline tag])))])))
 
 (def author-join {::m/author [::m/username ::m/image]})
 
@@ -57,7 +57,7 @@
 
    author-name (:username author)]
 
-  ;; (js/console.log "data" data)
+  (js/console.log "data" data)
 
   (<< [:div.article-meta
        [:a {:href (url-for :profile author-name)}
@@ -122,7 +122,7 @@
           [:h1 title]
           [:p description]
           [:span "Read more ..."]
-          (tags-list {:tags tag-list})]])))
+          (tags-list tag-list)]])))
 
 (defn errors-list
   [errors]
@@ -254,7 +254,7 @@
          [:p "A place to share your knowledge."]]]]
 
       (sg/suspense
-        {:fallback "Loading Articles ..."
+        {:fallback (<< [:div.container "Loading Articles ..."])
          :key ::home
          :timeout 500}
         (ui-home))))
@@ -505,50 +505,63 @@
 
 ;; -- Article -----------------------------------------------------------------
 ;;
-(defc ui-article [article]
-  [form (sg/form {})
+
+(defc ui-article-comment-form [article]
+  [{::m/keys [current-user]}
+   (sg/query-ident article
+     [{::m/current-user [::m/image]}])
+
+   form (sg/form {})
 
    :post-comment
    (fn [env event]
      (.preventDefault event)
      (sg/run-tx env [:post-comment @form])
-     (sg/form-reset! form))
+     (sg/form-reset! form))]
 
-   article-data
-   (sg/query-ident article [:title :body :comments])
+  (<< [:form.card.comment-form
+       [:div.card-block
+        [:textarea.form-control
+         {:placeholder "Write a comment..."
+          :rows "3"
+          ::sg/form-field [form :body]}]]
+       [:div.card-footer
+        [:img.comment-author-img {:src (::m/image current-user)}]
+        [:button.btn.btn-sm.btn-primary
+         {:on-click [:post-comment]} "Post Comment"]]]))
 
-   {:keys [user]}
-   (sg/query-root [:user])]
+(defc ui-article [article]
+  [{::m/keys [user-is-author? user-can-comment?] :as article-data}
+   (sg/query-ident article
+     [::m/title
+      ::m/body
+      ::m/comments
+      ::m/user-is-author?
+      {::m/current-user
+       [::m/image]}
+      ::m/user-can-comment?])]
 
   (<< [:div.article-page
        [:div.banner
         [:div.container
-         [:h1 (:title article-data)]
+         [:h1 (::m/title article-data)]
          (article-meta article)]]
 
        [:div.container.page
         [:div.row.article-content
          [:div.col-md-12
-          [:p (:body article-data)]]]
-        (tags-list {:tags (:tagList article-data)})
+          [:p (::m/body article-data)]]]
+        (tags-list (::m/tag-list article-data))
         [:hr]
         [:div.article-actions
          (article-meta article)]
         [:div.row
          [:div.col-xs-12.col-md-8.offset-md-2
-          #_(when (:comments errors)
-              (errors-list {:errors (:comments errors)}))
-          (if-not (empty? user)
-            (<< [:form.card.comment-form
-                 [:div.card-block
-                  [:textarea.form-control
-                   {:placeholder "Write a comment..."
-                    :rows "3"
-                    ::sg/form-field [form :body]}]]
-                 [:div.card-footer
-                  [:img.comment-author-img {:src (:image user)}]
-                  [:button.btn.btn-sm.btn-primary
-                   {:on-click [:post-comment]} "Post Comment"]]])
+          (cond
+            user-can-comment?
+            (ui-article-comment-form article)
+
+            (not user-is-author?)
             (<< [:p
                  [:a {:href (url-for :register)} "Sign up"]
                  " or "

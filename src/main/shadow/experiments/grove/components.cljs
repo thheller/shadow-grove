@@ -8,6 +8,11 @@
     [shadow.experiments.arborist :as sa]
     [shadow.experiments.grove.protocols :as gp]))
 
+(def ^{:tag boolean
+       :jsdoc ["@define {boolean}"]}
+  DEBUG
+  (js/goog.define "shadow.experiments.grove.components.DEBUG" js/goog.DEBUG))
+
 ;; this file is an exercise in writing the least idiomatic clojure code possible
 ;; shield your eyes and beware!
 
@@ -96,10 +101,16 @@
 
   p/IManageNodes
   (dom-first [this]
-    (p/dom-first root))
+    (if DEBUG
+      (.-marker-before this)
+      (p/dom-first root)))
 
   (dom-insert [this parent anchor]
-    (p/dom-insert root parent anchor))
+    (when DEBUG
+      (.insertBefore parent (.-marker-before this) anchor))
+    (p/dom-insert root parent anchor)
+    (when DEBUG
+      (.insertBefore parent (.-marker-after this) anchor)))
 
   p/IUpdatable
   (supports? [this next]
@@ -152,6 +163,9 @@
   p/IDestructible
   (destroy! [this]
     (.unschedule! this)
+    (when DEBUG
+      (.remove (.-marker-before this))
+      (.remove (.-marker-after this)))
     (set! destroyed? true)
     (run!
       (fn [hook]
@@ -198,6 +212,16 @@
       (gp/perf-start! this)
 
       (set! component-env child-env)
+
+      ;; marks component boundaries in dev mode for easier inspect
+      (when DEBUG
+        (set! (.-marker-before this)
+          (doto (js/document.createComment (str "component: " (.-component-name config)))
+            (set! -shadow$instance this)))
+        (set! (.-marker-after this)
+          (doto (js/document.createComment (str "/component: " (.-component-name config)))
+            (set! -shadow$instance this))))
+
       (set! root (common/managed-root child-env nil nil))
       (set! current-idx (int 0))
       (set! hooks (js/Array. (alength (.-hooks config))))
@@ -568,7 +592,8 @@
   (hook-ready? [this]
     true)
   (hook-value [this]
-    (throw (ex-info "not supposed to access this directly?" {})))
+    ;; only accessed by debugging aids, code can't actually reference this
+    event-id)
   (hook-update! [this]
     ;; can't affect anything else since nothing can refer to it directly
     false)

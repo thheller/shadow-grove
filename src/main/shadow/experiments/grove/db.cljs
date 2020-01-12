@@ -165,13 +165,18 @@
     #{y}
     (conj x y)))
 
+(defn merge-or-replace [left right]
+  (if (keyword-identical? ::loading left)
+    right
+    (merge left right)))
+
 (defn- merge-imports [data imports]
   (reduce
     (fn [data [ident item]]
       (-> data
           ;; build a :foo #{ident ident ...} set because of the flat structure
           (update (coll-key ident) set-conj ident)
-          (update ident merge item)))
+          (update ident merge-or-replace item)))
     data
     imports))
 

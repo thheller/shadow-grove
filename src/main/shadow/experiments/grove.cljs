@@ -106,8 +106,11 @@
 
   gp/IBuildHook
   (hook-build [this c i]
-    (let [{::gp/keys [query-engine] :as env} (comp/get-env c)]
-      (assert query-engine "no query engine in env")
+    ;; support multiple query engines by allowing queries to supply which key to use
+    (let [env (comp/get-env c)
+          engine-key  (:engine config ::gp/query-engine)
+          query-engine (get env engine-key)]
+      (assert query-engine (str "no query engine in env for key " engine-key))
       (QueryHook. ident query config c i env query-engine (make-query-id) false nil)))
 
   gp/IHook
@@ -326,23 +329,47 @@
     ;; if displaying managed and supported, just sync
     ;; if displaying managed and not supported, start rendering in background and swap when ready
     ;; when rendering in background display fallback after timeout?
-    (when (or offscreen timeout)
-      (throw (ex-info "syncing while not even finished yet" {:this this :offscreen offscreen :timeout timeout})))
 
-    (let [next (.-vnode next)]
-      (set! vnode next)
-      (set! opts (.-opts next))
+    (set! vnode (.-vnode next))
+    (set! opts (.-opts next))
 
-      (if (ap/supports? display next)
-        (ap/dom-sync! display next)
-        (let [new (ap/as-managed next child-env)]
-          (if (empty? suspend-set)
-            (do (common/fragment-replace display new)
-                (set! display new))
-            (do (set! offscreen new)
-                (.start-offscreen! this)
-                (.schedule-timeout! this)
-                ))))))
+    (cond
+      ;; offscreen update
+      (and offscreen (ap/supports? offscreen vnode))
+      (ap/dom-sync! offscreen vnode)
+
+      ;; offscreen swap
+      ;; if new offscreen does not suspend immediately replace display placeholder
+      ;; otherwise keep offscreen
+      offscreen
+      (do (set! suspend-set #{})
+          (let [next-managed (ap/as-managed vnode child-env)]
+            ;; destroy current offscreen immediately
+            (ap/destroy! offscreen)
+            (set! offscreen next-managed)
+
+            ;; if not immediately suspended immediately swap
+            ;; otherwise continue offscreen
+            ;; naming of these helper fns doesn't quite match their intent
+            ;; but saves duplicating code
+            ;; FIXME: maybe clean up a bit
+            (if (empty? suspend-set)
+              (.maybe-swap! this)
+              (.start-offscreen! this))))
+
+      ;; display supports updating, just update
+      (ap/supports? display vnode)
+      (ap/dom-sync! display vnode)
+
+      :else ;; replace display and maybe start offscreen again
+      (let [new (ap/as-managed vnode child-env)]
+        (if (empty? suspend-set)
+          (do (common/fragment-replace display new)
+              (set! display new))
+          (do (set! offscreen new)
+              (.start-offscreen! this)
+              (.schedule-timeout! this)
+              )))))
 
   ap/IManageNodes
   (dom-insert [this parent anchor]
@@ -437,3 +464,4 @@
 (defn suspense [opts vnode]
   (SuspenseRootNode. opts vnode))
 
+(defn stream [stream-id opts item-fn])

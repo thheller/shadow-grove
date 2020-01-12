@@ -45,6 +45,11 @@
                (db/merge-seq ::m/article articles [profile-ident :written-articles]))
        })))
 
+(sg/reg-event-fx app-env :active-article-loaded
+  []
+  (fn [{:keys [db] :as env} article-ident {::m/keys [article] :as result}]
+    {:db (db/add db ::m/article article)}))
+
 (sg/reg-event-fx app-env ::m/route!
   []
   (fn [{:keys [db] :as env} token]
@@ -52,9 +57,18 @@
           db (assoc db :route-tokens tokens)]
       (case main
         "article"
-        (let [[slug & more] more]
-          {:db (assoc db :active-page :article
-                         :active-article (db/make-ident ::m/article slug))})
+        (let [[slug & more] more
+              article-ident (db/make-ident ::m/article slug)]
+          (-> {:db (assoc db :active-page :article
+                             :active-article article-ident)}
+
+              (cond->
+                (not (get db article-ident))
+                (-> (update :db assoc article-ident ::db/loading)
+                    (assoc :conduit-api
+                           {:request ["/articles" slug]
+                            :on-success [:active-article-loaded article-ident]}))
+                )))
 
         "profile"
         (let [[username & more] more
