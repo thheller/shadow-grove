@@ -34,7 +34,7 @@
      :attrs attrs
      :joins joins}))
 
-(defn configure [spec]
+(defn parse-schema [spec]
   (reduce-kv
     (fn [schema key {:keys [type] :as config}]
       (cond
@@ -46,29 +46,36 @@
     {:entities {}}
     spec))
 
+(defn configure [init-db spec]
+  ;; FIXME: should this use a special key instead of meta?
+  (let [schema (parse-schema spec)
+        m {::schema schema
+           ::ident-types (set (keys (:entities schema)))}]
+    (with-meta init-db m)))
+
 (defn make-ident [type id]
   [type id]
-  #_ (p/Ident. type id nil))
+  #_(p/Ident. type id nil))
 
 (defn ident? [thing]
   (and (vector? thing)
        (= (count thing) 2)
        (keyword? (first thing)))
-  #_ (instance? p/Ident thing))
+  #_(instance? p/Ident thing))
 
 (defn ident-key [^p/Ident thing]
   {:pre [(ident? thing)]}
   (first thing)
-  #_ (.-entity-type thing))
+  #_(.-entity-type thing))
 
-(defn coll-key [^p/Ident thing]
+(defn coll-key [thing]
   {:pre [(ident? thing)]}
   [::all (ident-key thing)])
 
 (defn ident-val [^p/Ident thing]
   {:pre [(ident? thing)]}
   (nth thing 1)
-  #_ (.-id thing))
+  #_(.-id thing))
 
 (defn- normalize* [imports schema entity-type item]
   (let [{:keys [id-attr id-pred joins] :as ent-config}
@@ -537,14 +544,18 @@
     (let [prev-val
           (-lookup data key ::not-found)
 
-          key-is-ident?
-          (ident? key)]
+          ;; FIXME: this should only be checking the key
+          ;; but since using vectors as ident we can't tell the difference from
+          ;; [::all :some.app.model/thing]
+          is-ident-update?
+          (and (ident? key)
+               (contains? (::ident-types (meta data)) (ident-key key)))]
 
       (if (identical? prev-val value)
         this
         (if (= ::not-found prev-val)
           ;; new
-          (if-not key-is-ident?
+          (if-not is-ident-update?
             ;; new non-ident key
             (TransactedData.
               (-assoc data key value)
@@ -564,7 +575,7 @@
               completed-ref))
 
           ;; update, non-ident key
-          (if-not key-is-ident?
+          (if-not is-ident-update?
             (TransactedData.
               (-assoc data key value)
               keys-new

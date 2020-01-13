@@ -4,7 +4,8 @@
   (:require
     [clojure.set :as set]
     [cognitect.transit :as transit]
-    [shadow.experiments.grove.db :as db]))
+    [shadow.experiments.grove.db :as db])
+  (:import [goog.structs CircularBuffer]))
 
 (defn set-conj [x y]
   (if (nil? x) #{y} (conj x y)))
@@ -18,6 +19,7 @@
 
 ;; FIXME: very inefficient, maybe worth maintaining an index
 (defn invalidate-queries! [active-queries keys-to-invalidate]
+  (js/console.log "invalidating queries" keys-to-invalidate)
   (reduce-kv
     (fn [_ query-id ^ActiveQuery query]
       ;; don't need to check if already pending
@@ -25,6 +27,9 @@
         (run!
           (fn [key]
             (when (.affected-by-key? query key)
+              ;; FIXME: should this instead collect all the queries that need updating
+              ;; and then process them in batch as well so we just send one message to main?
+              ;; might be easier to schedule?
               (.refresh! query)))
           keys-to-invalidate))
       nil)
@@ -32,7 +37,8 @@
     active-queries))
 
 (defn invalidate-keys! [{::keys [active-queries-ref invalidate-keys-ref] :as env}]
-  (invalidate-queries! @active-queries-ref @invalidate-keys-ref))
+  (invalidate-queries! @active-queries-ref @invalidate-keys-ref)
+  (reset! invalidate-keys-ref #{}))
 
 (defn tx*
   [{::keys [config-ref data-ref invalidate-keys-ref] :as env}
@@ -96,6 +102,7 @@
               ;; instead of invalidating queries for every processed tx
               ;; they are batched to update at most once in a certain interval
               ;; FIXME: make this configurable, benchmark
+              ;; FIXME: maybe debounce again per query?
               (when (empty? @invalidate-keys-ref)
                 (js/setTimeout #(invalidate-keys! env) 10))
 
@@ -146,20 +153,25 @@
           observed-data (db/observed @data-ref)
           result (db/query env observed-data query)]
 
+      ;; remember this even is query is still loading
       (set! read-keys @observed-data)
 
       ;; if query is still loading don't send to main
-      (when-not (keyword-identical? result ::db/loading)
-        (cond
-          (or (nil? result) (empty? result))
-          (js/console.warn "query result was empty" this result)
+      (when (and (not (keyword-identical? result ::db/loading))
+                 ;; empty result likely means the query is no longer valid
+                 ;; eg. deleted ident. don't send update, will likely be destroyed
+                 ;; when other query updates
+                 (some? result)
+                 (not (empty? result))
+                 ;; compare here so main doesn't need to compare again
+                 (not= result read-result))
 
-          (not= result read-result)
-          (do (set! read-result result)
-              ;; (js/console.log "did-read" read-keys read-result @data-ref)
-              ;; FIXME: we know which data the client already had. could skip over those parts
-              ;; but computing that might be more expensive than just replacing it?
-              (send-to-main env [:query-result query-id result]))))))
+        (set! read-result result)
+        ;; (js/console.log "did-read" read-keys read-result @data-ref)
+        ;; FIXME: we know which data the client already had. could skip over those parts
+        ;; but computing that might be more expensive than just replacing it?
+        ;; might speed things up with basic merge logic
+        (send-to-main env [:query-result query-id result]))))
 
   (actually-refresh! [this]
     ;; query might have been destroyed while being queued
@@ -198,13 +210,16 @@
   (tx* env tx))
 
 (defmethod worker-message :stream-init
-  [{::keys [active-streams-ref] :as env} [_ stream-id sub-id]]
-  (let [{:keys [items] :as stream-info} (get @active-streams-ref stream-id)]
+  [{::keys [active-streams-ref] :as env} [_ stream-id stream-key opts :as msg]]
+  (let [{:keys [^CircularBuffer buffer] :as stream-info} (get @active-streams-ref stream-key)]
     (if-not stream-info
-      (js/console.warn "stream not found, can't init" stream-id)
-      (do (swap! active-streams-ref update-in [stream-id :subs] set-conj sub-id)
+      (js/console.warn "stream not found, can't init" msg)
+      (do (swap! active-streams-ref update-in [stream-key :subs] set-conj stream-id)
           (send-to-main env
-            [:stream-info stream-id sub-id {:item-count (count items)}]
+            [:stream-msg stream-id {:op :init
+                                    :item-count (.getCount buffer)
+                                    :items (.getNewestValues buffer
+                                             (js/Math.min 10 (.getCount buffer)))}]
             )))))
 
 (defn init [env]
@@ -241,16 +256,20 @@
     (reg-fx env :stream-add
       (fn [{:keys [] :as env} items]
         (reduce
-          (fn [_ [stream-id stream-item]]
-            (if-not (get @active-streams-ref stream-id)
-              (js/console.warn "stream not found, can't add" stream-id stream-item)
-              (do (swap! active-streams-ref update-in [stream-id :items] vec-conj stream-item)
-                  (let [subs (get-in @active-streams-ref [stream-id :subs])]
-                    (reduce
-                      (fn [_ sub-id]
-                        (send-to-main env [:stream-add sub-id stream-id stream-item]))
-                      nil
-                      subs)))))
+          (fn [_ [stream-key stream-item]]
+            (let [stream (get @active-streams-ref stream-key)]
+              (if-not stream
+                (js/console.warn "stream not found, can't add" stream-key stream-item)
+                (let [{:keys [subs ^CircularBuffer buffer]} stream]
+                  (.add buffer stream-item)
+                  (reduce
+                    (fn [_ sub-id]
+                      (send-to-main env [:stream-msg
+                                         sub-id
+                                         {:op :add
+                                          :item stream-item}]))
+                    nil
+                    subs)))))
           nil
           items)))
 
@@ -263,3 +282,10 @@
 
     env))
 
+(defn stream-setup [{::keys [active-streams-ref] :as env} stream-key opts]
+  (let [stream
+        {:stream-key stream-key
+         :opts opts
+         :subs #{}
+         :buffer (CircularBuffer. (:capacity opts 1000))}]
+    (swap! active-streams-ref assoc stream-key stream)))

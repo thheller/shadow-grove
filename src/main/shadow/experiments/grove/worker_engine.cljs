@@ -4,23 +4,24 @@
     [shadow.experiments.grove.components :as comp]
     [cognitect.transit :as transit]))
 
-;; batch?
-(defn send-to-worker [worker ^function transit-str msg]
-  ;; (js/console.log "worker-write" env msg)
-  (.postMessage worker (transit-str msg)))
-
 (deftype WorkerEngine
-  [worker active-queries-ref transit-str]
+  [^function send! active-queries-ref active-streams-ref]
   gp/IQueryEngine
   (register-query [this env query-id query config callback]
     (swap! active-queries-ref assoc query-id callback)
-    (send-to-worker worker transit-str [:query-init query-id query]))
+    (send! [:query-init query-id query]))
 
   (unregister-query [this query-id]
-    (send-to-worker worker transit-str [:query-destroy query-id]))
+    (send! [:query-destroy query-id]))
 
   (transact! [this env tx]
-    (send-to-worker worker transit-str [:tx tx])))
+    (send! [:tx tx]))
+
+  gp/IStreamEngine
+  (stream-init [this env stream-id stream-key opts callback]
+    (swap! active-streams-ref assoc stream-id callback)
+    (send! [:stream-init stream-id stream-key opts])
+    ))
 
 (defn init
   ([env worker]
@@ -40,10 +41,17 @@
          active-queries-ref
          (atom {})
 
+         active-streams-ref
+         (atom {})
+
+         send!
+         (fn send! [msg]
+           (.postMessage worker (transit-str msg)))
+
          env
          (assoc env
            ::worker worker
-           engine-key (->WorkerEngine worker active-queries-ref transit-str)
+           engine-key (->WorkerEngine send! active-queries-ref active-streams-ref)
            ::transit-read transit-read
            ::transit-str transit-str)]
 
@@ -54,6 +62,8 @@
            (js/performance.measure "transit-read" "transit-read-start")
            (let [[op & args] msg]
 
+             (js/console.log "main read" op msg)
+
              ;; (js/console.log "main read took" (- t start))
              (case op
                :worker-ready
@@ -62,6 +72,12 @@
                :query-result
                (let [[query-id result] args
                      ^function callback (get @active-queries-ref query-id)]
+                 (when (some? callback)
+                   (callback result)))
+
+               :stream-msg
+               (let [[stream-id result] args
+                     ^function callback (get @active-streams-ref stream-id)]
                  (when (some? callback)
                    (callback result)))
 

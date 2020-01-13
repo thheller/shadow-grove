@@ -78,3 +78,7 @@
   (register-query [this env key query config callback])
   (unregister-query [this key])
   (transact! [this env tx]))
+
+(defprotocol IStreamEngine
+  (stream-init [this env stream-id stream-key opts callback])
+  (stream-destroy [this stream-id]))

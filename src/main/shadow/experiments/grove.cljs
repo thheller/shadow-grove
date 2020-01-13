@@ -11,18 +11,13 @@
     [cognitect.transit :as transit]
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.components :as comp]
+    [shadow.experiments.grove.main.util :as util]
+    [shadow.experiments.grove.main.suspense :as suspense]
+    [shadow.experiments.grove.main.streams :as streams]
+    [shadow.experiments.grove.main.atoms :as atoms]
     ))
 
 (defonce active-roots-ref (atom {}))
-
-(defn next-tick [callback]
-  ;; FIXME: should be smarter about when/where to schedule
-  (js/goog.async.nextTick callback))
-
-(def now
-  (if (exists? js/performance)
-    #(js/performance.now)
-    #(js/Date.now)))
 
 (deftype TreeScheduler [^:mutable work-arr ^:mutable update-pending?]
   gp/IScheduleUpdates
@@ -38,7 +33,7 @@
     ;; schedule was added in some async work
     (when-not update-pending?
       (set! update-pending? true)
-      (next-tick #(.process-pending! this))))
+      (util/next-tick #(.process-pending! this))))
 
   (unschedule! [this work-task]
     ;; FIXME: might be better to track this in the task itself and just check when processing
@@ -55,7 +50,7 @@
     ;; FIXME: this now processes in FCFS order
     ;; should be more intelligent about prioritizing
     ;; should use requestIdleCallback or something to schedule in batch
-    (let [start (now)
+    (let [start (util/now)
           done
           (loop []
             (if-not (pos? (alength work-arr))
@@ -69,7 +64,7 @@
                 ;; which means things take way longer especially when rendering collections
                 ;; so there really needs to be a Suspense style node that can at least delay
                 ;; inserting nodes into the actual DOM until they are actually ready
-                (let [diff (- (now) start)]
+                (let [diff (- (util/now) start)]
                   ;; FIXME: more logical timeouts
                   ;; something like IdleTimeout from requestIdleCallback?
                   ;; dunno if there is a polyfill for that?
@@ -87,11 +82,6 @@
 (defn run-now! [env callback]
   (gp/run-now! (::gp/scheduler env) callback))
 
-(defonce query-id-seq (atom 0))
-
-(defn make-query-id []
-  (swap! query-id-seq inc))
-
 (deftype QueryHook
   [^:mutable ident
    ^:mutable query
@@ -108,10 +98,10 @@
   (hook-build [this c i]
     ;; support multiple query engines by allowing queries to supply which key to use
     (let [env (comp/get-env c)
-          engine-key  (:engine config ::gp/query-engine)
+          engine-key (:engine config ::gp/query-engine)
           query-engine (get env engine-key)]
       (assert query-engine (str "no query engine in env for key " engine-key))
-      (QueryHook. ident query config c i env query-engine (make-query-id) false nil)))
+      (QueryHook. ident query config c i env query-engine (util/next-id) false nil)))
 
   gp/IHook
   (hook-init! [this]
@@ -233,67 +223,8 @@
     (ap/destroy! app-root)
     (dissoc env ::app-root ::root-el)))
 
-(deftype AtomWatch [the-atom ^:mutable val component idx]
-  gp/IBuildHook
-  (hook-build [this c i]
-    (AtomWatch. the-atom nil c i))
-
-  gp/IHook
-  (hook-init! [this]
-    (set! val @the-atom)
-    (add-watch the-atom this
-      (fn [_ _ _ next-val]
-        ;; check immediately and only invalidate if actually changed
-        ;; avoids kicking off too much work
-        ;; FIXME: maybe shouldn't check equiv? only identical?
-        ;; pretty likely that something changed after all
-        (when (not= val next-val)
-          (set! val next-val)
-          (comp/hook-invalidate! component idx)))))
-
-  (hook-ready? [this] true) ;; born ready
-  (hook-value [this] val)
-  (hook-update! [this]
-    ;; only gets here if value changed
-    true)
-  (hook-deps-update! [this new-val]
-    (throw (ex-info "shouldn't have changing deps?" {})))
-  (hook-destroy! [this]
-    (remove-watch the-atom this)))
-
 (defn watch [the-atom]
-  (AtomWatch. the-atom nil nil nil))
-
-(deftype EnvWatch [key-to-atom path default the-atom ^:mutable val component idx]
-  gp/IBuildHook
-  (hook-build [this c i]
-    (let [atom (get (comp/get-env c) key-to-atom)]
-      (when-not atom
-        (throw (ex-info "no atom found under key" {:key key-to-atom :path path})))
-      (EnvWatch. key-to-atom path default atom nil c i)))
-
-  gp/IHook
-  (hook-init! [this]
-    (set! val (get-in @the-atom path default))
-    (add-watch the-atom this
-      (fn [_ _ _ new-value]
-        ;; check immediately and only invalidate if actually changed
-        ;; avoids kicking off too much work
-        (let [next-val (get-in new-value path default)]
-          (when (not= val next-val)
-            (set! val next-val)
-            (comp/hook-invalidate! component idx))))))
-
-  (hook-ready? [this] true) ;; born ready
-  (hook-value [this] val)
-  (hook-update! [this]
-    ;; only gets here if val actually changed
-    true)
-
-  (hook-deps-update! [this new-val]
-    (throw (ex-info "shouldn't have changing deps?" {})))
-  (hook-destroy! [this]
-    (remove-watch the-atom this)))
+  (atoms/->AtomWatch the-atom nil nil nil))
 
 (defn env-watch
   ([key-to-atom]
@@ -303,165 +234,10 @@
   ([key-to-atom path default]
    {:pre [(keyword? key-to-atom)
           (vector? path)]}
-   (EnvWatch. key-to-atom path default nil nil nil nil)))
-
-(declare SuspenseRootNode)
-
-(deftype SuspenseRoot
-  [^:mutable opts
-   ^:mutable vnode
-   marker
-   parent-env
-   parent-scheduler
-   ^:mutable child-env
-   ^:mutable display
-   ^:mutable offscreen
-   ^:mutable suspend-set
-   ^:mutable timeout]
-
-  ap/IUpdatable
-  (supports? [this next]
-    (instance? SuspenseRootNode next))
-
-  (dom-sync! [this ^SuspenseRootNode next]
-    ;; FIXME: figure out strategy for this?
-    ;; if displaying fallback start rendering in background
-    ;; if displaying managed and supported, just sync
-    ;; if displaying managed and not supported, start rendering in background and swap when ready
-    ;; when rendering in background display fallback after timeout?
-
-    (set! vnode (.-vnode next))
-    (set! opts (.-opts next))
-
-    (cond
-      ;; offscreen update
-      (and offscreen (ap/supports? offscreen vnode))
-      (ap/dom-sync! offscreen vnode)
-
-      ;; offscreen swap
-      ;; if new offscreen does not suspend immediately replace display placeholder
-      ;; otherwise keep offscreen
-      offscreen
-      (do (set! suspend-set #{})
-          (let [next-managed (ap/as-managed vnode child-env)]
-            ;; destroy current offscreen immediately
-            (ap/destroy! offscreen)
-            (set! offscreen next-managed)
-
-            ;; if not immediately suspended immediately swap
-            ;; otherwise continue offscreen
-            ;; naming of these helper fns doesn't quite match their intent
-            ;; but saves duplicating code
-            ;; FIXME: maybe clean up a bit
-            (if (empty? suspend-set)
-              (.maybe-swap! this)
-              (.start-offscreen! this))))
-
-      ;; display supports updating, just update
-      (ap/supports? display vnode)
-      (ap/dom-sync! display vnode)
-
-      :else ;; replace display and maybe start offscreen again
-      (let [new (ap/as-managed vnode child-env)]
-        (if (empty? suspend-set)
-          (do (common/fragment-replace display new)
-              (set! display new))
-          (do (set! offscreen new)
-              (.start-offscreen! this)
-              (.schedule-timeout! this)
-              )))))
-
-  ap/IManageNodes
-  (dom-insert [this parent anchor]
-    (.insertBefore parent marker anchor)
-    (ap/dom-insert display parent anchor))
-
-  (dom-first [this]
-    marker)
-
-  ap/IDestructible
-  (destroy! [this]
-    (when timeout
-      (js/clearTimeout timeout))
-    (.remove marker)
-    (when display
-      (ap/destroy! display))
-    (when offscreen
-      (ap/destroy! offscreen)))
-
-  gp/IScheduleUpdates
-  (schedule-update! [this target]
-    (gp/schedule-update! parent-scheduler target))
-
-  (unschedule! [this target]
-    (gp/unschedule! parent-scheduler target))
-
-  (run-now! [this action]
-    (gp/run-now! parent-scheduler action))
-
-  (did-suspend! [this target]
-    ;; (js/console.log "did-suspend!" suspend-set target)
-    ;; FIXME: suspend parent scheduler when going offscreen?
-    (set! suspend-set (conj suspend-set target)))
-
-  (did-finish! [this target]
-    ;; (js/console.log "did-finish!" suspend-set target)
-    (set! suspend-set (disj suspend-set target))
-    (when (and offscreen (empty? suspend-set))
-      (js/goog.async.nextTick #(.maybe-swap! this))))
-
-  Object
-  (init! [this]
-    ;; can't be done in as-managed since it needs the this pointer
-    (let [next-env (assoc parent-env ::gp/scheduler this)
-          next-managed (ap/as-managed vnode next-env)]
-      (set! child-env next-env)
-      (if (empty? suspend-set)
-        (set! display next-managed)
-        (do (set! offscreen next-managed)
-            (.start-offscreen! this)
-            (set! display (ap/as-managed (:fallback opts) parent-env))))))
-
-  (schedule-timeout! [this]
-    (when-not timeout
-      (let [timeout-ms (:timeout opts 500)]
-        (set! timeout (js/setTimeout #(.did-timeout! this) timeout-ms)))))
-
-  (start-offscreen! [this]
-    (when-some [key (:key opts)]
-      (swap! (::suspense-keys parent-env) assoc key (js/Date.now))))
-
-  (did-timeout! [this]
-    (set! timeout nil)
-    (when offscreen
-      (let [fallback (ap/as-managed (:fallback opts) child-env)
-            old-display display]
-        ;; (js/console.log "using fallback after timeout")
-        (set! display (common/fragment-replace old-display fallback))
-        )))
-
-  (maybe-swap! [this]
-    (when (and offscreen (empty? suspend-set))
-      (ap/dom-insert offscreen (.-parentElement marker) marker)
-      (ap/destroy! display)
-      (set! display offscreen)
-      (set! offscreen nil)
-
-      (when-some [key (:key opts)]
-        (swap! (::suspense-keys parent-env) dissoc key))
-
-      (when timeout
-        (js/clearTimeout timeout)
-        (set! timeout nil)
-        ))))
-
-(deftype SuspenseRootNode [opts vnode]
-  ap/IConstruct
-  (as-managed [this env]
-    (doto (SuspenseRoot. opts vnode (common/dom-marker env) env (::gp/scheduler env) nil nil nil #{} nil)
-      (.init!))))
+   (atoms/->EnvWatch key-to-atom path default nil nil nil nil)))
 
 (defn suspense [opts vnode]
-  (SuspenseRootNode. opts vnode))
+  (suspense/->SuspenseRootNode opts vnode))
 
-(defn stream [stream-id opts item-fn])
+(defn stream [stream-key opts item-fn]
+  (streams/->StreamNode. stream-key opts item-fn))
