@@ -200,7 +200,7 @@
   ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
   ;; can't do this in the ComponentNode.as-managed since we need the this pointer
-  (^clj component-init! [^ComponentInstance this]
+  (component-init! [^ComponentInstance this]
     (let [child-env
           (-> parent-env
               (update ::depth safe-inc)
@@ -233,10 +233,10 @@
 
       true))
 
-  (^clj get-hook-value [this idx]
+  (get-hook-value [this idx]
     (gp/hook-value (aget hooks idx)))
 
-  (^clj invalidate-hook! [this idx]
+  (invalidate-hook! [this idx]
     ;; (js/console.log "invalidate-hook!" idx (:component-name config) this)
 
     (set! dirty-hooks (bit-set dirty-hooks idx))
@@ -245,7 +245,7 @@
 
     (.schedule! this))
 
-  (^clj ready-hook! [this idx]
+  (ready-hook! [this idx]
     ;; (js/console.log "invalidate-hook!" idx (:component-name config) this)
 
     (when (not= current-idx idx)
@@ -254,18 +254,18 @@
     (set! suspended? false)
     (.schedule! this))
 
-  (^clj mark-hooks-dirty! [this dirty-bits]
+  (mark-hooks-dirty! [this dirty-bits]
     (set! dirty-hooks (bit-or dirty-hooks dirty-bits))
     (set! current-idx (find-first-set-bit-idx dirty-hooks)))
 
-  (^clj mark-dirty-from-args! [this dirty-bits]
+  (mark-dirty-from-args! [this dirty-bits]
     (set! dirty-from-args (bit-or dirty-from-args dirty-bits))
     (.mark-hooks-dirty! this dirty-bits))
 
-  (^clj set-render-required! [this]
+  (set-render-required! [this]
     (set! needs-render? true))
 
-  (^clj run-next! [^not-native this]
+  (run-next! [^not-native this]
     ;; (js/console.log "Component:run-next!" (:component-name config) current-idx)
     (if (identical? current-idx (alength (.-hooks config)))
       ;; all hooks done
@@ -346,19 +346,20 @@
           :else
           (set! current-idx (inc current-idx))))))
 
-  (^clj unschedule! [this]
-    (gp/unschedule! scheduler this))
-
-  (^clj suspend! [this hook-causing-suspend]
+  (suspend! [this hook-causing-suspend]
     ;; just in case we were already scheduled. should really track this more efficiently
     (.unschedule! this)
     (gp/did-suspend! scheduler this)
     (set! suspended? true))
 
-  (^clj schedule! [this]
-    (gp/schedule-update! scheduler this))
+  (schedule! [this]
+    (when-not destroyed?
+      (gp/schedule-update! scheduler this)))
 
-  (^clj component-render! [^ComponentInstance this]
+  (unschedule! [this]
+    (gp/unschedule! scheduler this))
+
+  (component-render! [^ComponentInstance this]
     (assert (zero? dirty-hooks) "Got to render while hooks are dirty")
     ;; (js/console.log "Component:render!" (.-component-name config) updated-hooks needs-render? suspended? destroyed? this)
     (set! updated-hooks (int 0))
@@ -382,16 +383,16 @@
 
     (gp/did-finish! scheduler this))
 
-  (^clj register-event! [this event-id callback]
+  (register-event! [this event-id callback]
     (set! events (assoc events event-id callback)))
 
-  (^clj unregister-event! [this event-id callback]
+  (unregister-event! [this event-id callback]
     (set! events (dissoc events event-id)))
 
-  (^clj get-slot [this slot-id]
+  (get-slot [this slot-id]
     (get slots slot-id))
 
-  (^clj set-slot! [this slot-id slot]
+  (set-slot! [this slot-id slot]
     (set! slots (assoc slots slot-id slot))))
 
 (set! *warn-on-infer* true)

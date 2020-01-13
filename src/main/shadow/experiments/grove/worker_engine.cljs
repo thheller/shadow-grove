@@ -61,9 +61,7 @@
          (let [msg (transit-read (.-data e))]
            (js/performance.measure "transit-read" "transit-read-start")
            (let [[op & args] msg]
-
-             (js/console.log "main read" op msg)
-
+             ;; (js/console.log "main read" op msg)
              ;; (js/console.log "main read took" (- t start))
              (case op
                :worker-ready

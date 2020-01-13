@@ -280,7 +280,10 @@
         x
 
         (keyword-identical? ::missing x)
-        (assoc! result query-part (.cljs$core$IFn$_invoke$arity$5 query-calc env db current query-part {}))
+        (let [calced (.cljs$core$IFn$_invoke$arity$5 query-calc env db current query-part {})]
+          (if (keyword-identical? ::loading calced)
+            calced
+            (assoc! result query-part calced)))
 
         :else
         (if (contains? result query-part)
@@ -389,7 +392,9 @@
                     (assoc! result join-key query-val)))))
 
             :else
-            (throw (ex-info "failed to join" {:query-part query-part})))))
+            (throw (ex-info "failed to join" {:query-part query-part
+                                              :current current
+                                              :result result})))))
 
     ;; tx
     (list? query-part)

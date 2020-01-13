@@ -1,6 +1,7 @@
 (ns shadow.experiments.grove.main.streams
   (:require
     [shadow.experiments.arborist.protocols :as ap]
+    [shadow.experiments.arborist.attributes :as attr]
     [shadow.experiments.grove.protocols :as gp]
     [goog.style :as gs]
     [shadow.experiments.grove.main.util :as util]))
@@ -23,9 +24,12 @@
   ap/IUpdatable
   (supports? [this next]
     (and (instance? StreamNode next)
-         (keyword-identical? stream-key (.-stream-key next))))
+         (keyword-identical? stream-key (.-stream-key next))
+         (identical? item-fn (.-item-fn next))))
 
-  (dom-sync! [this ^StreamNode next])
+  (dom-sync! [this ^StreamNode next]
+    ;; not sure what this should sync. shouldn't really need updating
+    )
 
   ap/IManageNodes
   (dom-insert [this parent anchor]
@@ -44,7 +48,9 @@
     (gs/setStyle container-el
       #js {"outline" "none"
            "position" "relative"
-           "overflow-y" "auto"})
+           "overflow-y" "auto"
+           "width" "100%"
+           "height" "100%"})
 
     (set! inner-el (js/document.createElement "div"))
     (gs/setStyle inner-el
@@ -55,11 +61,42 @@
            "height" "100%"})
     (.appendChild container-el inner-el)
 
-    (let [callback
-          (fn [msg]
-            (js/console.log "stream msg" msg))]
+    (gp/stream-init stream-engine env stream-id stream-key
+      (:stream-opts opts {})
+      #(.handle-stream-msg this %)))
 
-      (gp/stream-init stream-engine env stream-id stream-key (:stream-opts opts {}) callback))))
+  (make-item [this item]
+    (let [el (js/document.createElement "div")
+          rendered (item-fn item)
+          managed (ap/as-managed rendered env)]
+      (set! el -shadow$managed managed)
+      (ap/dom-insert managed el nil)
+      el))
+
+  (handle-stream-msg [this {:keys [op] :as msg}]
+    (case op
+      :init
+      (let [{:keys [items]} msg]
+        (doseq [item items]
+          (let [el (.make-item this item)]
+            (.appendChild inner-el el))
+          ))
+
+      ;; FIXME: don't delete all, try to dom-sync!
+      :reset
+      (do (doseq [^Element child (into [] (array-seq (.-children inner-el)))
+                  :let [managed (.-shadow$managed child)]]
+            (ap/destroy! managed)
+            (.remove child))
+          (.handle-stream-msg this (assoc msg :op :init)))
+
+      :add
+      (let [{:keys [item]} msg
+            el (.make-item this item)]
+        (.insertBefore inner-el el (.-firstChild inner-el)))
+
+      (js/console.log "unhandled stream msg" op msg)
+      )))
 
 (deftype StreamNode [stream-key opts item-fn]
   ap/IConstruct

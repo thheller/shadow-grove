@@ -241,3 +241,6 @@
 
 (defn stream [stream-key opts item-fn]
   (streams/->StreamNode. stream-key opts item-fn))
+
+(defn render-seq [coll key-fn render-fn]
+  (sa/render-seq coll key-fn render-fn))

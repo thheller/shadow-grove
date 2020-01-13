@@ -156,6 +156,8 @@
       ;; remember this even is query is still loading
       (set! read-keys @observed-data)
 
+      (js/console.log "query" query result)
+
       ;; if query is still loading don't send to main
       (when (and (not (keyword-identical? result ::db/loading))
                  ;; empty result likely means the query is no longer valid
@@ -211,6 +213,7 @@
 
 (defmethod worker-message :stream-init
   [{::keys [active-streams-ref] :as env} [_ stream-id stream-key opts :as msg]]
+  (js/console.log "stream-init" env stream-key msg)
   (let [{:keys [^CircularBuffer buffer] :as stream-info} (get @active-streams-ref stream-key)]
     (if-not stream-info
       (js/console.warn "stream not found, can't init" msg)
@@ -260,7 +263,8 @@
             (let [stream (get @active-streams-ref stream-key)]
               (if-not stream
                 (js/console.warn "stream not found, can't add" stream-key stream-item)
-                (let [{:keys [subs ^CircularBuffer buffer]} stream]
+                (let [{:keys [subs ^CircularBuffer buffer]} stream
+                      stream-item (assoc stream-item :added-at (js/Date.now))]
                   (.add buffer stream-item)
                   (reduce
                     (fn [_ sub-id]
@@ -273,9 +277,45 @@
           nil
           items)))
 
+    (reg-fx env :stream-merge
+      (fn [env m]
+        (reduce-kv
+          (fn [env stream-key items]
+            (when (seq items)
+              (let [stream (get @active-streams-ref stream-key)]
+                (if-not stream
+                  (js/console.warn "stream not found, can't merge" stream-key items)
+                  (let [{:keys [subs ^CircularBuffer buffer opts]} stream
+                        new-items (->> (.getValues buffer)
+                                       (into items)
+                                       (sort-by :added-at)
+                                       (reverse))
+
+                        buffer (CircularBuffer. (:capacity opts 1000))]
+
+                    (doseq [item new-items]
+                      (.add buffer item))
+
+                    (swap! active-streams-ref assoc-in [stream-key :buffer] buffer)
+
+                    (let [new-head (into [] (take 10) new-items)]
+                      (reduce
+                        (fn [_ sub-id]
+                          (send-to-main env [:stream-msg
+                                             sub-id
+                                             {:op :reset
+                                              :item-count (.getCount buffer)
+                                              :items new-head}]))
+                        nil
+                        subs))))))
+            env)
+          env
+          m)))
+
     (js/self.addEventListener "message"
       (fn [e]
         (let [msg (transit-read (.-data e))]
+          ;; (js/console.log "worker-msg" (first msg) msg)
           (worker-message env msg))))
 
     (js/postMessage (transit-str [:worker-ready]))

@@ -108,4 +108,36 @@
       )))
 
 
+(defn merge-attrs
+  "merge attributes from old/new attr maps"
+  [env node old new]
+  (reduce-kv
+    (fn [_ key nval]
+      (let [oval (get old key)]
+        (when (not= nval oval)
+          (set-attr env node key oval nval))))
+    nil
+    new)
+
+  ;; {:a 1 :x 1} vs {:a 1}
+  ;; {:a 1} vs {:b 1}
+  ;; should be uncommon but need to unset props that are no longer used
+  (reduce-kv
+    (fn [_ key oval]
+      (when-not (contains? new key)
+        (set-attr env node key oval nil)))
+    nil
+    old))
+
+(defn set-attrs
+  "initial set attributes from key/val map"
+  [env node attrs]
+  (reduce-kv
+    (fn [_ key val]
+      (set-attr env node key nil val))
+    nil
+    attrs))
+
+
+
 

@@ -1,6 +1,7 @@
 (ns shadow.experiments.arborist.interpreted
   (:require
     [shadow.experiments.arborist.fragments :as frag]
+    [shadow.experiments.arborist.attributes :as a]
     [shadow.experiments.arborist.protocols :as p]
     [clojure.string :as str]))
 
@@ -30,23 +31,7 @@
             [attrs (subvec next 2)]
             [nil (subvec next 1)])]
 
-      (reduce-kv
-        (fn [_ key nval]
-          (let [oval (get attrs key)]
-            (when (not= nval oval)
-              (frag/set-attr env node key oval nval))))
-        nil
-        next-attrs)
-
-      ;; {:a 1 :x 1} vs {:a 1}
-      ;; {:a 1} vs {:b 1}
-      ;; should be uncommon but need to unset props that are no longer used
-      (reduce-kv
-        (fn [_ key oval]
-          (when-not (contains? next-attrs key)
-            (frag/set-attr env node key oval nil)))
-        nil
-        attrs)
+      (a/merge-attrs env node attrs next-attrs)
 
       (let [oc (count children)
             nc (count next-nodes)
