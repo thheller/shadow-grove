@@ -19,7 +19,7 @@
 
 ;; FIXME: very inefficient, maybe worth maintaining an index
 (defn invalidate-queries! [active-queries keys-to-invalidate]
-  (js/console.log "invalidating queries" keys-to-invalidate)
+  ;; (js/console.log "invalidating queries" keys-to-invalidate)
   (reduce-kv
     (fn [_ query-id ^ActiveQuery query]
       ;; don't need to check if already pending
@@ -155,8 +155,6 @@
 
       ;; remember this even is query is still loading
       (set! read-keys @observed-data)
-
-      (js/console.log "query" query result)
 
       ;; if query is still loading don't send to main
       (when (and (not (keyword-identical? result ::db/loading))

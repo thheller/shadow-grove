@@ -265,8 +265,8 @@
   (fn [env db current query-part params] query-part)
   :default ::default)
 
-(defmethod query-calc ::default [_ _ _ _ _]
-  nil)
+(defmethod query-calc ::default [env db current query-part params]
+  (get current query-part))
 
 ;; FIXME: this tracking of ::loading is really annoying, should probably just throw instead?
 (defn- process-query-part
@@ -274,24 +274,18 @@
   (cond
     ;; simple attr
     (keyword? query-part)
-    (let [x (get current query-part ::missing)]
-      (cond
-        (keyword-identical? ::loading x)
-        x
-
-        (keyword-identical? ::missing x)
-        (let [calced (.cljs$core$IFn$_invoke$arity$5 query-calc env db current query-part {})]
-          (if (keyword-identical? ::loading calced)
-            calced
-            (assoc! result query-part calced)))
-
-        :else
-        (if (contains? result query-part)
-          result
-          (assoc! result query-part x))))
+    (let [calced (.cljs$core$IFn$_invoke$arity$5 query-calc env db current query-part {})]
+      (if (keyword-identical? ::loading calced)
+        calced
+        (assoc! result query-part calced)))
 
     ;; (::foo {:params 1})
-    ;; TBD
+    (list? query-part)
+    (let [[kw params] query-part]
+      (let [calced (.cljs$core$IFn$_invoke$arity$5 query-calc env db current kw params)]
+        (if (keyword-identical? ::loading calced)
+          calced
+          (assoc! result kw calced))))
 
     ;; join
     ;; {ident [attrs]}
@@ -396,9 +390,6 @@
                                               :current current
                                               :result result})))))
 
-    ;; tx
-    (list? query-part)
-    result
 
     :else
     (throw (ex-info "invalid query part" {:part query-part}))))
@@ -413,9 +404,7 @@
           (vector? query-data)]}
    (let [len (count query-data)]
      (loop [current current
-            ;; query from the root should not return the entire db
-            ;; query on an entity is fine to return the entire entity
-            result (transient (if (identical? db current) {} current))
+            result (transient {})
             i 0]
        (if (>= i len)
          (persistent! result)

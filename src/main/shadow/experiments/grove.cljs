@@ -14,6 +14,7 @@
     [shadow.experiments.grove.main.util :as util]
     [shadow.experiments.grove.main.suspense :as suspense]
     [shadow.experiments.grove.main.streams :as streams]
+    [shadow.experiments.grove.main.vlist :as vlist]
     [shadow.experiments.grove.main.atoms :as atoms]
     ))
 
@@ -244,3 +245,6 @@
 
 (defn render-seq [coll key-fn render-fn]
   (sa/render-seq coll key-fn render-fn))
+
+(defn vlist [ident attr opts item-fn]
+  (vlist/->VirtualNode ident attr opts item-fn))
