@@ -173,7 +173,7 @@
     (conj x y)))
 
 (defn merge-or-replace [left right]
-  (if (keyword-identical? ::loading left)
+  (if (keyword-identical? :db/loading left)
     right
     (merge left right)))
 
@@ -268,14 +268,14 @@
 (defmethod query-calc ::default [env db current query-part params]
   (get current query-part :db/undefined))
 
-;; FIXME: this tracking of ::loading is really annoying, should probably just throw instead?
+;; FIXME: this tracking of :db/loading is really annoying, should probably just throw instead?
 (defn- process-query-part
   [env db current result query-part]
   (cond
     ;; simple attr
     (keyword? query-part)
     (let [calced (.cljs$core$IFn$_invoke$arity$5 query-calc env db current query-part {})]
-      (if (keyword-identical? ::loading calced)
+      (if (keyword-identical? :db/loading calced)
         calced
         (assoc! result query-part calced)))
 
@@ -283,7 +283,7 @@
     (list? query-part)
     (let [[kw params] query-part]
       (let [calced (.cljs$core$IFn$_invoke$arity$5 query-calc env db current kw params)]
-        (if (keyword-identical? ::loading calced)
+        (if (keyword-identical? :db/loading calced)
           calced
           (assoc! result kw calced))))
 
@@ -309,7 +309,7 @@
                     (.cljs$core$IFn$_invoke$arity$5 query-calc env db current join-key {}))]
 
               (cond
-                (keyword-identical? join-val ::loading)
+                (keyword-identical? join-val :db/loading)
                 join-val
 
                 (nil? join-val)
@@ -322,14 +322,14 @@
                     (keyword-identical? ::missing val)
                     (assoc! result join-key ::not-found)
 
-                    (keyword-identical? ::loading val)
+                    (keyword-identical? :db/loading val)
                     val
 
                     ;; FIXME: check more possible vals?
                     :else
                     (let [query-val (query env db val join-attrs)]
                       (cond
-                        (keyword-identical? ::loading query-val)
+                        (keyword-identical? :db/loading query-val)
                         query-val
 
                         :else
@@ -339,7 +339,7 @@
                 (map? join-val)
                 (let [query-val (query env db join-val join-attrs)]
                   (cond
-                    (keyword-identical? query-val ::loading)
+                    (keyword-identical? query-val :db/loading)
                     query-val
                     :else
                     (assoc! result join-key query-val)))
@@ -376,7 +376,7 @@
             (ident? join-key)
             (let [join-val (get db join-key)]
               (cond
-                (keyword-identical? ::loading join-val)
+                (keyword-identical? :db/loading join-val)
                 join-val
 
                 (nil? join-val)
@@ -385,7 +385,7 @@
                 :else
                 (let [query-val (query env db join-val join-attrs)]
                   (cond
-                    (keyword-identical? ::loading query-val)
+                    (keyword-identical? :db/loading query-val)
                     query-val
                     :else
                     (assoc! result join-key query-val)))))
@@ -415,7 +415,7 @@
          (persistent! result)
          (let [query-part (nth query-data i)
                result (process-query-part env db current result query-part)]
-           (if (keyword-identical? result ::loading)
+           (if (keyword-identical? result :db/loading)
              result
              (recur current result (inc i)))))))))
 

@@ -41,17 +41,18 @@
   (reset! invalidate-keys-ref #{}))
 
 (defn tx*
-  [{::keys [config-ref data-ref invalidate-keys-ref] :as env}
+  [{::keys [event-config fx-config data-ref invalidate-keys-ref] :as env}
    [ev-id & params :as tx]]
   {:pre [(vector? tx)
          (keyword? ev-id)]}
   ;; (js/console.log ::db-tx ev-id tx env)
 
   (let [{:keys [interceptors ^function handler-fn] :as event}
-        (get-in @config-ref [:events ev-id])]
+        (get event-config ev-id)]
 
     (if-not event
-      (js/console.warn "no event handler for" ev-id params)
+      (js/console.warn "no event handler for" ev-id params env)
+
       (let [before @data-ref
 
             tx-db
@@ -65,23 +66,22 @@
 
         ;; FIXME: move all of this out to interceptor chain. including DB stuff
 
-        (let [config @config-ref]
-          (reduce-kv
-            (fn [_ fx-key value]
-              (let [fx-fn (get-in config [:fx fx-key])]
-                (if-not fx-fn
-                  (js/console.warn "invalid fx" fx-key value)
-                  (let [transact-fn
-                        (fn [fx-tx]
-                          ;; FIXME: should probably track the fx causing this transaction and the original tx
-                          ;; FIXME: should probably prohibit calling this while tx is still processing?
-                          ;; just meant for async events triggered by fx
-                          (tx* env fx-tx))
-                        fx-env
-                        (assoc env :transact! transact-fn)]
-                    (fx-fn fx-env value)))))
-            nil
-            (dissoc result :db)))
+        (reduce-kv
+          (fn [_ fx-key value]
+            (let [fx-fn (get fx-config fx-key)]
+              (if-not fx-fn
+                (js/console.warn "invalid fx" fx-key value)
+                (let [transact-fn
+                      (fn [fx-tx]
+                        ;; FIXME: should probably track the fx causing this transaction and the original tx
+                        ;; FIXME: should probably prohibit calling this while tx is still processing?
+                        ;; just meant for async events triggered by fx
+                        (tx* env fx-tx))
+                      fx-env
+                      (assoc env :transact! transact-fn)]
+                  (fx-fn fx-env value)))))
+          nil
+          (dissoc result :db))
 
         (when (seq interceptors)
           (js/console.warn "TBD, ignored interceptors for event" ev-id))
@@ -115,24 +115,18 @@
          (keyword? (first tx))]}
   (tx* env tx))
 
-(defn reg-event-fx [{::keys [config-ref] :as env} ev-id interceptors handler-fn]
-  {:pre [(map? env)
-         (keyword? ev-id)
+(defn reg-event-fx [app-ref ev-id interceptors handler-fn]
+  {:pre [(keyword? ev-id)
          (vector? interceptors)
          (fn? handler-fn)]}
-  (swap! config-ref assoc-in [:events ev-id]
+  (swap! app-ref assoc-in [::event-config ev-id]
     {:handler-fn handler-fn
      :interceptors interceptors})
-  env)
+  app-ref)
 
-(defn reg-fx [{::keys [config-ref] :as env} fx-id handler-fn]
-  (swap! config-ref assoc-in [:fx fx-id] handler-fn)
-  env)
-
-(defn prepare [env data-ref]
-  (assoc env
-    ::config-ref (atom {:events {}})
-    ::data-ref data-ref))
+(defn reg-fx [app-ref fx-id handler-fn]
+  (swap! app-ref assoc-in [::fx-config fx-id] handler-fn)
+  app-ref)
 
 (defonce query-queue (js/Promise.resolve))
 
@@ -157,7 +151,7 @@
       (set! read-keys @observed-data)
 
       ;; if query is still loading don't send to main
-      (when (and (not (keyword-identical? result ::db/loading))
+      (when (and (not (keyword-identical? result :db/loading))
                  ;; empty result likely means the query is no longer valid
                  ;; eg. deleted ident. don't send update, will likely be destroyed
                  ;; when other query updates
@@ -223,7 +217,15 @@
                                              (js/Math.min 10 (.getCount buffer)))}]
             )))))
 
-(defn init [env]
+
+(defn prepare [init-env data-ref]
+  (atom
+    (assoc init-env
+      ::event-config {}
+      ::fx-config {}
+      ::data-ref data-ref)))
+
+(defn init! [app-ref]
   (let [tr (transit/reader :json)
         tw (transit/writer :json)
 
@@ -242,19 +244,20 @@
         (atom {})
 
         env
-        (assoc env
-          ::active-queries-ref active-queries-ref
-          ::active-streams-ref active-streams-ref
-          ::invalidate-keys-ref (atom #{})
-          ::transit-read transit-read
-          ::transit-str transit-str)]
+        {::active-queries-ref active-queries-ref
+         ::active-streams-ref active-streams-ref
+         ::invalidate-keys-ref (atom #{})
+         ::transit-read transit-read
+         ::transit-str transit-str}]
+
+    (swap! app-ref merge env)
 
     #_(set! js/self -onerror
         (fn [e]
           ;; FIXME: tell main?
           (js/console.warn "unhandled error" e)))
 
-    (reg-fx env :stream-add
+    (reg-fx app-ref :stream-add
       (fn [{:keys [] :as env} items]
         (reduce
           (fn [_ [stream-key stream-item]]
@@ -275,7 +278,7 @@
           nil
           items)))
 
-    (reg-fx env :stream-merge
+    (reg-fx app-ref :stream-merge
       (fn [env m]
         (reduce-kv
           (fn [env stream-key items]
@@ -314,16 +317,18 @@
       (fn [e]
         (let [msg (transit-read (.-data e))]
           ;; (js/console.log "worker-msg" (first msg) msg)
-          (worker-message env msg))))
+          (worker-message @app-ref msg))))
 
     (js/postMessage (transit-str [:worker-ready]))
+    ))
 
-    env))
+(defn stream-setup [app-ref  stream-key opts]
+  (let [{::keys [active-streams-ref]} @app-ref
 
-(defn stream-setup [{::keys [active-streams-ref] :as env} stream-key opts]
-  (let [stream
+        stream
         {:stream-key stream-key
          :opts opts
          :subs #{}
          :buffer (CircularBuffer. (:capacity opts 1000))}]
+
     (swap! active-streams-ref assoc stream-key stream)))
