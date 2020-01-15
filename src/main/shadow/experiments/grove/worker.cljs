@@ -211,7 +211,7 @@
 
 (defmethod worker-message :stream-init
   [{::keys [active-streams-ref] :as env} [_ stream-id stream-key opts :as msg]]
-  (js/console.log "stream-init" env stream-key msg)
+  ;; (js/console.log "stream-init" env stream-key msg)
   (let [{:keys [^CircularBuffer buffer] :as stream-info} (get @active-streams-ref stream-key)]
     (if-not stream-info
       (js/console.warn "stream not found, can't init" msg)

@@ -14,7 +14,6 @@
     [shadow.experiments.grove.main.util :as util]
     [shadow.experiments.grove.main.suspense :as suspense]
     [shadow.experiments.grove.main.streams :as streams]
-    [shadow.experiments.grove.main.vlist :as vlist]
     [shadow.experiments.grove.main.atoms :as atoms]
     ))
 
@@ -161,19 +160,18 @@
 
 (defn query-ident
   ([ident query]
-   {:pre [;; (db/ident? ident) FIXME: can't access db namespace in main, move to protocols?
-          (vector? query)]}
-   (QueryHook. ident query {} nil nil nil nil nil false nil))
+   (query-ident ident query {}))
   ([ident query config]
    {:pre [;; (db/ident? ident) FIXME: can't access db namespace in main, move to protocols?
+          (vector? ident)
+          (keyword? (first ident))
           (vector? query)
           (map? config)]}
    (QueryHook. ident query config nil nil nil nil nil false nil)))
 
 (defn query-root
   ([query]
-   {:pre [(vector? query)]}
-   (QueryHook. nil query {} nil nil nil nil nil false nil))
+   (query-root query {}))
   ([query config]
    {:pre [(vector? query)
           (map? config)]}
@@ -245,6 +243,3 @@
 
 (defn render-seq [coll key-fn render-fn]
   (sa/render-seq coll key-fn render-fn))
-
-(defn vlist [ident attr opts item-fn]
-  (vlist/->VirtualNode ident attr opts item-fn))

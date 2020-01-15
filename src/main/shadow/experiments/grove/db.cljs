@@ -82,7 +82,7 @@
         (get-in schema [:entities entity-type])
 
         item-ident
-        (get item ::ident)
+        (get item :db/ident)
 
         id-val
         (get item id-attr)
@@ -104,7 +104,7 @@
         item
         (if (= item-ident ident)
           item
-          (assoc item ::ident ident))
+          (assoc item :db/ident ident))
 
         item
         (reduce-kv
@@ -266,7 +266,7 @@
   :default ::default)
 
 (defmethod query-calc ::default [env db current query-part params]
-  (get current query-part))
+  (get current query-part :db/undefined))
 
 ;; FIXME: this tracking of ::loading is really annoying, should probably just throw instead?
 (defn- process-query-part
@@ -335,6 +335,15 @@
                         :else
                         (assoc! result join-key query-val)))))
 
+                ;; nested-map, may want to join nested
+                (map? join-val)
+                (let [query-val (query env db join-val join-attrs)]
+                  (cond
+                    (keyword-identical? query-val ::loading)
+                    query-val
+                    :else
+                    (assoc! result join-key query-val)))
+
                 ;; {:some-prop [[:some-other-ident 123] [:some-other-ident 456]]}
                 (coll? join-val)
                 (assoc! result join-key
@@ -342,7 +351,12 @@
                     (fn [join-item]
                       (cond
                         (ident? join-item)
-                        (query env db (get db join-item) join-attrs)
+                        (let [joined (get db join-item)]
+                          (if (map? joined)
+                            (query env db joined join-attrs)
+                            (throw (ex-info "coll item join missing" {:join-key join-key
+                                                                      :join-val join-val
+                                                                      :join-item join-item}))))
 
                         (map? join-item)
                         (query env db join-item join-attrs)
@@ -354,15 +368,6 @@
                                   :join-item join-item
                                   :current current}))))
                     join-val))
-
-                ;; non-normalized nested-map
-                (map? join-val)
-                (let [query-val (query env db join-val join-attrs)]
-                  (cond
-                    (keyword-identical? query-val ::loading)
-                    query-val
-                    :else
-                    (assoc! result join-key query-val)))
 
                 :else
                 (throw (ex-info "don't know how to join" {:query-part query-part :join-val join-val :join-key join-key}))))
@@ -429,8 +434,8 @@
     (ident? thing)
     (dissoc data thing)
 
-    (and (map? thing) (::ident thing))
-    (dissoc data (::ident thing))
+    (and (map? thing) (:db/ident thing))
+    (dissoc data (:db/ident thing))
 
     :else
     (throw (ex-info "don't know how to remove thing" {:thing thing}))))

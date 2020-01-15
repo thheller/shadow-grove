@@ -10,14 +10,13 @@
 (declare VirtualNode)
 
 (deftype VirtualList
-  [env
+  [^VirtualConfig config
+   env
    ^not-native query-engine
    query-id
    ^:mutable query
    ident
-   attr
    opts
-   item-fn
    ^:mutable items
    ^:mutable ^js container-el
    ^:mutable ^js inner-el]
@@ -25,11 +24,13 @@
   ap/IUpdatable
   (supports? [this ^VirtualNode next]
     (and (instance? VirtualNode next)
-         (= ident (.-ident next))
-         (keyword-identical? attr (.-attr next))))
+         (identical? config (.-config next))
+         ;; might be nil, set when constructing from opts
+         (= ident (:ident (.-opts next)))))
 
-  (dom-sync! [this next]
-    (js/console.log "vlist sync" this next))
+  (dom-sync! [this ^VirtualNode next]
+    (when (not= opts (.-opts next))
+      (js/console.log "vlist sync, opts changed" this next)))
 
   ap/IManageNodes
   (dom-insert [this parent anchor]
@@ -76,17 +77,17 @@
       (gp/unregister-query query-engine query-id))
 
     (let [attr-opts {:offset offset :num num}
-          attr-with-opts (list attr attr-opts)]
+          attr-with-opts (list (.-attr config) attr-opts)]
       (set! query (if ident [{ident [attr-with-opts]}] [attr-with-opts])))
 
     (gp/register-query query-engine env query-id query {} #(.handle-query-result! this %)))
 
   (handle-query-result! [this result]
     (let [{:keys [item-count offset slice] :as data}
-          (if ident (get-in result [ident attr] (get result attr)))
+          (if ident (get-in result [ident (.-attr config)] (get result (.-attr config))))
 
           {:keys [item-height]}
-          opts]
+          (.-config config)]
 
       (cond
         (not items)
@@ -104,7 +105,7 @@
           (when (.in-visible-range? this idx)
             (let [current (aget items idx)]
               (if-not current
-                (let [rendered (item-fn val idx)
+                (let [rendered (. config (item-fn val idx opts))
                       managed (ap/as-managed rendered env)
 
                       el-wrapper
@@ -126,7 +127,7 @@
 
                 ;; current exists, try to update or replace
                 (let [{:keys [managed]} current
-                      rendered (item-fn val idx)]
+                      rendered (. config (item-fn val idx opts))]
                   (if (ap/supports? managed rendered)
                     (do (ap/dom-sync! managed rendered)
                         (aset items idx (assoc current :val val)))
@@ -151,7 +152,8 @@
 
   (measure! [this]
     (let [scroll-top (.-scrollTop container-el)
-          {:keys [item-height]} opts
+          {:keys [item-height]}
+          (.-config config)
 
           min-idx
           (js/Math.floor (/ scroll-top item-height))
@@ -172,12 +174,38 @@
     (.update-query! this (.-visible-offset this) (.-max-items this))
     ))
 
-(deftype VirtualNode [ident attr opts item-fn]
+(deftype VirtualNode [config opts]
   ap/IConstruct
   (as-managed [this env]
     (let [query-engine (::gp/query-engine env)]
       (when-not query-engine
         (throw (ex-info "missing query engine" {:env env})))
-      (doto (VirtualList. env query-engine (util/next-id) nil ident attr opts item-fn nil nil nil)
+      (doto (VirtualList.
+              config
+              env
+              query-engine
+              (util/next-id)
+              nil
+              (:ident opts)
+              opts
+              nil
+              nil
+              nil)
         (.init!)))))
 
+(deftype VirtualConfig [attr config item-fn]
+  IFn
+  (-invoke [this opts]
+    (VirtualNode. this opts)))
+
+(defn configure ^not-native [vlist-attr config item-fn]
+  {:pre [(keyword? vlist-attr)
+         (map? config)
+         ;; FIXME: variable size would be nice but thats a lot more work
+         (pos-int? (:item-height config))
+         ;; FIXME: item-fn should be allowed to be IFn (ie. components)?
+         ;; it is not because it needs to be invoked differently then
+         ;; investigate if components actually make sense first though
+         ;; the result should only ever be one element?
+         (fn? item-fn)]}
+  (VirtualConfig. vlist-attr config item-fn))
