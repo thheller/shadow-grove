@@ -75,8 +75,8 @@
    render-fn])
 
 (defprotocol IQueryEngine
-  (register-query [this env key query config callback])
-  (unregister-query [this key])
+  (query-init [this env key query config callback])
+  (query-destroy [this key])
   (transact! [this env tx]))
 
 (defprotocol IStreamEngine

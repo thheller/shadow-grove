@@ -138,12 +138,12 @@
 
   Object
   (register-query! [this]
-    (gp/register-query query-engine env query-id (if ident [{ident query}] query) config
+    (gp/query-init query-engine env query-id (if ident [{ident query}] query) config
       (fn [result]
         (.set-data! this result))))
 
   (unregister-query! [this]
-    (gp/unregister-query query-engine query-id))
+    (gp/query-destroy query-engine query-id))
 
   (set-loading! [this]
     (set! ready? (false? (:suspend config)))

@@ -1,6 +1,7 @@
 (ns shadow.experiments.grove.http-fx
   (:require
-    [clojure.string :as str]))
+    [clojure.string :as str]
+    [shadow.experiments.grove.worker :as sw]))
 
 ;; this is using XMLHttpRequest. no intent on making this usable with anything else.
 ;; might split this up into different namespace so there could be one variant using js/fetch
@@ -16,7 +17,22 @@
     (when-not request-format
       (throw (ex-info "no request-format configured but :body provided" {:env env :config config :body body :opts opts})))
 
-    (request-format env body opts)))
+    (cond
+      (fn? request-format)
+      (request-format env body opts)
+
+      (= :transit request-format)
+      (let [{::sw/keys [^function transit-str]} env]
+        ["application/transit+json; charset=utf-8"
+         (transit-str body)])
+
+      (= :edn request-format)
+      ["application/edn; charset=utf-8"
+       (pr-str body)]
+
+      :else
+      (throw (ex-info "unknown request format" {:request-format request-format :config config :env env}))
+      )))
 
 (defn body-transform [config env request ^js xhr-req]
   (let [content-type
@@ -95,10 +111,11 @@
           [:GET request nil {}]
 
           (map? request)
-          [(get request :method :GET)
-           (or (get request :uri) (throw (ex-info "missing :uri in request map" {:request request})))
-           (:body request)
-           request])
+          (let [{:keys [method uri body]} request]
+            [(or method (if body :POST :GET))
+             (or uri "")
+             body
+             request]))
 
         {:keys [timeout]}
         opts
@@ -187,13 +204,13 @@
 ;; taking the read-fns from env so this ns doesn't depend on either cljs.reader nor transit
 ;; there are also several other places that will require these fns anyways
 (defn parse-edn [env ^js xhr-req]
-  (let [read-fn (:shadow.experiments.grove/edn-read env)]
+  (let [read-fn (:shadow.experiments.grove.worker/edn-read env)]
     (when-not read-fn
       (throw (ex-info "received a EDN response but didn't have edn-read fn" {})))
     (read-fn (.-responseText xhr-req))))
 
 (defn parse-transit [env ^js xhr-req]
-  (let [read-fn (:shadow.experiments.grove/transit-read env)]
+  (let [read-fn (:shadow.experiments.grove.worker/transit-read env)]
     (when-not read-fn
       (throw (ex-info "received a transit response but didn't have transit-read fn" {})))
     (read-fn (.-responseText xhr-req))))

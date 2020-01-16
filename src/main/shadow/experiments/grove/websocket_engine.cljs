@@ -11,11 +11,11 @@
 (deftype Engine
   [websocket active-queries-ref transit-str]
   gp/IQueryEngine
-  (register-query [this env query-id query config callback]
+  (query-init [this env query-id query config callback]
     (swap! active-queries-ref assoc query-id callback)
     (send-to-ws websocket transit-str [:query-init query-id query]))
 
-  (unregister-query [this query-id]
+  (query-destroy [this query-id]
     (send-to-ws websocket transit-str [:query-destroy query-id]))
 
   (transact! [this env tx]

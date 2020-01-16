@@ -7,11 +7,11 @@
 (deftype WorkerEngine
   [^function send! active-queries-ref active-streams-ref]
   gp/IQueryEngine
-  (register-query [this env query-id query config callback]
+  (query-init [this env query-id query config callback]
     (swap! active-queries-ref assoc query-id callback)
     (send! [:query-init query-id query]))
 
-  (unregister-query [this query-id]
+  (query-destroy [this query-id]
     (send! [:query-destroy query-id]))
 
   (transact! [this env tx]

@@ -124,7 +124,8 @@
                          :base-url "https://conduit.productionready.io/api"
                          :request-format
                          (fn [env body opts]
-                           (json/write-str body))
+                           ["application/json; charset=utf-8"
+                            (json/write-str body)])
                          :response-formats
                          {"application/json"
                           (fn [env xhr-req]

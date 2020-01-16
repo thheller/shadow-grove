@@ -312,6 +312,9 @@
                 (keyword-identical? join-val :db/loading)
                 join-val
 
+                (keyword-identical? join-val :db/undefined)
+                result
+
                 (nil? join-val)
                 result
 

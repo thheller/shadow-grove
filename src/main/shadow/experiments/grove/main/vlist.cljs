@@ -74,13 +74,13 @@
 
   (update-query! [this offset num]
     (when query
-      (gp/unregister-query query-engine query-id))
+      (gp/query-destroy query-engine query-id))
 
     (let [attr-opts {:offset offset :num num}
           attr-with-opts (list (.-attr config) attr-opts)]
       (set! query (if ident [{ident [attr-with-opts]}] [attr-with-opts])))
 
-    (gp/register-query query-engine env query-id query {} #(.handle-query-result! this %)))
+    (gp/query-init query-engine env query-id query {} #(.handle-query-result! this %)))
 
   (handle-query-result! [this result]
     (let [{:keys [item-count offset slice] :as data}
