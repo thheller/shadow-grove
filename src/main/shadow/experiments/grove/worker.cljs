@@ -59,7 +59,9 @@
             (db/transacted before)
 
             tx-env
-            (assoc env :db tx-db)
+            (assoc env ::event-id ev-id
+                       ::tx tx
+                       :db tx-db)
 
             {^clj tx-after :db :as result}
             (apply handler-fn tx-env params)]

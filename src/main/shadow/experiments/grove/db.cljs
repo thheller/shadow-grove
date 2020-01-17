@@ -272,6 +272,9 @@
 (defn- process-query-part
   [env db current result query-part]
   (cond
+    (keyword-identical? query-part :db/all)
+    (reduce-kv assoc! result current)
+
     ;; simple attr
     (keyword? query-part)
     (let [calced (.cljs$core$IFn$_invoke$arity$5 query-calc env db current query-part {})]

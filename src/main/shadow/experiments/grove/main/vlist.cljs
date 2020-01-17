@@ -63,7 +63,11 @@
     (.appendChild container-el inner-el)
 
     (.addEventListener container-el "scroll"
-      (gfn/debounce #(.handle-scroll! this %) 100))
+      (gfn/debounce #(.handle-scroll! this %)
+        ;; there is a good balance between too much work and too long wait
+        ;; every scroll update will trigger a potentially complex DOM change
+        ;; so it shouldn't do too much
+        (:scroll-delay config 25)))
 
     ;; FIXME: this should first get the size of the container-el
     ;; but for that we need to wait till inserted into the DOM
