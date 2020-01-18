@@ -517,11 +517,10 @@
           (ident? key)
 
           next-data
-          (-> data
+          (-> (-dissoc data key)
               (cond->
                 key-is-ident?
-                (-> (-dissoc key)
-                    (update (coll-key key) disj key))))
+                (update (coll-key key) disj key)))
 
           next-removed
           (-> keys-removed
