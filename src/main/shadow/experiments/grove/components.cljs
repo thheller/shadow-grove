@@ -543,6 +543,7 @@
 
     cfg))
 
+
 (defn get-arg ^not-native [^ManagedComponent comp idx]
   (-nth ^not-native (.-args comp) idx))
 

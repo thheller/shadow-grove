@@ -7,14 +7,15 @@
 (deftype WorkerEngine
   [^function send! active-queries-ref active-streams-ref]
   gp/IQueryEngine
-  (query-init [this env query-id query config callback]
+  (query-init [this query-id query config callback]
     (swap! active-queries-ref assoc query-id callback)
     (send! [:query-init query-id query]))
 
   (query-destroy [this query-id]
+    (swap! active-queries-ref dissoc query-id)
     (send! [:query-destroy query-id]))
 
-  (transact! [this env tx]
+  (transact! [this tx]
     (send! [:tx tx]))
 
   gp/IStreamEngine
@@ -65,7 +66,7 @@
              ;; (js/console.log "main read took" (- t start))
              (case op
                :worker-ready
-               (js/console.log "worker is ready")
+               nil
 
                :query-result
                (let [[query-id result] args

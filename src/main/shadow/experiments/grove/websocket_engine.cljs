@@ -18,7 +18,7 @@
   (query-destroy [this query-id]
     (send-to-ws websocket transit-str [:query-destroy query-id]))
 
-  (transact! [this env tx]
+  (transact! [this tx]
     (send-to-ws websocket transit-str [:tx tx])))
 
 (defn init

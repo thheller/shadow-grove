@@ -84,7 +84,7 @@
           attr-with-opts (list (.-attr config) attr-opts)]
       (set! query (if ident [{ident [attr-with-opts]}] [attr-with-opts])))
 
-    (gp/query-init query-engine env query-id query {} #(.handle-query-result! this %)))
+    (gp/query-init query-engine query-id query {} #(.handle-query-result! this %)))
 
   (handle-query-result! [this result]
     (let [{:keys [item-count offset slice] :as data}
@@ -202,7 +202,7 @@
   (-invoke [this opts]
     (VirtualNode. this opts)))
 
-(defn configure ^not-native [vlist-attr config item-fn]
+(defn configure [vlist-attr config item-fn]
   {:pre [(keyword? vlist-attr)
          (map? config)
          ;; FIXME: variable size would be nice but thats a lot more work
@@ -212,4 +212,9 @@
          ;; investigate if components actually make sense first though
          ;; the result should only ever be one element?
          (fn? item-fn)]}
-  (VirtualConfig. vlist-attr config item-fn))
+
+  ;; shadow-tweak so it skips checking and blindly invokes IFN
+  ;; FIXME: this should work via (defn configure ^not-native [...])
+  ;; but doesn't because tag inference overwrites it with the deftype type
+  ^not-native
+  (->VirtualConfig vlist-attr config item-fn))

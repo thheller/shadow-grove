@@ -138,7 +138,7 @@
 
   Object
   (register-query! [this]
-    (gp/query-init query-engine env query-id (if ident [{ident query}] query) config
+    (gp/query-init query-engine query-id (if ident [{ident query}] query) config
       (fn [result]
         (.set-data! this result))))
 
@@ -180,7 +180,7 @@
 (defn tx*
   [{::gp/keys [query-engine] :as env} tx]
   (assert query-engine "missing query-engine in env")
-  (gp/transact! query-engine env tx))
+  (gp/transact! query-engine tx))
 
 (defn tx [env e & params]
   (tx* env (into [(::comp/ev-id env)] params)))
