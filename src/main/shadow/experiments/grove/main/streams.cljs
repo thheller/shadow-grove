@@ -8,7 +8,7 @@
 
 (util/assert-not-in-worker!)
 
-(declare StreamNode)
+(declare StreamInit)
 
 (deftype StreamRoot
   [env
@@ -19,15 +19,16 @@
    item-fn
    ^:mutable container-el
    ^:mutable inner-el
+   ^boolean ^:mutable dom-entered?
    ]
 
   ap/IUpdatable
-  (supports? [this next]
-    (and (instance? StreamNode next)
+  (supports? [this ^StreamInit next]
+    (and (instance? StreamInit next)
          (keyword-identical? stream-key (.-stream-key next))
          (identical? item-fn (.-item-fn next))))
 
-  (dom-sync! [this ^StreamNode next]
+  (dom-sync! [this ^StreamInit next]
     ;; not sure what this should sync. shouldn't really need updating
     )
 
@@ -39,6 +40,7 @@
     container-el)
 
   (dom-entered! [this]
+    (set! dom-entered? true)
     (js/console.log "stream entered" this))
 
   ap/IDestructible
@@ -101,12 +103,12 @@
       (js/console.log "unhandled stream msg" op msg)
       )))
 
-(deftype StreamNode [stream-key opts item-fn]
+(deftype StreamInit [stream-key opts item-fn]
   ap/IConstruct
   (as-managed [this env]
     (let [stream-engine (::gp/query-engine env)]
       (when-not (satisfies? gp/IStreamEngine stream-engine)
         (throw (ex-info "engine does not implement streaming features" {:env env})))
 
-      (doto (StreamRoot. env stream-engine (util/next-id) stream-key opts item-fn nil nil)
+      (doto (StreamRoot. env stream-engine (util/next-id) stream-key opts item-fn nil nil false)
         (.init!)))))

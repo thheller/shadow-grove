@@ -7,7 +7,7 @@
 
 (util/assert-not-in-worker!)
 
-(declare SuspenseRootNode)
+(declare SuspenseInit)
 
 (deftype SuspenseRoot
   [^:mutable opts
@@ -24,9 +24,9 @@
 
   ap/IUpdatable
   (supports? [this next]
-    (instance? SuspenseRootNode next))
+    (instance? SuspenseInit next))
 
-  (dom-sync! [this ^SuspenseRootNode next]
+  (dom-sync! [this ^SuspenseInit next]
     ;; FIXME: figure out strategy for this?
     ;; if displaying fallback start rendering in background
     ;; if displaying managed and supported, just sync
@@ -169,7 +169,7 @@
         (set! timeout nil)
         ))))
 
-(deftype SuspenseRootNode [opts vnode]
+(deftype SuspenseInit [opts vnode]
   ap/IConstruct
   (as-managed [this env]
     (doto (SuspenseRoot. opts vnode (common/dom-marker env) env (::gp/scheduler env) nil nil nil #{} nil false)

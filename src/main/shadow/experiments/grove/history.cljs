@@ -32,13 +32,14 @@
   (.setEnabled history true)
   app-env)
 
+;; FIXME: this should take some config to be more flexible
+(defn init []
+  (fn [app-env]
+    (let [history
+          (doto (Html5History.)
+            (.setPathPrefix "/")
+            (.setUseFragment false))]
 
-(defn init [app-env]
-  (let [history
-        (doto (Html5History.)
-          (.setPathPrefix "/")
-          (.setUseFragment false))]
-
-    (-> app-env
-        (assoc ::history history)
-        (setup-history history))))
+      (-> app-env
+          (assoc ::history history)
+          (setup-history history)))))

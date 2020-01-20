@@ -44,6 +44,7 @@
     (set! dom-entered? true)
 
     ;; can only measure once added to the actual document
+    ;; FIXME: should also add a resizeobserver in case things get resized
     (.measure! this)
     (.update-query! this (.-visible-offset this) (.-max-items this)))
 
@@ -61,6 +62,7 @@
       #js {"outline" "none"
            "overflow-y" "auto"
            "width" "100%"
+           "min-height" "100%"
            "height" "100%"})
 
     (set! inner-el (js/document.createElement "div"))
@@ -169,6 +171,9 @@
 
           container-height
           (.-clientHeight container-el)
+
+          _ (when (zero? container-height)
+              (js/console.warn "vlist container height measured zero!" container-el this))
 
           max-items ;; inc to avoid half items
           (inc (js/Math.ceil (/ container-height item-height)))]

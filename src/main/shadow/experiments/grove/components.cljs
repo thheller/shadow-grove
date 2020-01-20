@@ -18,31 +18,31 @@
 
 (defonce components-ref (atom {}))
 
-(declare ^{:arglists '([x])} component-node?)
-(declare ^{:arglists '([component args])} ->ComponentNode)
+(declare ^{:arglists '([x])} component-init?)
+(declare ^{:arglists '([component args])} ->ComponentInit)
 
-(defn- make-component-node [component args]
+(defn- make-component-init [component args]
   ;; FIXME: maybe use array, never directly accessible anyways
   {:pre [(vector? args)]}
-  (->ComponentNode component args))
+  (->ComponentInit component args))
 
 (extend-type gp/ComponentConfig
   cljs.core/IFn
   (-invoke
     ([this]
-     (make-component-node this []))
+     (make-component-init this []))
     ([this a1]
-     (make-component-node this [a1]))
+     (make-component-init this [a1]))
     ([this a1 a2]
-     (make-component-node this [a1 a2]))
+     (make-component-init this [a1 a2]))
     ([this a1 a2 a3]
-     (make-component-node this [a1 a2 a3]))
+     (make-component-init this [a1 a2 a3]))
     ([this a1 a2 a3 a4]
-     (make-component-node this [a1 a2 a3 a4]))
+     (make-component-init this [a1 a2 a3 a4]))
     ([this a1 a2 a3 a4 a5]
-     (make-component-node this [a1 a2 a3 a4 a5]))
+     (make-component-init this [a1 a2 a3 a4 a5]))
     ([this a1 a2 a3 a4 a5 a6]
-     (make-component-node this [a1 a2 a3 a4 a5 a6]))
+     (make-component-init this [a1 a2 a3 a4 a5 a6]))
     ;; FIXME: add more, user should really use maps at this point
     ))
 
@@ -119,11 +119,11 @@
 
   p/IUpdatable
   (supports? [this next]
-    (and (component-node? next)
-         (let [other (.-component ^ComponentNode next)]
+    (and (component-init? next)
+         (let [other (.-component ^ComponentInit next)]
            (identical? config other))))
 
-  (dom-sync! [this ^ComponentNode next]
+  (dom-sync! [this ^ComponentInit next]
     (. config (check-args-fn this args (.-args next)))
     (set! args (.-args next))
     (when (gp/work-pending? this)
@@ -204,7 +204,7 @@
 
   ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
-  ;; can't do this in the ComponentNode.as-managed since we need the this pointer
+  ;; can't do this in the ComponentInit.as-managed since we need the this pointer
   (component-init! [^ComponentInstance this]
     (let [child-env
           (-> parent-env
@@ -431,19 +431,19 @@
           )
     (.component-init!)))
 
-(deftype ComponentNode [component args]
+(deftype ComponentInit [component args]
   p/IConstruct
   (as-managed [this env]
     (component-create env component args))
 
   IEquiv
-  (-equiv [this ^ComponentNode other]
-    (and (instance? ComponentNode other)
+  (-equiv [this ^ComponentInit other]
+    (and (instance? ComponentInit other)
          (identical? component (.-component other))
          (= args (.-args other)))))
 
-(defn component-node? [x]
-  (instance? ComponentNode x))
+(defn component-init? [x]
+  (instance? ComponentInit x))
 
 (defn call-event-fn [{::keys [^ManagedComponent component] :as env} ev-id e ev-args]
   (when-not component

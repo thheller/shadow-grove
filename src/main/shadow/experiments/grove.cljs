@@ -8,7 +8,6 @@
     [shadow.experiments.arborist.fragments] ;; util macro references this
     [shadow.experiments.arborist :as sa]
     [goog.async.nextTick]
-    [cognitect.transit :as transit]
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.components :as comp]
     [shadow.experiments.grove.main.util :as util]
@@ -17,7 +16,9 @@
     [shadow.experiments.grove.main.atoms :as atoms]
     ))
 
+;; these are private - should not be accessed from the outside
 (defonce active-roots-ref (atom {}))
+(defonce active-apps-ref (atom {}))
 
 (deftype TreeScheduler [^:mutable work-arr ^:mutable update-pending?]
   gp/IScheduleUpdates
@@ -188,39 +189,55 @@
 (defn run-tx [env tx]
   (tx* env tx))
 
-(defn form [defaults])
+(defn init [app-id init-env init-features]
+  {:pre [(some? app-id)
+         (map? init-env)
+         (sequential? init-features)
+         (every? fn? init-features)]}
 
-(defn form-values [form])
+  (let [scheduler (TreeScheduler. (array) false)
 
-(defn form-reset! [form])
+        env
+        (assoc init-env
+          ::app-id app-id
+          ::gp/scheduler scheduler
+          ::suspense-keys (atom {}))
 
-(defn init
-  [env app-id]
-  (let [scheduler (TreeScheduler. (array) false)]
-    (assoc env
-      ::app-id app-id
-      ::gp/scheduler scheduler
-      ::suspense-keys (atom {}))))
+        env
+        (reduce
+          (fn [env init-fn]
+            (init-fn env))
+          env
+          init-features)]
 
-(defn start [env root-el root-node]
-  (let [active (get @active-roots-ref root-el)]
-    (if-not active
-      (let [root (sa/dom-root root-el env)]
-        (sa/update! root root-node)
-        (swap! active-roots-ref assoc root-el {:env env :root root :root-el root-el})
-        ::started)
+    (swap! active-apps-ref assoc app-id env)
 
-      (let [{:keys [root]} active]
-        (assert (identical? env (:env active)) "can't change env between restarts")
-        (sa/update! root root-node)
-        ::updated
-        ))))
+    ;; never expose the env so people don't get ideas about using it
+    app-id))
 
-(defn stop [root-el]
-  (when-let [{::keys [app-root] :as env} (get @active-roots-ref root-el)]
-    (swap! active-roots-ref dissoc root-el)
-    (ap/destroy! app-root)
-    (dissoc env ::app-root ::root-el)))
+(defn start [app-id root-el root-node]
+  (let [env (get @active-apps-ref app-id)]
+    (if-not env
+      (throw (ex-info "app not initialized" {:app-id app-id}))
+      (let [active (get @active-roots-ref root-el)]
+        (if-not active
+          (let [root (sa/dom-root root-el env)]
+            (sa/update! root root-node)
+            (swap! active-roots-ref assoc root-el {:env env :root root :root-el root-el})
+            ::started)
+
+          (let [{:keys [root]} active]
+            (assert (identical? env (:env active)) "can't change env between restarts")
+            (sa/update! root root-node)
+            ::updated
+            ))))))
+
+;; FIXME: figure out if stop is ever needed?
+#_(defn stop [root-el]
+    (when-let [{::keys [app-root] :as env} (get @active-roots-ref root-el)]
+      (swap! active-roots-ref dissoc root-el)
+      (ap/destroy! app-root)
+      (dissoc env ::app-root ::root-el)))
 
 (defn watch [the-atom]
   (atoms/->AtomWatch the-atom nil nil nil))
@@ -236,10 +253,18 @@
    (atoms/->EnvWatch key-to-atom path default nil nil nil nil)))
 
 (defn suspense [opts vnode]
-  (suspense/->SuspenseRootNode opts vnode))
+  (suspense/->SuspenseInit opts vnode))
 
 (defn stream [stream-key opts item-fn]
-  (streams/->StreamNode. stream-key opts item-fn))
+  (streams/->StreamInit stream-key opts item-fn))
 
 (defn render-seq [coll key-fn render-fn]
   (sa/render-seq coll key-fn render-fn))
+
+;; TBD
+(defn form [defaults])
+
+(defn form-values [form])
+
+(defn form-reset! [form])
+
