@@ -1,8 +1,13 @@
 (ns shadow.experiments.arborist.common
-  (:require [shadow.experiments.arborist.protocols :as p]))
+  (:require
+    [goog.dom :as gdom]
+    [shadow.experiments.arborist.protocols :as p]))
 
 (defn dom-marker [env]
   (js/document.createTextNode ""))
+
+(defn in-document? [el]
+  (gdom/isInDocument el))
 
 (defn fragment-replace [old-managed new-managed]
   (let [first-node (p/dom-first old-managed)
@@ -18,14 +23,26 @@
     (fragment-replace old new)))
 
 ;; swappable root
-(deftype ManagedRoot [env ^:mutable marker ^:mutable ^not-native node ^:mutable val]
+(deftype ManagedRoot
+  [env
+   ^boolean ^:mutable dom-entered?
+   ^:mutable marker
+   ^:mutable
+   ^not-native node
+   ^:mutable val]
   p/IManageNodes
   (dom-first [this] marker)
 
   (dom-insert [this parent anchor]
     (.insertBefore parent marker anchor)
     (when node
-      (p/dom-insert node parent anchor)))
+      (p/dom-insert node parent anchor)
+      ))
+
+  (dom-entered! [this]
+    (set! dom-entered? true)
+    (when node
+      (p/dom-entered! node)))
 
   p/IDirectUpdate
   (update! [this next]
@@ -34,16 +51,22 @@
       (not node)
       (let [el (p/as-managed val env)]
         (set! node el)
-        ;; root was already added to dom but no node was available at the time
+        ;; root was already inserted to dom but no node was available at the time
         (when-some [parent (.-parentElement marker)]
-          (p/dom-insert node parent marker)))
+          (p/dom-insert node parent marker)
+          ;; root might not be in document yet
+          (when dom-entered?
+            (p/dom-entered! node))))
 
       (p/supports? node next)
       (p/dom-sync! node next)
 
       :else
       (let [new (replace-managed env node next)]
-        (set! node new))))
+        (set! node new)
+        (when dom-entered?
+          (p/dom-entered! new)
+          ))))
 
   p/IDestructible
   (destroy! [this]
@@ -51,8 +74,8 @@
     (when node
       (p/destroy! node))))
 
-(defn managed-root [env node val]
-  (ManagedRoot. env (dom-marker env) node val))
+(defn managed-root [env]
+  (ManagedRoot. env false (dom-marker env) nil nil))
 
 (deftype ManagedText [env ^:mutable val node]
   p/IManageNodes
@@ -60,6 +83,8 @@
 
   (dom-insert [this parent anchor]
     (.insertBefore parent node anchor))
+
+  (dom-entered! [this])
 
   p/IUpdatable
   (supports? [this next]

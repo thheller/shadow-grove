@@ -19,7 +19,8 @@
    ^:mutable display
    ^:mutable offscreen
    ^:mutable suspend-set
-   ^:mutable timeout]
+   ^:mutable timeout
+   ^boolean ^:mutable dom-entered?]
 
   ap/IUpdatable
   (supports? [this next]
@@ -67,7 +68,9 @@
       (let [new (ap/as-managed vnode child-env)]
         (if (empty? suspend-set)
           (do (common/fragment-replace display new)
-              (set! display new))
+              (set! display new)
+              (when dom-entered?
+                (ap/dom-entered! new)))
           (do (set! offscreen new)
               (.start-offscreen! this)
               (.schedule-timeout! this)
@@ -80,6 +83,10 @@
 
   (dom-first [this]
     marker)
+
+  (dom-entered! [this]
+    (set! dom-entered? true)
+    (ap/dom-entered! display))
 
   ap/IDestructible
   (destroy! [this]
@@ -140,7 +147,9 @@
             old-display display]
         ;; (js/console.log "using fallback after timeout")
         (set! display (common/fragment-replace old-display fallback))
-        )))
+        (when dom-entered?
+          (ap/dom-entered! display)
+          ))))
 
   (maybe-swap! [this]
     (when (and offscreen (empty? suspend-set))
@@ -148,6 +157,9 @@
       (ap/destroy! display)
       (set! display offscreen)
       (set! offscreen nil)
+
+      (when dom-entered?
+        (ap/dom-entered! display))
 
       (when-some [key (:key opts)]
         (swap! (::suspense-keys parent-env) dissoc key))
@@ -160,6 +172,6 @@
 (deftype SuspenseRootNode [opts vnode]
   ap/IConstruct
   (as-managed [this env]
-    (doto (SuspenseRoot. opts vnode (common/dom-marker env) env (::gp/scheduler env) nil nil nil #{} nil)
+    (doto (SuspenseRoot. opts vnode (common/dom-marker env) env (::gp/scheduler env) nil nil nil #{} nil false)
       (.init!))))
 

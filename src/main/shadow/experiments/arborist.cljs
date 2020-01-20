@@ -17,10 +17,11 @@
   (update! [this next]
     (if root
       (p/update! root next)
-      (let [new-root (common/managed-root env nil nil)]
+      (let [new-root (common/managed-root env)]
         (set! root new-root)
         (p/update! root next)
         (p/dom-insert root container nil)
+        (p/dom-entered! root)
         )))
 
   p/IDestructible
@@ -30,6 +31,7 @@
 
 (defn dom-root
   ([container env]
+   {:pre [(common/in-document? container)]}
    (let [root (TreeRoot. container nil nil)
          root-env (assoc env ::root root)]
      (set! (.-env root) root-env)

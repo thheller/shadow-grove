@@ -38,6 +38,9 @@
   (dom-first [this]
     container-el)
 
+  (dom-entered! [this]
+    (js/console.log "stream entered" this))
+
   ap/IDestructible
   (destroy! [this]
     (.remove container-el))

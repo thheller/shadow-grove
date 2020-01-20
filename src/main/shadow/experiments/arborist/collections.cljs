@@ -19,6 +19,7 @@
    ^:mutable item-vals ;; map of {key rendered}
    marker-before
    marker-after
+   ^boolean ^:mutable dom-entered?
    ]
 
   p/IManageNodes
@@ -28,6 +29,15 @@
     (.insertBefore parent marker-before anchor)
     (run! #(p/dom-insert (get items %) parent anchor) item-keys)
     (.insertBefore parent marker-after anchor))
+
+  (dom-entered! [this]
+    (set! dom-entered? true)
+    (reduce
+      (fn [_ key]
+        (let [val (get items key)]
+          (p/dom-entered! val)))
+      nil
+      item-keys))
 
   p/IUpdatable
   (supports? [this next]
@@ -73,8 +83,9 @@
                   (if-not item
                     ;; new item added to list, nothing to compare to just insert
                     (let [item (p/as-managed rendered env)]
-
                       (p/dom-insert item (.-parentNode anchor) anchor)
+                      (when dom-entered?
+                        (p/dom-entered! item))
                       (set! item-vals (assoc item-vals key rendered))
                       (set! items (assoc items key item))
                       (recur (p/dom-first item) (dec idx) updated))
@@ -106,6 +117,8 @@
                             (let [new-item (p/as-managed rendered env)]
                               (set! items (assoc items key new-item))
                               (p/dom-insert new-item dom-parent anchor)
+                              (when dom-entered?
+                                (p/dom-entered! new-item))
                               (p/destroy! item)
 
                               (recur (p/dom-first new-item) (dec idx) updated)
@@ -164,7 +177,8 @@
             (persistent! keys)
             (persistent! vals)
             marker-before
-            marker-after)
+            marker-after
+            false)
 
           (let [val (nth coll idx)
                 key (key-fn val)
@@ -208,6 +222,9 @@
     (run! #(p/dom-insert % parent anchor) items)
     (.insertBefore parent marker-after anchor))
 
+  (dom-entered! [this]
+    (js/console.log "simple collection entered" this))
+
   p/IUpdatable
   (supports? [this next]
     (instance? SimpleNode next))
@@ -235,7 +252,8 @@
 
           (if (p/supports? item new-rendered)
             (p/dom-sync! item new-rendered)
-            (aset items idx (common/replace-managed env item new-rendered)))))
+            (let [new-managed (common/replace-managed env item new-rendered)]
+              (aset items idx new-managed)))))
 
       (cond
         (= oc nc)

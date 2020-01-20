@@ -334,3 +334,9 @@
          :buffer (CircularBuffer. (:capacity opts 1000))}]
 
     (swap! active-streams-ref assoc stream-key stream)))
+
+(defn refresh-all-queries! [app-ref]
+  (let [{::keys [active-queries-ref]} @app-ref]
+    (doseq [^ActiveQuery query (vals @active-queries-ref)]
+      ;; recomputes and updates main if data changed
+      (.actually-refresh! query))))

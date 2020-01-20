@@ -34,7 +34,8 @@
    ^FragmentCode code
    ^:mutable vals
    marker
-   exports]
+   exports
+   ^boolean ^:mutable dom-entered?]
 
   p/IManageNodes
   (dom-first [this] marker)
@@ -43,6 +44,17 @@
     (.insertBefore parent marker anchor)
     (. code (mount-fn exports parent anchor)))
 
+  (dom-entered! [this]
+    ;; FIXME: maybe create fn in macro that saves traversing exports
+    ;; exports may contain many regular dom nodes and those don't need this
+    ;; but this is called once in the entire lifecycle so this should be fine
+    (set! dom-entered? true)
+    (.forEach exports
+      (fn [item]
+        (when (implements? p/IManageNodes item)
+          (p/dom-entered! item)
+          ))))
+
   p/IUpdatable
   (supports? [this ^FragmentNode next]
     (and (fragment-node? next)
@@ -50,7 +62,7 @@
 
   (dom-sync! [this ^FragmentNode next]
     (let [nvals (.-vals next)]
-      (.. code (update-fn env exports vals nvals))
+      (.. code (update-fn this env exports vals nvals))
       (set! vals nvals))
     :synced)
 
@@ -70,7 +82,7 @@
           ;; didn't benchmark but the array variant shouldn't be that much slower. maybe even faster since
           ;; the functions don't need to be recreated for each fragment instance
           exports (.. code (create-fn env vals))]
-      (ManagedFragment. env code vals (common/dom-marker env) exports)))
+      (ManagedFragment. env code vals (common/dom-marker env) exports false)))
 
   IEquiv
   (-equiv [this ^FragmentNode other]
@@ -137,13 +149,15 @@
   (p/destroy! component))
 
 ;; called by macro generated code
-(defn update-managed [env nodes idx oval nval]
+(defn update-managed [^ManagedFragment fragment env nodes idx oval nval]
   ;; not comparing oval/nval because impls can do that if needed
   (let [^not-native el (aget nodes idx)]
     (if (p/supports? el nval)
       (p/dom-sync! el nval)
       (let [next (common/replace-managed env el nval)]
-        (aset nodes idx next)))))
+        (aset nodes idx next)
+        (when (.-dom-entered? fragment)
+          (p/dom-entered! next))))))
 
 ;; called by macro generated code
 (defn update-attr [env nodes idx ^not-native attr oval nval]

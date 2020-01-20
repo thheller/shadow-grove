@@ -346,6 +346,7 @@
                 (let [ref-id (:ref-id ast)]
                   (with-loc ast
                     `(update-managed
+                       ~this-sym
                        ~env-sym
                        ~exports-sym
                        ~(get sym->idx sym)
@@ -364,7 +365,7 @@
           ast)]
 
 
-    `(fn [~env-sym ~exports-sym ~oldv-sym ~newv-sym]
+    `(fn [~this-sym ~env-sym ~exports-sym ~oldv-sym ~newv-sym]
        ~@mutations)))
 
 (defn make-mount-impl [ast sym->idx]

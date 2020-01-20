@@ -15,9 +15,13 @@
 
   p/IManageNodes
   (dom-first [this] node)
+
   (dom-insert [this parent anchor]
     (run! #(p/dom-insert % node nil) children)
     (.insertBefore parent node anchor))
+
+  (dom-entered! [this]
+    (js/console.log "managed-vector entered" this))
 
   p/IUpdatable
   (supports? [this next]

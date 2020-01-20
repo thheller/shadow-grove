@@ -93,7 +93,8 @@
    ^number ^:mutable updated-hooks
    ^boolean ^:mutable needs-render?
    ^boolean ^:mutable suspended?
-   ^boolean ^:mutable destroyed?]
+   ^boolean ^:mutable destroyed?
+   ^boolean ^:mutable dom-entered?]
 
   cljs.core/IHash
   (-hash [this]
@@ -111,6 +112,10 @@
     (p/dom-insert root parent anchor)
     (when DEBUG
       (.insertBefore parent (.-marker-after this) anchor)))
+
+  (dom-entered! [this]
+    (set! dom-entered? true)
+    (p/dom-entered! root))
 
   p/IUpdatable
   (supports? [this next]
@@ -222,7 +227,7 @@
           (doto (js/document.createComment (str "/component: " (.-component-name config)))
             (set! -shadow$instance this))))
 
-      (set! root (common/managed-root child-env nil nil))
+      (set! root (common/managed-root child-env))
       (set! current-idx (int 0))
       (set! hooks (js/Array. (alength (.-hooks config))))
 
@@ -422,6 +427,7 @@
           true ;; needs-render?
           false ;; suspended?
           false ;; destroyed?
+          false ;; dom-entered?
           )
     (.component-init!)))
 
@@ -543,7 +549,6 @@
 
     cfg))
 
-
 (defn get-arg ^not-native [^ManagedComponent comp idx]
   (-nth ^not-native (.-args comp) idx))
 
@@ -645,6 +650,9 @@
       (throw (ex-info "slot already in document" {})))
 
     (.insertBefore parent node anchor))
+
+  (dom-entered! [this]
+    (js/console.log "slot entered" this))
 
   p/IUpdatable
   (supports? [this ^SlotHook other]

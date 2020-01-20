@@ -19,7 +19,8 @@
    opts
    ^:mutable items
    ^:mutable ^js container-el
-   ^:mutable ^js inner-el]
+   ^:mutable ^js inner-el
+   ^:mutable dom-entered?]
 
   ap/IUpdatable
   (supports? [this ^VirtualNode next]
@@ -38,6 +39,13 @@
 
   (dom-first [this]
     container-el)
+
+  (dom-entered! [this]
+    (set! dom-entered? true)
+
+    ;; can only measure once added to the actual document
+    (.measure! this)
+    (.update-query! this (.-visible-offset this) (.-max-items this)))
 
   ap/IDestructible
   (destroy! [this]
@@ -67,14 +75,7 @@
         ;; there is a good balance between too much work and too long wait
         ;; every scroll update will trigger a potentially complex DOM change
         ;; so it shouldn't do too much
-        (:scroll-delay config 25)))
-
-    ;; FIXME: this should first get the size of the container-el
-    ;; but for that we need to wait till inserted into the DOM
-    (set! this -visible-offset 0)
-    (set! this -max-items 40)
-    (set! this -visible-end 40)
-    (.update-query! this 0 40))
+        (:scroll-delay config 25))))
 
   (update-query! [this offset num]
     (when query
@@ -135,9 +136,13 @@
                   (if (ap/supports? managed rendered)
                     (do (ap/dom-sync! managed rendered)
                         (aset items idx (assoc current :val val)))
-                    (aset items idx (assoc current
-                                      :val val
-                                      :managed (common/replace-managed env current rendered)))))))))
+                    (let [new-managed (common/replace-managed env current rendered)]
+                      (aset items idx (assoc current
+                                        :val val
+                                        :managed new-managed))
+                      (when dom-entered?
+                        (ap/dom-entered! new-managed)
+                        ))))))))
         nil
         slice))
 
@@ -194,7 +199,8 @@
               opts
               nil
               nil
-              nil)
+              nil
+              false)
         (.init!)))))
 
 (deftype VirtualConfig [attr config item-fn]
