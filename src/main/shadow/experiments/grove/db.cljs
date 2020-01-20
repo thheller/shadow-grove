@@ -268,6 +268,25 @@
 (defmethod query-calc ::default [env db current query-part params]
   (get current query-part :db/undefined))
 
+;; kw query with optional params
+;; ::foo
+;; (::foo {:bar 1})
+(defn- process-lookup [env db current result kw params]
+  ;; multi-fn invoke always goes through .call, seems like the compiler should optimize that
+  ;; it doesn't so I do it directly (this is called a lot so I care about a 15% overhead)
+  (let [calced (.cljs$core$IFn$_invoke$arity$5 query-calc env db current kw params)]
+    (cond
+      (keyword-identical? :db/loading calced)
+      calced
+
+      ;; don't add to result
+      (keyword-identical? :db/undefined calced)
+      result
+
+      :else
+      ;; FIXME: alias support
+      (assoc! result kw calced))))
+
 ;; FIXME: this tracking of :db/loading is really annoying, should probably just throw instead?
 (defn- process-query-part
   [env db current result query-part]
@@ -277,18 +296,12 @@
 
     ;; simple attr
     (keyword? query-part)
-    (let [calced (.cljs$core$IFn$_invoke$arity$5 query-calc env db current query-part {})]
-      (if (keyword-identical? :db/loading calced)
-        calced
-        (assoc! result query-part calced)))
+    (process-lookup env db current result query-part {})
 
     ;; (::foo {:params 1})
     (list? query-part)
     (let [[kw params] query-part]
-      (let [calced (.cljs$core$IFn$_invoke$arity$5 query-calc env db current kw params)]
-        (if (keyword-identical? :db/loading calced)
-          calced
-          (assoc! result kw calced))))
+      (process-lookup env db current result kw params))
 
     ;; join
     ;; {ident [attrs]}

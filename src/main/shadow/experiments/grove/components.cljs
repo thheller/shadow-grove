@@ -501,7 +501,7 @@
   (fn [env node oval nval]
     (event-attr env node :blur oval nval)))
 
-(a/add-attr :shadow.experiments.arborist/ref
+(a/add-attr :dom/ref
   (fn [{::keys [dom-refs] :as env} node oval nval]
     (when-not dom-refs
       (throw (ex-info "ref used outside component" {:val nval :env env})))
