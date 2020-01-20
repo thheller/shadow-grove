@@ -53,7 +53,7 @@
 
   ap/IDestructible
   (destroy! [this]
-    (js/console.log ::destroy! this)
+    ;; (js/console.log ::destroy! this)
     (.remove marker)
     (when managed
       (ap/destroy! managed)))
@@ -91,10 +91,10 @@
 (deftype LoadableInit [loadable opts]
   ap/IConstruct
   (as-managed [this env]
-    (js/console.log ::as-managed this env)
+    ;; (js/console.log ::as-managed this env)
     (doto (->LoadableRoot env (::gp/scheduler env) loadable (common/dom-marker env) nil opts false)
       (.init!))))
 
 (defn init [loadable]
   (fn [opts]
-    (->LoadableInit loadable opts)))
+    (LoadableInit. loadable opts)))

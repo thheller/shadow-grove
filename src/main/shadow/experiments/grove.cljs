@@ -241,7 +241,7 @@
       (dissoc env ::app-root ::root-el)))
 
 (defn watch [the-atom]
-  (atoms/->AtomWatch the-atom nil nil nil))
+  (atoms/AtomWatch. the-atom nil nil nil))
 
 (defn env-watch
   ([key-to-atom]
@@ -251,13 +251,13 @@
   ([key-to-atom path default]
    {:pre [(keyword? key-to-atom)
           (vector? path)]}
-   (atoms/->EnvWatch key-to-atom path default nil nil nil nil)))
+   (atoms/EnvWatch. key-to-atom path default nil nil nil nil)))
 
 (defn suspense [opts vnode]
-  (suspense/->SuspenseInit opts vnode))
+  (suspense/SuspenseInit. opts vnode))
 
 (defn stream [stream-key opts item-fn]
-  (streams/->StreamInit stream-key opts item-fn))
+  (streams/StreamInit. stream-key opts item-fn))
 
 (defn render-seq [coll key-fn render-fn]
   (sa/render-seq coll key-fn render-fn))

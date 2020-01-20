@@ -498,7 +498,7 @@
         `(fragment-id ~(str *ns* "/" code-id))
 
         fragment-code
-        `(->FragmentCode
+        `(shadow.experiments.arborist.fragments/FragmentCode.
            ~(make-build-impl ast sym->idx)
            ~(make-mount-impl ast sym->idx)
            ~(make-update-impl ast sym->idx)
@@ -514,10 +514,10 @@
       (if-let [analyze-top (and (not (false? (::optimize macro-env))) shadow-analyze-top @shadow-analyze-top)]
         ;; optimal variant, best performance, requires special support from compiler
         (do (analyze-top (with-meta `(def ~code-id ~fragment-code) (meta macro-form)))
-            `(fragment-node (cljs.core/array ~@code-snippets) ~ns-hint ~code-id))
+            `(fragment-init (cljs.core/array ~@code-snippets) ~ns-hint ~code-id))
 
         ;; fallback, probably good enough, registers fragments to maintain identity
-        `(fragment-node
+        `(fragment-init
            (cljs.core/array ~@code-snippets)
            ~ns-hint
            (~'js* "(~{} || ~{})"

@@ -7,7 +7,7 @@
     [shadow.experiments.grove.main.util :as util]
     [shadow.experiments.arborist.common :as common]))
 
-(declare VirtualNode)
+(declare VirtualInit)
 
 (deftype VirtualList
   [^VirtualConfig config
@@ -23,13 +23,13 @@
    ^:mutable dom-entered?]
 
   ap/IUpdatable
-  (supports? [this ^VirtualNode next]
-    (and (instance? VirtualNode next)
+  (supports? [this ^VirtualInit next]
+    (and (instance? VirtualInit next)
          (identical? config (.-config next))
          ;; might be nil, set when constructing from opts
          (= ident (:ident (.-opts next)))))
 
-  (dom-sync! [this ^VirtualNode next]
+  (dom-sync! [this ^VirtualInit next]
     (when (not= opts (.-opts next))
       (js/console.log "vlist sync, opts changed" this next)))
 
@@ -188,7 +188,7 @@
     (.update-query! this (.-visible-offset this) (.-max-items this))
     ))
 
-(deftype VirtualNode [config opts]
+(deftype VirtualInit [config opts]
   ap/IConstruct
   (as-managed [this env]
     (let [query-engine (::gp/query-engine env)]
@@ -211,7 +211,7 @@
 (deftype VirtualConfig [attr config item-fn]
   IFn
   (-invoke [this opts]
-    (VirtualNode. this opts)))
+    (VirtualInit. this opts)))
 
 (defn configure [vlist-attr config item-fn]
   {:pre [(keyword? vlist-attr)
@@ -228,4 +228,4 @@
   ;; FIXME: this should work via (defn configure ^not-native [...])
   ;; but doesn't because tag inference overwrites it with the deftype type
   ^not-native
-  (->VirtualConfig vlist-attr config item-fn))
+  (VirtualConfig. vlist-attr config item-fn))

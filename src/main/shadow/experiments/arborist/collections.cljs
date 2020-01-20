@@ -4,7 +4,7 @@
     [shadow.experiments.arborist.fragments :as frag]
     [shadow.experiments.arborist.common :as common]))
 
-(declare KeyedNode)
+(declare KeyedCollectionInit)
 
 (defn index-map ^not-native [key-vec]
   (persistent! (reduce-kv #(assoc! %1 %3 %2) (transient {}) key-vec)))
@@ -41,9 +41,9 @@
 
   p/IUpdatable
   (supports? [this next]
-    (instance? KeyedNode next))
+    (instance? KeyedCollectionInit next))
 
-  (dom-sync! [this ^KeyedNode next]
+  (dom-sync! [this ^KeyedCollectionInit next]
     (let [old-coll coll
           new-coll (vec (.-coll next)) ;; FIXME: could use into-array
           dom-parent (.-parentNode marker-after)]
@@ -151,7 +151,7 @@
 ;; FIXME: this shouldn't initialize everything in sync. might take too long
 ;; could do work in chunks, maybe even check if items are visible at all?
 ;; FIXME: with 6x throttle this already takes 150ms for 100 items
-(deftype KeyedNode [coll key-fn render-fn]
+(deftype KeyedCollectionInit [coll key-fn render-fn]
   p/IConstruct
   (as-managed [this env]
     (let [coll (vec coll) ;; FIXME: could use into-array, colls are never modified again, only used to look stuff up by index
@@ -192,8 +192,8 @@
               (assoc! vals key rendered)))))))
 
   IEquiv
-  (-equiv [this ^KeyedNode other]
-    (and (instance? KeyedNode other)
+  (-equiv [this ^KeyedCollectionInit other]
+    (and (instance? KeyedCollectionInit other)
          ;; could be a keyword, can't use identical?
          (keyword-identical? key-fn (.-key-fn other))
          ;; FIXME: this makes it never equal if fn is created in :render fn
@@ -201,7 +201,7 @@
          ;; compare coll last since its pointless if the others changed and typically more expensive to compare
          (= coll (.-coll other)))))
 
-(declare SimpleNode)
+(declare SimpleCollectionInit)
 
 ;; FIXME: verify this is actually faster in a meaningful way to have 2 separate impls
 ;; seems like it should be faster but might not be
@@ -227,9 +227,9 @@
 
   p/IUpdatable
   (supports? [this next]
-    (instance? SimpleNode next))
+    (instance? SimpleCollectionInit next))
 
-  (dom-sync! [this ^SimpleNode next]
+  (dom-sync! [this ^SimpleCollectionInit next]
     (let [old-coll coll
           new-coll (vec (.-coll next))
           dom-parent (.-parentNode marker-after)
@@ -287,7 +287,7 @@
     (run! #(p/destroy! %) items)
     (.remove marker-after)))
 
-(deftype SimpleNode [coll render-fn]
+(deftype SimpleCollectionInit [coll render-fn]
   p/IConstruct
   (as-managed [this env]
     (let [coll (vec coll)
@@ -301,11 +301,11 @@
         nil
         coll)
 
-      (->SimpleCollection env coll render-fn arr marker-before marker-after)))
+      (SimpleCollection. env coll render-fn arr marker-before marker-after)))
 
   IEquiv
-  (-equiv [this ^SimpleNode other]
-    (and (instance? SimpleNode other)
+  (-equiv [this ^SimpleCollectionInit other]
+    (and (instance? SimpleCollectionInit other)
          ;; could be a keyword, can't use identical?
          ;; FIXME: this makes it never equal if fn is created in :render fn
          (identical? render-fn (.-render-fn other))
@@ -316,5 +316,5 @@
   {:pre [(sequential? coll)
          (ifn? render-fn)]}
   (if-not (nil? key-fn)
-    (KeyedNode. coll key-fn render-fn)
-    (SimpleNode. coll render-fn)))
+    (KeyedCollectionInit. coll key-fn render-fn)
+    (SimpleCollectionInit. coll render-fn)))

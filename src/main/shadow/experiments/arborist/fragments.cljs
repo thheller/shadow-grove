@@ -21,13 +21,9 @@
           (when (= (aget a i) (aget b i))
             (recur (inc i))))))))
 
-(deftype FragmentCode
-  [create-fn
-   mount-fn
-   update-fn
-   destroy-fn])
+(deftype FragmentCode [create-fn mount-fn update-fn destroy-fn])
 
-(declare ^{:arglists '([thing])} fragment-node?)
+(declare ^{:arglists '([thing])} fragment-init?)
 
 (deftype ManagedFragment
   [env
@@ -56,11 +52,11 @@
           ))))
 
   p/IUpdatable
-  (supports? [this ^FragmentNode next]
-    (and (fragment-node? next)
+  (supports? [this ^FragmentInit next]
+    (and (fragment-init? next)
          (identical? code (.-code next))))
 
-  (dom-sync! [this ^FragmentNode next]
+  (dom-sync! [this ^FragmentInit next]
     (let [nvals (.-vals next)]
       (.. code (update-fn this env exports vals nvals))
       (set! vals nvals))
@@ -72,7 +68,7 @@
     (. code (destroy-fn exports))
     (set! (.-length exports) 0)))
 
-(deftype FragmentNode [vals element-ns ^FragmentCode code]
+(deftype FragmentInit [vals element-ns ^FragmentCode code]
   p/IConstruct
   (as-managed [_ env]
     (let [env (cond-> env element-ns (assoc ::element-ns element-ns))
@@ -85,20 +81,20 @@
       (ManagedFragment. env code vals (common/dom-marker env) exports false)))
 
   IEquiv
-  (-equiv [this ^FragmentNode other]
-    (and (instance? FragmentNode other)
+  (-equiv [this ^FragmentInit other]
+    (and (instance? FragmentInit other)
          (identical? code (. other -code))
          (array-equiv vals (.-vals other)))))
 
-(defn fragment-node? [thing]
-  (instance? FragmentNode thing))
+(defn fragment-init? [thing]
+  (instance? FragmentInit thing))
 
 (defn has-no-lazy-seqs? [vals]
   (every? #(not (instance? cljs.core/LazySeq %)) vals))
 
-(defn fragment-node [vals element-ns code]
+(defn fragment-init [vals element-ns code]
   (assert (has-no-lazy-seqs? vals)  "no lazy seqs allowed in fragments")
-  (FragmentNode. vals element-ns code))
+  (FragmentInit. vals element-ns code))
 
 ;; for fallback code, relying on registry
 (def ^{:jsdoc ["@dict"]} known-fragments #js {})

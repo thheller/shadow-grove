@@ -19,12 +19,12 @@
 (defonce components-ref (atom {}))
 
 (declare ^{:arglists '([x])} component-init?)
-(declare ^{:arglists '([component args])} ->ComponentInit)
+(declare ComponentInit)
 
 (defn- make-component-init [component args]
   ;; FIXME: maybe use array, never directly accessible anyways
   {:pre [(vector? args)]}
-  (->ComponentInit component args))
+  (ComponentInit. component args))
 
 (extend-type gp/ComponentConfig
   cljs.core/IFn
