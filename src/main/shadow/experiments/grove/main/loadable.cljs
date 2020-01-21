@@ -1,9 +1,14 @@
 (ns shadow.experiments.grove.main.loadable
+  (:require-macros [shadow.experiments.grove.main.loadable])
   (:require
     [shadow.experiments.arborist.protocols :as ap]
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.arborist.common :as common]
     [shadow.lazy :as lazy]))
+
+;; FIXME: shadow.lazy is only available with shadow-cljs since it requires compiler support
+;; must not use this namespace directly in the framework elsewhere since that would
+;; make everything shadow-cljs only. not that important but also not necessary to do that.
 
 (declare LoadableInit)
 
@@ -95,6 +100,13 @@
     (doto (->LoadableRoot env (::gp/scheduler env) loadable (common/dom-marker env) nil opts false)
       (.init!))))
 
-(defn init [loadable]
+(defn wrap-loadable [loadable]
   (fn [opts]
+    ;; this should NOT check if loadable is ready
+    ;; otherwise may lead to situation where it is not ready at first
+    ;; and rendering the loadable
+    ;; then on re-render it would be ready but replace the content
+    ;; since the new rendered is not compatible with the managed loadable
+    ;; so the impl takes care of rendering immediately if available
     (LoadableInit. loadable opts)))
+

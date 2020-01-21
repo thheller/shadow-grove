@@ -14,7 +14,6 @@
     [shadow.experiments.grove.main.suspense :as suspense]
     [shadow.experiments.grove.main.streams :as streams]
     [shadow.experiments.grove.main.atoms :as atoms]
-    [shadow.experiments.grove.main.loadable :as loadable]
     ))
 
 ;; these are private - should not be accessed from the outside
@@ -261,9 +260,6 @@
 
 (defn render-seq [coll key-fn render-fn]
   (sa/render-seq coll key-fn render-fn))
-
-(defn loadable-ui [loadable]
-  (loadable/init loadable))
 
 ;; TBD
 (defn form [defaults])

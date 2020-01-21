@@ -459,7 +459,6 @@
     :else
     (throw (ex-info "don't know how to remove thing" {:thing thing}))))
 
-
 (deftype ObservedData [^:mutable keys-used data]
   IDeref
   (-deref [_]
@@ -614,7 +613,7 @@
           ))))
 
   Object
-  (^clj check-completed! [this]
+  (check-completed! [this]
     (when @completed-ref
       (throw (ex-info "transaction concluded, don't hold on to db while in tx" {}))))
 
