@@ -189,7 +189,7 @@
 (defn run-tx [env tx]
   (tx* env tx))
 
-(defn init [app-id init-env init-features]
+(defn init* [app-id init-env init-features]
   {:pre [(some? app-id)
          (map? init-env)
          (sequential? init-features)
@@ -210,8 +210,17 @@
           env
           init-features)]
 
-    (swap! active-apps-ref assoc app-id env)
+    env))
 
+(defn init [app-id init-env init-features]
+  {:pre [(some? app-id)
+         (map? init-env)
+         (sequential? init-features)
+         (every? fn? init-features)]}
+
+  (let [env (init* app-id init-env init-features)]
+    ;; FIXME: throw if already initialized?
+    (swap! active-apps-ref assoc app-id env)
     ;; never expose the env so people don't get ideas about using it
     app-id))
 
