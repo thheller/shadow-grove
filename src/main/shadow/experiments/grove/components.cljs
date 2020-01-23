@@ -100,7 +100,7 @@
   (-hash [this]
     (goog/getUid this))
 
-  p/IManageNodes
+  p/IManaged
   (dom-first [this]
     (if DEBUG
       (.-marker-before this)
@@ -117,7 +117,6 @@
     (set! dom-entered? true)
     (p/dom-entered! root))
 
-  p/IUpdatable
   (supports? [this next]
     (and (component-init? next)
          (let [other (.-component ^ComponentInit next)]
@@ -128,6 +127,21 @@
     (set! args (.-args next))
     (when (gp/work-pending? this)
       (.schedule! this)))
+
+  (destroy! [this]
+    (.unschedule! this)
+    (when DEBUG
+      (.remove (.-marker-before this))
+      (.remove (.-marker-after this)))
+    (set! destroyed? true)
+    (run!
+      (fn [hook]
+        (when hook
+          (gp/hook-destroy! hook)))
+      hooks)
+    (p/destroy! root)
+
+    (gp/perf-destroy! this))
 
   ;; FIXME: figure out default event handler
   ;; don't want to declare all events all the time
@@ -165,21 +179,7 @@
         (when-not (gobj/get e "shadow$handled")
           (js/console.warn "event not handled" ev-id e ev-args)))))
 
-  p/IDestructible
-  (destroy! [this]
-    (.unschedule! this)
-    (when DEBUG
-      (.remove (.-marker-before this))
-      (.remove (.-marker-after this)))
-    (set! destroyed? true)
-    (run!
-      (fn [hook]
-        (when hook
-          (gp/hook-destroy! hook)))
-      hooks)
-    (p/destroy! root)
 
-    (gp/perf-destroy! this))
 
   gp/IWork
   (work-priority [this] 10) ;; FIXME: could allow setting this via config
@@ -643,7 +643,7 @@
     ;; FIXME: throw if env is not identical to our component env?
     this)
 
-  p/IManageNodes
+  p/IManaged
   (dom-first [this] node)
   (dom-insert [this parent anchor]
     (when (.-parentNode node)
@@ -654,13 +654,11 @@
   (dom-entered! [this]
     (js/console.log "slot entered" this))
 
-  p/IUpdatable
   (supports? [this ^SlotHook other]
     (identical? this other))
 
   (dom-sync! [this other])
 
-  p/IDestructible
   (destroy! [this]
     (.remove node))
 

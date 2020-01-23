@@ -21,7 +21,7 @@
    ^:mutable opts
    ^:mutable dom-entered?]
 
-  ap/IUpdatable
+  ap/IManaged
   (supports? [this ^LoadableInit next]
     (and (instance? LoadableInit next)
          (identical? loadable (.-loadable next))))
@@ -40,7 +40,6 @@
               (ap/dom-entered! new))
             )))))
 
-  ap/IManageNodes
   (dom-insert [this parent anchor]
     ;; (js/console.log ::dom-insert this)
     (.insertBefore parent marker anchor)
@@ -56,7 +55,6 @@
     (when managed
       (ap/dom-entered! managed)))
 
-  ap/IDestructible
   (destroy! [this]
     ;; (js/console.log ::destroy! this)
     (.remove marker)

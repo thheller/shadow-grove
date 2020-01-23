@@ -22,7 +22,7 @@
    ^:mutable timeout
    ^boolean ^:mutable dom-entered?]
 
-  ap/IUpdatable
+  ap/IManaged
   (supports? [this next]
     (instance? SuspenseInit next))
 
@@ -76,7 +76,6 @@
               (.schedule-timeout! this)
               )))))
 
-  ap/IManageNodes
   (dom-insert [this parent anchor]
     (.insertBefore parent marker anchor)
     (ap/dom-insert display parent anchor))
@@ -88,7 +87,6 @@
     (set! dom-entered? true)
     (ap/dom-entered! display))
 
-  ap/IDestructible
   (destroy! [this]
     (when timeout
       (js/clearTimeout timeout))

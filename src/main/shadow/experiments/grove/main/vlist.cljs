@@ -22,7 +22,7 @@
    ^:mutable ^js inner-el
    ^:mutable dom-entered?]
 
-  ap/IUpdatable
+  ap/IManaged
   (supports? [this ^VirtualInit next]
     (and (instance? VirtualInit next)
          (identical? config (.-config next))
@@ -33,7 +33,6 @@
     (when (not= opts (.-opts next))
       (js/console.log "vlist sync, opts changed" this next)))
 
-  ap/IManageNodes
   (dom-insert [this parent anchor]
     (.insertBefore parent container-el anchor))
 
@@ -48,7 +47,6 @@
     (.measure! this)
     (.update-query! this (.-visible-offset this) (.-max-items this)))
 
-  ap/IDestructible
   (destroy! [this]
     (.remove container-el)
     (.forEach items ;; sparse array, doseq processes too many

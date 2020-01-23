@@ -22,7 +22,7 @@
    ^boolean ^:mutable dom-entered?
    ]
 
-  p/IManageNodes
+  p/IManaged
   (dom-first [this] marker-before)
 
   (dom-insert [this parent anchor]
@@ -39,7 +39,6 @@
       nil
       item-keys))
 
-  p/IUpdatable
   (supports? [this next]
     (instance? KeyedCollectionInit next))
 
@@ -137,7 +136,6 @@
           items)))
     :synced)
 
-  p/IDestructible
   (destroy! [this]
     (.remove marker-before)
     (when items
@@ -214,7 +212,7 @@
    marker-after
    ]
 
-  p/IManageNodes
+  p/IManaged
   (dom-first [this] marker-before)
 
   (dom-insert [this parent anchor]
@@ -225,7 +223,6 @@
   (dom-entered! [this]
     (js/console.log "simple collection entered" this))
 
-  p/IUpdatable
   (supports? [this next]
     (instance? SimpleCollectionInit next))
 
@@ -281,7 +278,6 @@
 
     :synced)
 
-  p/IDestructible
   (destroy! [this]
     (.remove marker-before)
     (run! #(p/destroy! %) items)

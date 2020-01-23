@@ -24,7 +24,7 @@
         (p/dom-entered! root)
         )))
 
-  p/IDestructible
+  Object
   (destroy! [this]
     (when root
       (p/destroy! root))))

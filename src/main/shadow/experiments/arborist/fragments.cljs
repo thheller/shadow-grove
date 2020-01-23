@@ -33,7 +33,7 @@
    exports
    ^boolean ^:mutable dom-entered?]
 
-  p/IManageNodes
+  p/IManaged
   (dom-first [this] marker)
 
   (dom-insert [this parent anchor]
@@ -51,7 +51,6 @@
           (p/dom-entered! item)
           ))))
 
-  p/IUpdatable
   (supports? [this ^FragmentInit next]
     (and (fragment-init? next)
          (identical? code (.-code next))))
@@ -62,7 +61,6 @@
       (set! vals nvals))
     :synced)
 
-  p/IDestructible
   (destroy! [this]
     (.remove marker)
     (. code (destroy-fn exports))
@@ -134,7 +132,7 @@
 
 ;; called by macro generated code
 (defn managed-append [parent other]
-  (when-not (satisfies? p/IUpdatable other)
+  (when-not (satisfies? p/IManaged other)
     (throw (ex-info "cannot append-managed" {:parent parent :other other})))
   (p/dom-insert other parent nil))
 

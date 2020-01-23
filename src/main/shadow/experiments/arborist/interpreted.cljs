@@ -13,7 +13,7 @@
    ^:mutable children
    ^:mutable src]
 
-  p/IManageNodes
+  p/IManaged
   (dom-first [this] node)
 
   (dom-insert [this parent anchor]
@@ -23,7 +23,6 @@
   (dom-entered! [this]
     (js/console.log "managed-vector entered" this))
 
-  p/IUpdatable
   (supports? [this next]
     (and (vector? next)
          (keyword-identical? tag-kw (get next 0))))
@@ -76,7 +75,6 @@
         (set! attrs next-attrs)
         (set! src next))))
 
-  p/IDestructible
   (destroy! [this]
     (.remove node)
     (run! #(p/destroy! %) children)))

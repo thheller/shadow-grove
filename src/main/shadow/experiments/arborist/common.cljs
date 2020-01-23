@@ -30,7 +30,8 @@
    ^:mutable
    ^not-native node
    ^:mutable val]
-  p/IManageNodes
+
+  p/IManaged
   (dom-first [this] marker)
 
   (dom-insert [this parent anchor]
@@ -43,6 +44,17 @@
     (set! dom-entered? true)
     (when node
       (p/dom-entered! node)))
+
+  (supports? [this next]
+    (throw (ex-info "invalid use, don't sync roots?" {:this this :next next})))
+
+  (dom-sync! [this next]
+    (throw (ex-info "invalid use, don't sync roots?" {:this this :next next})))
+
+  (destroy! [this]
+    (.remove marker)
+    (when node
+      (p/destroy! node)))
 
   p/IDirectUpdate
   (update! [this next]
@@ -66,19 +78,13 @@
         (set! node new)
         (when dom-entered?
           (p/dom-entered! new)
-          ))))
-
-  p/IDestructible
-  (destroy! [this]
-    (.remove marker)
-    (when node
-      (p/destroy! node))))
+          )))))
 
 (defn managed-root [env]
   (ManagedRoot. env false (dom-marker env) nil nil))
 
 (deftype ManagedText [env ^:mutable val node]
-  p/IManageNodes
+  p/IManaged
   (dom-first [this] node)
 
   (dom-insert [this parent anchor]
@@ -86,7 +92,6 @@
 
   (dom-entered! [this])
 
-  p/IUpdatable
   (supports? [this next]
     ;; FIXME: anything else?
     (or (string? next)
@@ -100,7 +105,6 @@
       (set! node -data (str next)))
     :synced)
 
-  p/IDestructible
   (destroy! [this]
     (.remove node)))
 

@@ -22,7 +22,7 @@
    ^boolean ^:mutable dom-entered?
    ]
 
-  ap/IUpdatable
+  ap/IManaged
   (supports? [this ^StreamInit next]
     (and (instance? StreamInit next)
          (keyword-identical? stream-key (.-stream-key next))
@@ -32,7 +32,6 @@
     ;; not sure what this should sync. shouldn't really need updating
     )
 
-  ap/IManageNodes
   (dom-insert [this parent anchor]
     (.insertBefore parent container-el anchor))
 
@@ -43,7 +42,6 @@
     (set! dom-entered? true)
     (js/console.log "stream entered" this))
 
-  ap/IDestructible
   (destroy! [this]
     (.remove container-el))
 

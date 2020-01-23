@@ -219,14 +219,22 @@
                                              (js/Math.min 10 (.getCount buffer)))}]
             )))))
 
+;; FIXME: this shouldn't be worker dependent
+(defonce known-envs-ref (atom {}))
 
-(defn prepare [init-env data-ref]
-  (atom
-    (assoc init-env
-      ::event-config {}
-      ::fx-config {}
-      ::data-ref data-ref)))
+(defn prepare [init-env data-ref app-id]
+  (let [env-ref
+        (atom
+          (assoc init-env
+            ::app-id app-id
+            ::event-config {}
+            ::fx-config {}
+            ::data-ref data-ref))]
 
+    (swap! known-envs-ref assoc app-id env-ref)
+    env-ref))
+
+;; FIXME: only this should be worker specific
 (defn init! [app-ref]
   (let [tr (transit/reader :json)
         tw (transit/writer :json)
