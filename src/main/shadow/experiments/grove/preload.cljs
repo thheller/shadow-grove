@@ -3,8 +3,7 @@
     [shadow.remote.runtime.cljs.env :as renv]
     [shadow.remote.runtime.api :as p]
     [shadow.experiments.grove.worker :as sw]
-    [shadow.experiments.grove.db :as db]
-    [shadow.remote.runtime.obj-support :as obj-support]))
+    [shadow.experiments.grove.db :as db]))
 
 (defn get-databases [{:keys [runtime]} msg]
   (p/reply runtime msg
@@ -47,24 +46,21 @@
        :rows rows})))
 
 (defn get-entry
-  [{:keys [runtime obj-support]}
+  [{:keys [runtime]}
    {:keys [db table row] :as msg}]
   (let [env-ref (get @sw/known-envs-ref db)
         data-ref (get @env-ref ::sw/data-ref)
         db @data-ref
-        ident (db/make-ident table row)
-        val (get db ident)
-        val-ref (obj-support/register obj-support val {:db db :table table :row row})]
+        ident (if (= table :db/globals) row (db/make-ident table row))
+        val (get db ident)]
 
     (p/reply runtime msg
-      {:op :db/object
-       :oid val-ref})))
+      {:op :db/entry :row val})))
 
 (renv/init-extension! ::db-explorer #{}
-  (fn [{:keys [runtime obj-support] :as env}]
+  (fn [{:keys [runtime] :as env}]
     (let [svc
-          {:runtime runtime
-           :obj-support obj-support}]
+          {:runtime runtime}]
 
       ;; maybe just return the ops?
       ;; dunno if this extra layer is needed

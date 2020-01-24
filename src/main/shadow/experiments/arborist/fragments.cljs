@@ -63,8 +63,7 @@
 
   (destroy! [this]
     (.remove marker)
-    (. code (destroy-fn exports))
-    (set! (.-length exports) 0)))
+    (. code (destroy-fn exports))))
 
 (deftype FragmentInit [vals element-ns ^FragmentCode code]
   p/IConstruct

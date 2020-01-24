@@ -1,7 +1,81 @@
 (ns shadow.experiments.grove.ui.forms
   (:require [shadow.experiments.grove.protocols :as gp]
-            [shadow.experiments.arborist.protocols :as ap]))
+            [shadow.experiments.arborist.protocols :as ap]
+            [shadow.experiments.grove.components :as comp]))
 
+(deftype FormInstance
+  [component idx config ^:mutable state]
+  gp/IHook
+  (hook-init! [this]
+    (js/console.log ::form-instance-init!))
+  (hook-ready? [this] true)
+  (hook-value [this]
+    ;; FIXME: return something thats easier to work with and as much data as possible
+    ;; maybe pure data with meta reference to this, fields need this
+    this)
+  (hook-deps-update! [this ^FormInit val]
+    (assert (identical? config (.-config val)))
+    (when-not (= state (.-state val))
+      (js/console.log ::form-instance-deps-update! this val)))
+  (hook-update! [this]
+    (js/console.log ::form-instance-update! this))
+  (hook-destroy! [this]
+    (js/console.log ::form-instance-destroy! this))
+
+  Object
+  ;; dunno if we actually need to keep a reference
+  ;; should return config, so it doesn't need a separate method
+  (register-field [this field instance]
+    (get-in config [:fields field]))
+
+  (remove-field [this field])
+
+  (get-field-value [this field]
+    (let [v (get state field ::undefined)]
+      (if-not (keyword-identical? ::undefined v)
+        v
+        (get-in config [:fields field :default-value]))))
+
+  (field-did-change! [this field val]
+    (set! state (assoc state field val))
+
+    ;; FIXME: invalidate form to trigger re-render of hosting component?
+
+    ;; FIXME: should validation be done by the form or the field?
+    ;; eager-submit as in submit as soon as the form is valid
+    (when (:eager-submit config)
+      (let [submit-fn (:submit config)]
+        (submit-fn (comp/get-env component) state)))
+
+    val))
+
+(deftype FormInit [config state]
+  gp/IBuildHook
+  (hook-build [this comp idx]
+    (FormInstance. comp idx config state)))
+
+(defn form-has-errors? [form]
+  false)
+
+(defn form-has-error? [form field]
+  false)
+
+;; force configuration separately from instantiation
+;; saves a bunch of checking if a form config was changed
+;; since it may contain function it would otherwise
+;; never compare equal
+(defn configure [config]
+  ;; FIXME: validate config?
+  (fn form-config [state]
+    ;; FIXME: validate state being passed in?
+    (FormInit. config state)))
+
+
+
+;; =====================================================================
+;; SELECT
+;; =====================================================================
+;; FIXME: move to separate ns once the structure is cleaner
 
 (defn select-find-idx [options current-val]
   (reduce-kv
@@ -27,8 +101,9 @@
          (identical? form (.-form next))
          (= field (.-field next))))
 
-  (dom-sync! [this next]
-    (js/console.warn ::field-dom-sync! this next))
+  (dom-sync! [this ^SelectInit next]
+    (when (not= options (.-options next))
+      (js/console.warn ::select-options-changed! this next)))
 
   (dom-insert [this parent anchor]
     (.insertBefore parent element anchor))
@@ -60,14 +135,14 @@
       (when init-idx
         (set! element -selectedIndex init-idx))
 
-      ;; FIXME: maybe create in dom-entered!?
+      ;; FIXME: any other events we need to listen to for <select>?
       (.addEventListener element "change"
         (fn [e]
           (let [idx (.-selectedIndex element)
-                ;; do not use oval/nval, they may be out of date
-                val (get options idx)]
-            ;; FIXME: report change to form
-            (js/console.log "select change" idx val e))))))
+                ;; options should be [[1 "foo"]]
+                [val label] (get options idx)]
+
+            (.field-did-change! form field val))))))
 
 
   (set-options! [this]
@@ -91,39 +166,6 @@
     (doto (ManagedSelect. env (js/document.createElement "select") form field options nil)
       (.init!))))
 
-(deftype FormInstance
-  [component idx config ^:mutable state]
-  gp/IHook
-  (hook-init! [this]
-    (js/console.log ::form-instance-init!))
-  (hook-ready? [this] true)
-  (hook-value [this] this)
-  (hook-deps-update! [this val]
-    (js/console.log ::form-instance-deps-update! this val))
-  (hook-update! [this]
-    (js/console.log ::form-instance-update! this))
-  (hook-destroy! [this]
-    (js/console.log ::form-instance-destroy! this))
-
-  Object
-  ;; dunno if we actually need to keep a reference
-  ;; should return config, so it doesn't need a separate method
-  (register-field [this field instance]
-    (get-in config [:fields field]))
-
-  (remove-field [this field])
-
-  (get-field-value [this field]
-    (let [v (get state field ::undefined)]
-      (if-not (keyword-identical? ::undefined v)
-        v
-        (get-in config [:fields field :default-value])))))
-
-(deftype FormInit [config state]
-  gp/IBuildHook
-  (hook-build [this comp idx]
-    (FormInstance. comp idx config state)))
-
 ;; not doing fields via attrs since that means
 ;; none of the related code can ever be DCE'd
 ;; which is really bad
@@ -145,21 +187,8 @@
          (every? select-option? options)]}
   (SelectInit. form field options))
 
-(defn form-has-errors? [form]
-  false)
 
-(defn form-has-error? [form field]
-  false)
-
-
-;; force configuration separately from instantiation
-;; saves a bunch of checking if a form config was changed
-;; since it may contain function it would otherwise
-;; never compare equal
-(defn configure [config]
-  ;; FIXME: validate config?
-  (fn form-config [state]
-    ;; FIXME: validate state being passed in?
-    (FormInit. config state)))
-
-
+;; FIXME: implement something like material-components-web, native select/input feel old and clunky
+;; can't use it directly because it is loading it via npm means no DCE
+;; way too much code if everything is bundled
+;; can't consume it directly because no clean ESM output is provided (as of now)

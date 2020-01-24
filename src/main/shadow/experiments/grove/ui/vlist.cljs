@@ -100,8 +100,15 @@
         (do (set! items (js/Array. item-count))
             (gs/setStyle inner-el "height" (str (* item-count item-height) "px")))
 
+        ;; FIXME: this needs to be handled differently, shouldn't just throw everything away
         (not= item-count (.-length items))
-        (throw (ex-info "item count changed, TBD" {:this this :data data}))
+        (do (.forEach items ;; sparse array, doseq processes too many
+              (fn [{:keys [wrapper managed] :as item} idx]
+                (ap/destroy! managed)
+                (.remove wrapper)))
+            (set! items (js/Array. item-count))
+            (set! container-el -scrollTop 0)
+            (gs/setStyle inner-el "height" (str (* item-count item-height) "px")))
 
         :else
         nil)
@@ -112,6 +119,7 @@
             (let [current (aget items idx)]
               (if-not current
                 (let [rendered (. config (item-fn val idx opts))
+                      ;; FIXME: could use (<< [:div {:style ...} rendered]) to create wrapper?
                       managed (ap/as-managed rendered env)
 
                       el-wrapper
