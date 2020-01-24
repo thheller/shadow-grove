@@ -77,6 +77,11 @@
 (defprotocol IQueryEngine
   (query-init [this key query config callback])
   (query-destroy [this key])
+  ;; FIXME: one shot query that can't be updated later?
+  ;; can be done by helper method over init/destroy but engine
+  ;; would still do a bunch of needless work
+  ;; only had one case where this might have been useful, maybe it isn't worth adding?
+  ;; (query-once [this query config callback])
   (transact! [this tx]))
 
 (defprotocol IStreamEngine

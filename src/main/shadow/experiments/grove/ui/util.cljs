@@ -1,4 +1,4 @@
-(ns shadow.experiments.grove.main.util
+(ns shadow.experiments.grove.ui.util
   (:require [goog.async.nextTick]))
 
 (defn assert-not-in-worker! []

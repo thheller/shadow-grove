@@ -1,6 +1,8 @@
 (ns shadow.experiments.grove.history
-  (:require [shadow.experiments.grove :as sg]
-            [clojure.string :as str])
+  (:require
+    [shadow.experiments.grove :as sg]
+    [shadow.experiments.grove.worker-engine :as eng]
+    [clojure.string :as str])
   (:import [goog.history Html5History]))
 
 (defn navigate-to-token! [app-env token]
@@ -42,4 +44,10 @@
 
       (-> app-env
           (assoc ::history history)
-          (setup-history history)))))
+          ;; FIXME: this shouldn't be coupled to the worker impl
+          (eng/add-msg-handler :ui/redirect!
+            (fn [token]
+              (assert (str/starts-with? token "/") "redirect token must start with /")
+              (.setToken history (subs token 1))))
+          (setup-history history)
+          ))))

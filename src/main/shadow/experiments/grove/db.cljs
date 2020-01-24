@@ -321,7 +321,7 @@
                   join-val
                   (if (not= ::missing join-val)
                     join-val
-                    ;; might be computed, should check in db schema
+                    ;; process-lookup but without associng the result since we need to process it
                     (.cljs$core$IFn$_invoke$arity$5 query-calc env db current join-key {}))]
 
               (cond
@@ -331,10 +331,15 @@
                 (keyword-identical? join-val :db/undefined)
                 result
 
+                ;; FIXME: should this return nil or no key at all
+                ;; [{:foo [:bar]}] against {:foo nil}
+                ;; either {} or {:foo nil}?
                 (nil? join-val)
                 result
 
                 ;; {:some-prop [:some-other-ident 123]}
+                ;; FIXME: buggy if val is [:foo :bar] (just a vector of two keywords, no ident)
+                ;; but then the user shouldn't be trying to join so should be fine
                 (ident? join-val)
                 (let [val (get db join-val ::missing)]
                   (cond
@@ -364,6 +369,8 @@
                     (assoc! result join-key query-val)))
 
                 ;; {:some-prop [[:some-other-ident 123] [:some-other-ident 456]]}
+                ;; {:some-prop [{:foo 1} {:foo 2}]}
+                ;; FIXME: should it preserve sets?
                 (coll? join-val)
                 (assoc! result join-key
                   (mapv

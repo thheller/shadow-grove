@@ -1,10 +1,10 @@
-(ns shadow.experiments.grove.main.streams
+(ns shadow.experiments.grove.ui.streams
   (:require
     [shadow.experiments.arborist.protocols :as ap]
     [shadow.experiments.arborist.attributes :as attr]
     [shadow.experiments.grove.protocols :as gp]
     [goog.style :as gs]
-    [shadow.experiments.grove.main.util :as util]))
+    [shadow.experiments.grove.ui.util :as util]))
 
 (util/assert-not-in-worker!)
 

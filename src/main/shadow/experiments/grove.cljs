@@ -10,10 +10,10 @@
     [goog.async.nextTick]
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.components :as comp]
-    [shadow.experiments.grove.main.util :as util]
-    [shadow.experiments.grove.main.suspense :as suspense]
-    [shadow.experiments.grove.main.streams :as streams]
-    [shadow.experiments.grove.main.atoms :as atoms]
+    [shadow.experiments.grove.ui.util :as util]
+    [shadow.experiments.grove.ui.suspense :as suspense]
+    [shadow.experiments.grove.ui.streams :as streams]
+    [shadow.experiments.grove.ui.atoms :as atoms]
     ))
 
 ;; these are private - should not be accessed from the outside

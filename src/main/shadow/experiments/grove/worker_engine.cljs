@@ -1,5 +1,6 @@
 (ns shadow.experiments.grove.worker-engine
   (:require
+    [shadow.experiments.grove :as sg]
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.components :as comp]
     [cognitect.transit :as transit]))
@@ -23,6 +24,10 @@
     (swap! active-streams-ref assoc stream-id callback)
     (send! [:stream-init stream-id stream-key opts])
     ))
+
+(defn add-msg-handler [{::keys [msg-handlers-ref] :as env} msg-id handler-fn]
+  (swap! msg-handlers-ref assoc msg-id handler-fn)
+  env)
 
 (defn init
   ([worker]
@@ -49,38 +54,43 @@
 
            send!
            (fn send! [msg]
+             ;; (js/console.log "to-worker" (first msg) msg)
              (.postMessage worker (transit-str msg)))
+
+           msg-handlers-ref
+           (atom {})
 
            env
            (assoc env
              ::worker worker
              engine-key (->WorkerEngine send! active-queries-ref active-streams-ref)
+             ::msg-handlers-ref msg-handlers-ref
              ::transit-read transit-read
              ::transit-str transit-str)]
 
        (.addEventListener worker "message"
          (fn [e]
-           (js/performance.mark "transit-read-start")
-           (let [msg (transit-read (.-data e))]
-             (js/performance.measure "transit-read" "transit-read-start")
-             (let [[op & args] msg]
-               ;; (js/console.log "main read" op msg)
-               ;; (js/console.log "main read took" (- t start))
-               (case op
-                 :worker-ready
-                 nil
+           (let [msg (transit-read (.-data e))
+                 [op & args] msg]
+             ;; (js/console.log "from-worker" op msg)
+             (case op
+               :worker-ready
+               nil
 
-                 :query-result
-                 (let [[query-id result] args
-                       ^function callback (get @active-queries-ref query-id)]
-                   (when (some? callback)
-                     (callback result)))
+               :query-result
+               (let [[query-id result] args
+                     ^function callback (get @active-queries-ref query-id)]
+                 (when (some? callback)
+                   (callback result)))
 
-                 :stream-msg
-                 (let [[stream-id result] args
-                       ^function callback (get @active-streams-ref stream-id)]
-                   (when (some? callback)
-                     (callback result)))
+               :stream-msg
+               (let [[stream-id result] args
+                     ^function callback (get @active-streams-ref stream-id)]
+                 (when (some? callback)
+                   (callback result)))
 
-                 (js/console.warn "unhandled main msg" op msg))))))
+               (let [handler-fn (get @msg-handlers-ref op)]
+                 (if-not handler-fn
+                   (js/console.warn "unhandled main msg" op msg)
+                   (apply handler-fn args)))))))
        env))))

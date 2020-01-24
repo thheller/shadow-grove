@@ -1,10 +1,10 @@
-(ns shadow.experiments.grove.main.vlist
+(ns shadow.experiments.grove.ui.vlist
   (:require
     [goog.style :as gs]
     [goog.functions :as gfn]
     [shadow.experiments.arborist.protocols :as ap]
     [shadow.experiments.grove.protocols :as gp]
-    [shadow.experiments.grove.main.util :as util]
+    [shadow.experiments.grove.ui.util :as util]
     [shadow.experiments.arborist.common :as common]))
 
 (declare VirtualInit)
@@ -49,9 +49,10 @@
 
   (destroy! [this]
     (.remove container-el)
-    (.forEach items ;; sparse array, doseq processes too many
-      (fn [item idx]
-        (ap/destroy! (:managed item)))))
+    (when items ;; query might still be pending
+      (.forEach items ;; sparse array, doseq processes too many
+        (fn [item idx]
+          (ap/destroy! (:managed item))))))
 
   Object
   (init! [this]

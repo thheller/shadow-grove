@@ -47,7 +47,7 @@
     (set! dom-entered? true)
     (.forEach exports
       (fn [item]
-        (when (implements? p/IManageNodes item)
+        (when (implements? p/IManaged item)
           (p/dom-entered! item)
           ))))
 

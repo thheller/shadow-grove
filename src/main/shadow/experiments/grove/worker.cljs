@@ -323,6 +323,10 @@
           env
           m)))
 
+    (reg-fx app-ref :ui/redirect!
+      (fn [env token]
+        (send-to-main env [:ui/redirect! token])))
+
     (js/self.addEventListener "message"
       (fn [e]
         (let [msg (transit-read (.-data e))]

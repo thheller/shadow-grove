@@ -1,4 +1,4 @@
-(ns shadow.experiments.grove.main.loadable)
+(ns shadow.experiments.grove.ui.loadable)
 
 (defmacro refer-lazy
   ([lazy-name]

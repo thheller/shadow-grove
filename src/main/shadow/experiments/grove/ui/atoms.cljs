@@ -1,8 +1,8 @@
-(ns shadow.experiments.grove.main.atoms
+(ns shadow.experiments.grove.ui.atoms
   (:require
     [shadow.experiments.grove.components :as comp]
     [shadow.experiments.grove.protocols :as gp]
-    [shadow.experiments.grove.main.util :as util]))
+    [shadow.experiments.grove.ui.util :as util]))
 
 (util/assert-not-in-worker!)
 

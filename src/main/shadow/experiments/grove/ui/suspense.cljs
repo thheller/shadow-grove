@@ -1,9 +1,9 @@
-(ns shadow.experiments.grove.main.suspense
+(ns shadow.experiments.grove.ui.suspense
   (:require
     [shadow.experiments.arborist.common :as common]
     [shadow.experiments.arborist.protocols :as ap]
     [shadow.experiments.grove.protocols :as gp]
-    [shadow.experiments.grove.main.util :as util]))
+    [shadow.experiments.grove.ui.util :as util]))
 
 (util/assert-not-in-worker!)
 

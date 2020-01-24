@@ -1,5 +1,5 @@
-(ns shadow.experiments.grove.main.loadable
-  (:require-macros [shadow.experiments.grove.main.loadable])
+(ns shadow.experiments.grove.ui.loadable
+  (:require-macros [shadow.experiments.grove.ui.loadable])
   (:require
     [shadow.experiments.arborist.protocols :as ap]
     [shadow.experiments.grove.protocols :as gp]
