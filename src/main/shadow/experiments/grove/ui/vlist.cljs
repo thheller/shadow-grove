@@ -5,7 +5,8 @@
     [shadow.experiments.arborist.protocols :as ap]
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.ui.util :as util]
-    [shadow.experiments.arborist.common :as common]))
+    [shadow.experiments.arborist.common :as common]
+    [shadow.experiments.arborist.attributes :as a]))
 
 (declare VirtualInit)
 
@@ -18,8 +19,9 @@
    ident
    opts
    ^:mutable items
-   ^:mutable ^js container-el
-   ^:mutable ^js inner-el
+   ^:mutable ^js container-el ;; the other scroll container
+   ^:mutable ^js inner-el ;; the inner container providing the height
+   ^:mutable ^js box-el ;; the box element moving inside inner-el
    ^:mutable dom-entered?]
 
   ap/IManaged
@@ -52,31 +54,41 @@
     (when items ;; query might still be pending
       (.forEach items ;; sparse array, doseq processes too many
         (fn [item idx]
-          (ap/destroy! (:managed item))))))
+          (ap/destroy! item)))))
 
   Object
   (init! [this]
-    (set! container-el (js/document.createElement "div"))
-    (gs/setStyle container-el
-      #js {"outline" "none"
-           "overflow-y" "auto"
-           "width" "100%"
-           "min-height" "100%"
-           "height" "100%"})
+    ;; FIXME: this (.-config config) stuff sucks
+    ;; only have it because config is VirtualConfig class which we check identical? on
+    (let [{:keys [scroll-delay box-style] :or {scroll-delay 100}} (.-config config)]
 
-    (set! inner-el (js/document.createElement "div"))
-    (gs/setStyle inner-el
-      #js {"width" "100%"
-           "position" "relative"
-           "height" "0"})
-    (.appendChild container-el inner-el)
+      (set! container-el (js/document.createElement "div"))
+      (gs/setStyle container-el
+        #js {"outline" "none"
+             "overflow-y" "auto"
+             "width" "100%"
+             "min-height" "100%"
+             "height" "100%"})
 
-    (.addEventListener container-el "scroll"
-      (gfn/debounce #(.handle-scroll! this %)
-        ;; there is a good balance between too much work and too long wait
-        ;; every scroll update will trigger a potentially complex DOM change
-        ;; so it shouldn't do too much
-        (:scroll-delay config 25))))
+      (set! inner-el (js/document.createElement "div"))
+      (gs/setStyle inner-el
+        #js {"width" "100%"
+             "position" "relative"
+             "height" "0"})
+      (.appendChild container-el inner-el)
+
+      (set! box-el (js/document.createElement "div"))
+      (let [box-style (merge box-style {:position "absolute" :top "0px" :width "100%"})]
+        (js/console.log "setting box style" box-style this)
+        (a/set-attr env box-el :style nil box-style))
+      (.appendChild inner-el box-el)
+
+      (.addEventListener container-el "scroll"
+        (gfn/debounce #(.handle-scroll! this %)
+          ;; there is a good balance between too much work and too long wait
+          ;; every scroll update will trigger a potentially complex DOM change
+          ;; so it shouldn't do too much
+          scroll-delay))))
 
   (update-query! [this offset num]
     (when query
@@ -103,9 +115,8 @@
         ;; FIXME: this needs to be handled differently, shouldn't just throw everything away
         (not= item-count (.-length items))
         (do (.forEach items ;; sparse array, doseq processes too many
-              (fn [{:keys [wrapper managed] :as item} idx]
-                (ap/destroy! managed)
-                (.remove wrapper)))
+              (fn [item idx]
+                (ap/destroy! item)))
             (set! items (js/Array. item-count))
             (set! container-el -scrollTop 0)
             (gs/setStyle inner-el "height" (str (* item-count item-height) "px")))
@@ -113,50 +124,53 @@
         :else
         nil)
 
+      (gs/setStyle box-el "top" (str (* item-height offset) "px"))
+
+      (.cleanup! this)
+
+      ;; FIXME: this would likely be more efficient DOM wise when traversing backwards
+      ;; easier to keep track of anchor-el for dom-insert
       (reduce-kv
         (fn [_ offset-idx val]
           (let [idx (+ offset-idx offset)]
+            ;; might have scrolled out while query was loading
+            ;; can skip render of elements that will be immediately replaced
             (when (.in-visible-range? this idx)
-              (let [current (aget items idx)]
-                (if-not current
-                  (let [rendered (. config (item-fn val idx opts))
-                        ;; FIXME: could use (<< [:div {:style ...} rendered]) to create wrapper?
-                        managed (ap/as-managed rendered env)
-
-                        el-wrapper
-                        (doto (js/document.createElement "div")
-                          (gs/setStyle #js {"position" "absolute"
-                                            "top" (str (* item-height idx) "px")
-                                            "height" (str item-height "px")
-                                            "width" "100%"}))]
-
-                    (set! el-wrapper -shadow$idx idx)
-
-                    (ap/dom-insert managed el-wrapper nil)
-                    (aset items idx {:wrapper el-wrapper :managed managed :idx idx :val val})
-
-                    ;; FIXME: this should probably insert in the correct dom order?
-                    ;; might be bad to rely on positioning to order things?
-                    ;; dunno how to benchmark this, appending works just fine for now
-                    (.appendChild inner-el el-wrapper))
-
+              ;; render and update/insert
+              (let [rendered (. config (item-fn val idx opts))]
+                (if-let [current (aget items idx)]
                   ;; current exists, try to update or replace
-                  (let [{:keys [managed]} current
-                        rendered (. config (item-fn val idx opts))]
-                    (if (ap/supports? managed rendered)
-                      (do (ap/dom-sync! managed rendered)
-                          (aset items idx (assoc current :val val)))
-                      (let [new-managed (common/replace-managed env current rendered)]
-                        (aset items idx (assoc current
-                                          :val val
-                                          :managed new-managed))
-                        (when dom-entered?
-                          (ap/dom-entered! new-managed)
-                          )))))))))
-        nil
-        slice))
+                  (if (ap/supports? current rendered)
+                    (ap/dom-sync! current rendered)
+                    (let [new-managed (common/replace-managed env current rendered)]
+                      (aset items idx new-managed)
+                      (when dom-entered?
+                        (ap/dom-entered! new-managed)
+                        )))
+                  ;; doesn't exist, create managed and insert at correct DOM position
+                  (let [managed (ap/as-managed rendered env)
+                        ;; FIXME: would be easier with wrapper elements
+                        ;; just create them once and replace the contents
+                        ;; but no wrappers means potentially supporting CSS grid?
+                        next-item (.find-next-item this idx)
+                        anchor-el (when next-item (ap/dom-first next-item))]
 
-    (.cleanup! this))
+                    ;; insert before next item, or append if it doesn't exist
+                    (ap/dom-insert managed box-el anchor-el)
+                    (when dom-entered?
+                      (ap/dom-entered! managed))
+                    (aset items idx managed)))))))
+        nil
+        slice)))
+
+  ;; sparse array, idx might be 6 and the next item is 10
+  ;; FIXME: should maintain the rendered items better and avoid all this logic
+  (find-next-item [this idx]
+    (loop [idx (inc idx)]
+      (when (< idx (.-visible-end this))
+        (if-some [item (aget items idx)]
+          item
+          (recur (inc idx))))))
 
   (in-visible-range? [this idx]
     (<= (.-visible-offset this) idx (.-visible-end this)))
@@ -165,8 +179,7 @@
     (.forEach items
       (fn [item idx]
         (when-not (.in-visible-range? this idx)
-          (ap/destroy! (:managed item))
-          (.remove (:wrapper item))
+          (ap/destroy! item)
           (js-delete items idx)))))
 
   (measure! [this]
@@ -210,6 +223,7 @@
               nil
               (:ident opts)
               opts
+              nil
               nil
               nil
               nil
