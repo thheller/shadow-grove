@@ -114,44 +114,45 @@
         nil)
 
       (reduce-kv
-        (fn [_ idx val]
-          (when (.in-visible-range? this idx)
-            (let [current (aget items idx)]
-              (if-not current
-                (let [rendered (. config (item-fn val idx opts))
-                      ;; FIXME: could use (<< [:div {:style ...} rendered]) to create wrapper?
-                      managed (ap/as-managed rendered env)
+        (fn [_ offset-idx val]
+          (let [idx (+ offset-idx offset)]
+            (when (.in-visible-range? this idx)
+              (let [current (aget items idx)]
+                (if-not current
+                  (let [rendered (. config (item-fn val idx opts))
+                        ;; FIXME: could use (<< [:div {:style ...} rendered]) to create wrapper?
+                        managed (ap/as-managed rendered env)
 
-                      el-wrapper
-                      (doto (js/document.createElement "div")
-                        (gs/setStyle #js {"position" "absolute"
-                                          "top" (str (* item-height idx) "px")
-                                          "height" (str item-height "px")
-                                          "width" "100%"}))]
+                        el-wrapper
+                        (doto (js/document.createElement "div")
+                          (gs/setStyle #js {"position" "absolute"
+                                            "top" (str (* item-height idx) "px")
+                                            "height" (str item-height "px")
+                                            "width" "100%"}))]
 
-                  (set! el-wrapper -shadow$idx idx)
+                    (set! el-wrapper -shadow$idx idx)
 
-                  (ap/dom-insert managed el-wrapper nil)
-                  (aset items idx {:wrapper el-wrapper :managed managed :idx idx :val val})
+                    (ap/dom-insert managed el-wrapper nil)
+                    (aset items idx {:wrapper el-wrapper :managed managed :idx idx :val val})
 
-                  ;; FIXME: this should probably insert in the correct dom order?
-                  ;; might be bad to rely on positioning to order things?
-                  ;; dunno how to benchmark this, appending works just fine for now
-                  (.appendChild inner-el el-wrapper))
+                    ;; FIXME: this should probably insert in the correct dom order?
+                    ;; might be bad to rely on positioning to order things?
+                    ;; dunno how to benchmark this, appending works just fine for now
+                    (.appendChild inner-el el-wrapper))
 
-                ;; current exists, try to update or replace
-                (let [{:keys [managed]} current
-                      rendered (. config (item-fn val idx opts))]
-                  (if (ap/supports? managed rendered)
-                    (do (ap/dom-sync! managed rendered)
-                        (aset items idx (assoc current :val val)))
-                    (let [new-managed (common/replace-managed env current rendered)]
-                      (aset items idx (assoc current
-                                        :val val
-                                        :managed new-managed))
-                      (when dom-entered?
-                        (ap/dom-entered! new-managed)
-                        ))))))))
+                  ;; current exists, try to update or replace
+                  (let [{:keys [managed]} current
+                        rendered (. config (item-fn val idx opts))]
+                    (if (ap/supports? managed rendered)
+                      (do (ap/dom-sync! managed rendered)
+                          (aset items idx (assoc current :val val)))
+                      (let [new-managed (common/replace-managed env current rendered)]
+                        (aset items idx (assoc current
+                                          :val val
+                                          :managed new-managed))
+                        (when dom-entered?
+                          (ap/dom-entered! new-managed)
+                          )))))))))
         nil
         slice))
 
