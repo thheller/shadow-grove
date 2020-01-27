@@ -17,11 +17,11 @@
   (dom-first [this] node)
 
   (dom-insert [this parent anchor]
-    (run! #(p/dom-insert % node nil) children)
+    (run! #(p/dom-insert ^not-native % node nil) children)
     (.insertBefore parent node anchor))
 
   (dom-entered! [this]
-    (js/console.log "managed-vector entered" this))
+    (run! #(p/dom-entered! ^not-native %) children))
 
   (supports? [this next]
     (and (vector? next)

@@ -210,6 +210,7 @@
    ^:mutable ^array items
    marker-before
    marker-after
+   ^boolean ^:mutable dom-entered?
    ]
 
   p/IManaged
@@ -221,7 +222,8 @@
     (.insertBefore parent marker-after anchor))
 
   (dom-entered! [this]
-    (js/console.log "simple collection entered" this))
+    (set! dom-entered? true)
+    (run! #(p/dom-entered! ^not-native %) items))
 
   (supports? [this next]
     (instance? SimpleCollectionInit next))
@@ -250,6 +252,8 @@
           (if (p/supports? item new-rendered)
             (p/dom-sync! item new-rendered)
             (let [new-managed (common/replace-managed env item new-rendered)]
+              (when dom-entered?
+                (p/dom-entered! new-managed))
               (aset items idx new-managed)))))
 
       (cond
@@ -274,13 +278,14 @@
                 managed (p/as-managed rendered env)]
             (.push items managed)
             (p/dom-insert managed dom-parent marker-after)
-            ))))
+            (when dom-entered?
+              (p/dom-entered! managed))))))
 
     :synced)
 
   (destroy! [this]
     (.remove marker-before)
-    (run! #(p/destroy! %) items)
+    (run! #(p/destroy! ^not-native %) items)
     (.remove marker-after)))
 
 (deftype SimpleCollectionInit [coll render-fn]
@@ -297,7 +302,7 @@
         nil
         coll)
 
-      (SimpleCollection. env coll render-fn arr marker-before marker-after)))
+      (SimpleCollection. env coll render-fn arr marker-before marker-after false)))
 
   IEquiv
   (-equiv [this ^SimpleCollectionInit other]

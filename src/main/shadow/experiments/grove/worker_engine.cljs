@@ -3,7 +3,8 @@
     [shadow.experiments.grove :as sg]
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.components :as comp]
-    [cognitect.transit :as transit]))
+    [cognitect.transit :as transit]
+    [shadow.experiments.grove.ui.util :as util]))
 
 (deftype WorkerEngine
   [^function send! active-queries-ref active-streams-ref]
@@ -81,13 +82,16 @@
                (let [[query-id result] args
                      ^function callback (get @active-queries-ref query-id)]
                  (when (some? callback)
-                   (callback result)))
+                   ;; likely not worth delaying but we already were async
+                   ;; so it really doesn't matter if we give the browser a chance to do other work
+                   ;; inbetween transit-read and the actual query processing
+                   (util/next-tick #(callback result))))
 
                :stream-msg
                (let [[stream-id result] args
                      ^function callback (get @active-streams-ref stream-id)]
                  (when (some? callback)
-                   (callback result)))
+                   (util/next-tick #(callback result))))
 
                (let [handler-fn (get @msg-handlers-ref op)]
                  (if-not handler-fn

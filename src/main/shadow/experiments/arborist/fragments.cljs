@@ -21,6 +21,20 @@
           (when (= (aget a i) (aget b i))
             (recur (inc i))))))))
 
+(def svg-ns "http://www.w3.org/2000/svg")
+
+;; FIXME: maybe take document from env, easier to mock out later
+(defn svg-element-fn [^Keyword type]
+  (js/document.createElementNS svg-ns (.-name type)))
+
+(defn dom-element-fn [^Keyword type]
+  (js/document.createElement (.-name type)))
+
+(defn get-element-fn [env element-ns]
+  (if (identical? element-ns svg-ns)
+    svg-element-fn
+    dom-element-fn))
+
 (deftype FragmentCode [create-fn mount-fn update-fn destroy-fn])
 
 (declare ^{:arglists '([thing])} fragment-init?)
@@ -68,13 +82,14 @@
 (deftype FragmentInit [vals element-ns ^FragmentCode code]
   p/IConstruct
   (as-managed [_ env]
-    (let [env (cond-> env element-ns (assoc ::element-ns element-ns))
+    (let [element-fn (if (nil? element-ns) (:dom/element-fn env) (get-element-fn env element-ns))
+          env (cond-> env (some? element-ns) (assoc :dom/element-fn element-fn))
           ;; create-fn creates all necessary nodes but only exports those that will be accessed later in an array
           ;; this might be faster if create-fn just closed over locals and returns the callbacks to be used later
           ;; svelte does this but CLJS doesn't allow to set! locals so it would require ugly js* code to make it work
           ;; didn't benchmark but the array variant shouldn't be that much slower. maybe even faster since
           ;; the functions don't need to be recreated for each fragment instance
-          exports (.. code (create-fn env vals))]
+          exports (.. code (create-fn env vals element-fn))]
       (ManagedFragment. env code vals (common/dom-marker env) exports false)))
 
   IEquiv
@@ -96,21 +111,6 @@
 ;; for fallback code, relying on registry
 (def ^{:jsdoc ["@dict"]} known-fragments #js {})
 
-;; accessed by macro, do not remove
-;; FIXME: what about mathml?
-(def svg-ns "http://www.w3.org/2000/svg")
-
-;; FIXME: should maybe take ::document from env
-;; not sure under which circumstance this would ever need a different document instance though
-(defn create-element
-  ;; inlined version is longer than the none inline version
-  ;; {:jsdoc ["@noinline"]}
-  {:jsdoc ["@return {Element}"]}
-  [env ^string element-ns ^Keyword type] ;; kw
-  (if (nil? element-ns)
-    (js/document.createElement (.-name type))
-    (js/document.createElementNS element-ns (.-name type))
-    ))
 
 (defn create-text
   ;; {:jsdoc ["@noinline"]}

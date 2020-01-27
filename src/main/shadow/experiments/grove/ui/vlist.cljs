@@ -60,7 +60,7 @@
   (init! [this]
     ;; FIXME: this (.-config config) stuff sucks
     ;; only have it because config is VirtualConfig class which we check identical? on
-    (let [{:keys [scroll-delay box-style] :or {scroll-delay 100}} (.-config config)]
+    (let [{:keys [scroll-delay box-style] :or {scroll-delay 50}} (.-config config)]
 
       (set! container-el (js/document.createElement "div"))
       (gs/setStyle container-el
@@ -79,7 +79,6 @@
 
       (set! box-el (js/document.createElement "div"))
       (let [box-style (merge box-style {:position "absolute" :top "0px" :width "100%"})]
-        (js/console.log "setting box style" box-style this)
         (a/set-attr env box-el :style nil box-style))
       (.appendChild inner-el box-el)
 
@@ -124,6 +123,7 @@
         :else
         nil)
 
+      ;; FIXME: can do this directly on scroll?
       (gs/setStyle box-el "top" (str (* item-height offset) "px"))
 
       (.cleanup! this)

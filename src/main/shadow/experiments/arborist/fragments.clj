@@ -238,7 +238,7 @@
   (let [this-sym (gensym "this")
         env-sym (with-meta (gensym "env") {:tag 'not-native})
         vals-sym (with-meta (gensym "vals") {:tag 'array})
-        element-ns-sym (gensym "element-ns")
+        element-fn-sym (with-meta (gensym "element-fn") {:tag 'function})
 
         {:keys [bindings mutations] :as result}
         (reduce
@@ -247,15 +247,14 @@
               (case op
                 :element
                 (-> env
-                    (update :bindings conj sym (with-loc ast `(create-element ~env-sym ~element-ns-sym ~(:tag ast))))
+                    (update :bindings conj sym (with-loc ast `(~element-fn-sym ~(:tag ast))))
                     (cond->
                       (and parent-sym (= parent-type :element))
                       (update :mutations conj (with-loc ast `(append-child ~parent-sym ~sym)))
 
                       (and parent-sym (= parent-type :component))
                       (update :mutations conj (with-loc ast `(component-append ~parent-sym ~sym))))
-                    (reduce-> step-fn (:children ast))
-                    )
+                    (reduce-> step-fn (:children ast)))
 
                 #_#_:component
                     (-> env
@@ -293,7 +292,7 @@
                 :dynamic-attr
                 (update env :mutations conj (with-loc ast `(set-attr ~env-sym ~(:sym ast) ~(:attr ast) nil (aget ~vals-sym ~(-> ast :value :ref-id)))))
                 )))
-          {:bindings [element-ns-sym `(::element-ns ~env-sym)]
+          {:bindings []
            :mutations []}
           ast)
 
@@ -303,7 +302,7 @@
              (sort-by second)
              (map first))]
 
-    `(fn [~env-sym ~vals-sym]
+    `(fn [~env-sym ~vals-sym ~element-fn-sym]
        (let [~@bindings]
          ~@mutations
          (cljs.core/array ~@return)))))

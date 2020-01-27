@@ -33,7 +33,7 @@
   ([container env]
    {:pre [(common/in-document? container)]}
    (let [root (TreeRoot. container nil nil)
-         root-env (assoc env ::root root)]
+         root-env (assoc env ::root root :dom/element-fn frag/dom-element-fn)]
      (set! (.-env root) root-env)
      root))
   ([container env init]
