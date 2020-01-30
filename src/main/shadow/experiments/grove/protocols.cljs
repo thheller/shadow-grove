@@ -46,23 +46,21 @@
   (run-asap! [this action])
   (run-whenever! [this action]))
 
-(defprotocol IBuildHook
-  (hook-build [node component idx]))
-
 (defprotocol IProfile
   (perf-count! [this counter-id])
   (perf-start! [this])
   (perf-destroy! [this]))
 
 (defprotocol IHook
-  (hook-init! [node])
-  (hook-ready? [node])
-  (hook-value [node])
-  (hook-deps-update! [node val])
-  (hook-update! [node])
-  ;; (node-did-mount [node] "do stuff after the initial mount only")
-  ;; (node-did-update [node] "do stuff after dom update")
-  (hook-destroy! [node]))
+  (hook-init! [this])
+  (hook-ready? [this])
+  (hook-value [this])
+  (hook-deps-update! [this val])
+  (hook-update! [this])
+  (hook-destroy! [this]))
+
+(defprotocol IBuildHook
+  (hook-build [this component idx]))
 
 ;; just here so that working on components file doesn't cause hot-reload issues
 ;; with already constructed components

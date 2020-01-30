@@ -31,7 +31,7 @@
 
     (when managed
       (let [renderable @loadable
-            rendered (renderable opts)]
+            rendered (apply renderable opts)]
         (if (ap/supports? managed rendered)
           (ap/dom-sync! managed rendered)
           (let [new (common/replace-managed env managed rendered)]
@@ -87,7 +87,7 @@
   (render! [this]
     ;; (js/console.log ::render! this (lazy/ready? loadable))
     (let [renderable @loadable
-          rendered (renderable opts)
+          rendered (apply renderable opts)
           new (ap/as-managed rendered env)]
       (set! managed new))))
 
@@ -99,7 +99,7 @@
       (.init!))))
 
 (defn wrap-loadable [loadable]
-  (fn [opts]
+  (fn [& opts]
     ;; this should NOT check if loadable is ready
     ;; otherwise may lead to situation where it is not ready at first
     ;; and rendering the loadable
