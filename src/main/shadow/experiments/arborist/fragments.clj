@@ -506,10 +506,11 @@
     ;;(clojure.pprint/pprint ast)
     ;; (clojure.pprint/pprint sym->idx)
 
-    ;; skip fragment if someone did `(<< (something))`, no point in wrapping, just call `(something)`
+    ;; skip fragment if someone did `(<< (something))`, no point in wrapping, just return (something)
+    ;; auto-upgrades (<< [:svg ...]) to (svg [:svg ...]) for simplicity
     (if (and (= 1 (count ast))
              (= :code-ref (:op (first ast))))
-      (first body)
+      (-> @(:code-ref env) first key)
       (if-let [analyze-top (and (not (false? (::optimize macro-env))) shadow-analyze-top @shadow-analyze-top)]
         ;; optimal variant, best performance, requires special support from compiler
         (do (analyze-top (with-meta `(def ~code-id ~fragment-code) (meta macro-form)))
@@ -530,11 +531,11 @@
     (make-fragment
       {}
       nil
-      '["before" [:div {:dyn (foo)} 1 [:div {:foo "bar"} 2]] (yo) [:div [:div 3]] "after"])))
+      '["before" [:div {:dyn (foo)} 1 [:div {:foo "bar"} 2]] (yo) [:div [:div 3]] "after"]))
 
-(comment
 
-  (make-fragment
-    {}
-    nil
-    '[(foo 1 2 3)]))
+  (clojure.pprint/pprint
+    (make-fragment
+      {}
+      nil
+      '[(foo 1 2 3)])))

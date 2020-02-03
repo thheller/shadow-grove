@@ -6,7 +6,8 @@
     [shadow.experiments.grove.db :as db]
     [shadow.experiments.arborist.common :as common]
     [shadow.experiments.grove.protocols :as gp]
-    [shadow.experiments.arborist.attributes :as attr]))
+    [shadow.experiments.arborist.attributes :as attr]
+    [shadow.experiments.arborist.fragments :as frag]))
 
 (deftype LocalQueryEngine [db-data stream-data]
   gp/IQueryEngine
@@ -37,9 +38,9 @@
 
 (defn make-card-env [{:keys [id opts] :as card}]
   (let [{:keys [schema db streams]} opts]
-    (sg/init* id {}
-      [(test-query-engine schema db streams)]
-      )))
+    (-> (sg/init* id
+          {:dom/element-fn frag/dom-element-fn}
+          [(test-query-engine schema db streams)]))))
 
 (defn start []
   (let [cards

@@ -106,6 +106,9 @@
           {:keys [item-height]}
           (.-config config)]
 
+      ;; FIXME: rewrite this!
+      ;; sparse array makes no sense anymore. only ever keeping the elements visible anyways
+
       (cond
         (not items)
         (do (set! items (js/Array. item-count))

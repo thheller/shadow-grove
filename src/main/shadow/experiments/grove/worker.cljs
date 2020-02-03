@@ -323,6 +323,20 @@
           env
           m)))
 
+    (reg-fx app-ref :stream-init
+      (fn [{::keys [active-streams-ref] :as env} m]
+        (reduce-kv
+          (fn [env stream-key opts]
+            (when-not (contains? @active-streams-ref stream-key)
+              (swap! active-streams-ref assoc stream-key
+                {:stream-key stream-key
+                 :opts opts
+                 :subs #{}
+                 :buffer (CircularBuffer. (:capacity opts 1000))}))
+            env)
+          env
+          m)))
+
     (reg-fx app-ref :ui/redirect!
       (fn [env token]
         (send-to-main env [:ui/redirect! token])))
@@ -336,7 +350,7 @@
     (js/postMessage (transit-str [:worker-ready]))
     ))
 
-(defn stream-setup [app-ref  stream-key opts]
+(defn stream-setup [app-ref stream-key opts]
   (let [{::keys [active-streams-ref]} @app-ref
 
         stream
