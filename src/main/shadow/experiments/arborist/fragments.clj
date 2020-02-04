@@ -203,7 +203,11 @@
       ;; [:svg ...] into (svg [:svg ...])
       (and (str/starts-with? (name tag-kw) "svg")
            (not (::svg env)))
-      (make-code env `(shadow.experiments.arborist/svg ~el) {:element-id (next-el-id env)})
+      (make-code env
+        (with-meta
+          `(shadow.experiments.arborist/svg ~el)
+          (meta el))
+        {:element-id (next-el-id env)})
 
       ;; FIXME: could analyze completely static elements and emit actual HTML strings and use DocumentFragment at runtime
       ;; that could potentially be faster with lots of completely static elements but that probably won't be too common
@@ -468,7 +472,16 @@
 
         ;; for ns vars only, must not be used as string id
         code-id
-        (gensym "fragment__")
+        (if-let [{:keys [line column]} (meta macro-form)]
+          ;; if we have a source location use it as the var name
+          ;; avoids creating too many ns vars when hot-reloading code
+          ;; with many fragments there is a good chance not all of their locations change
+          ;; thus re-using a name. gensym is random which isn't a huge problem
+          ;; but after many hot-reloads you can end up with hundreds of them
+          (symbol (str "fragment_l" line "_c" column))
+          ;; fallback if no source location is available for some reason
+          ;; shouldn't happen but no big deal if it does
+          (gensym "fragment__"))
 
         ;; if [:svg...] is encountered it'll be turned to (svg [:svg...])
         ;; ns-hint tells the FragmentNode to modify the env in as-managed
@@ -495,6 +508,7 @@
         ;; so length does not matter
         frag-id
         `(fragment-id ~(str *ns* "/" code-id))
+
 
         fragment-code
         `(shadow.experiments.arborist.fragments/FragmentCode.

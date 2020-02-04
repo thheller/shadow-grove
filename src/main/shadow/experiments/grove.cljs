@@ -237,6 +237,9 @@
 
           (let [{:keys [root]} active]
             (assert (identical? env (:env active)) "can't change env between restarts")
+            (when ^boolean js/goog.DEBUG
+              (comp/mark-all-dirty!))
+
             (sa/update! root root-node)
             ::updated
             ))))))

@@ -17,6 +17,14 @@
 ;; shield your eyes and beware!
 
 (defonce components-ref (atom {}))
+(defonce instances-ref (atom #{}))
+
+;; called on start for hot-reload purposes
+;; otherwise components may decide to skip rendering and preventing nested UI updates
+;; will be stripped in release builds
+(defn mark-all-dirty! []
+  (doseq [^ManagedComponent comp @instances-ref]
+    (set! comp -needs-render? true)))
 
 (declare ^{:arglists '([x])} component-init?)
 (declare ComponentInit)
@@ -131,6 +139,7 @@
   (destroy! [this]
     (.unschedule! this)
     (when DEBUG
+      (swap! instances-ref disj this)
       (.remove (.-marker-before this))
       (.remove (.-marker-after this)))
     (set! destroyed? true)
@@ -220,6 +229,7 @@
 
       ;; marks component boundaries in dev mode for easier inspect
       (when DEBUG
+        (swap! instances-ref conj this)
         (set! (.-marker-before this)
           (doto (js/document.createComment (str "component: " (.-component-name config)))
             (set! -shadow$instance this)))
