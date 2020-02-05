@@ -4,7 +4,8 @@
   (:require
     [clojure.set :as set]
     [cognitect.transit :as transit]
-    [shadow.experiments.grove.db :as db])
+    [shadow.experiments.grove.db :as db]
+    [shadow.experiments.grove.eql-query :as eql])
   (:import [goog.structs CircularBuffer]))
 
 (defn set-conj [x y]
@@ -147,7 +148,7 @@
 
     (let [{::keys [data-ref]} env
           observed-data (db/observed @data-ref)
-          result (db/query env observed-data query)]
+          result (eql/query env observed-data query)]
 
       ;; remember this even is query is still loading
       (set! read-keys @observed-data)
