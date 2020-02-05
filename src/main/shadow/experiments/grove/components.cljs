@@ -511,6 +511,18 @@
   (fn [env node oval nval]
     (event-attr env node :blur oval nval)))
 
+(a/add-attr :on-mouseenter
+  (fn [env node oval nval]
+    (event-attr env node :mouseenter oval nval)))
+
+(a/add-attr :on-mousemove
+  (fn [env node oval nval]
+    (event-attr env node :mousemove oval nval)))
+
+(a/add-attr :on-mouseout
+  (fn [env node oval nval]
+    (event-attr env node :mouseout oval nval)))
+
 (a/add-attr :dom/ref
   (fn [{::keys [dom-refs] :as env} node oval nval]
     (when-not dom-refs
