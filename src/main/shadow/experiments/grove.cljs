@@ -251,8 +251,11 @@
       (ap/destroy! app-root)
       (dissoc env ::app-root ::root-el)))
 
-(defn watch [the-atom]
-  (atoms/AtomWatch. the-atom nil nil nil))
+(defn watch
+  ([the-atom]
+   (watch the-atom []))
+  ([the-atom path]
+   (atoms/AtomWatch. the-atom path nil nil nil)))
 
 (defn env-watch
   ([key-to-atom]
