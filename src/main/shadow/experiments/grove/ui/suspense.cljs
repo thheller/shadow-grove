@@ -9,16 +9,52 @@
 
 (declare SuspenseInit)
 
+(deftype SuspenseScheduler
+  [parent-scheduler
+   ^SuspenseRoot root
+   ^:mutable should-trigger?
+   ^:mutable suspend-set]
+  gp/IScheduleUpdates
+  (schedule-update! [this target]
+    (gp/schedule-update! parent-scheduler target))
+
+  (unschedule! [this target]
+    (gp/unschedule! parent-scheduler target))
+
+  (run-now! [this action]
+    (gp/run-now! parent-scheduler action))
+
+  (did-suspend! [this target]
+    ;; (js/console.log "did-suspend!" suspend-set target)
+    ;; FIXME: suspend parent scheduler when going offscreen?
+    (set! suspend-set (conj suspend-set target)))
+
+  (did-finish! [this target]
+    ;; (js/console.log "did-finish!" suspend-set target)
+    (set! suspend-set (disj suspend-set target))
+    (when (and should-trigger? (empty? suspend-set))
+      (set! should-trigger? false)
+      (.tree-did-finish! root)))
+
+  Object
+  (set-should-trigger! [this]
+    (set! should-trigger? true))
+
+  (cancel! [this]
+    (set! should-trigger? false))
+
+  (did-suspend? [this]
+    (pos? (count suspend-set))))
+
 (deftype SuspenseRoot
   [^:mutable opts
    ^:mutable vnode
    marker
    parent-env
    parent-scheduler
-   ^:mutable child-env
-   ^:mutable display
-   ^:mutable offscreen
-   ^:mutable suspend-set
+   ^not-native ^:mutable display
+   ^not-native ^:mutable offscreen
+   ^SuspenseScheduler ^:mutable offscreen-scheduler
    ^:mutable timeout
    ^boolean ^:mutable dom-entered?]
 
@@ -45,36 +81,55 @@
       ;; if new offscreen does not suspend immediately replace display placeholder
       ;; otherwise keep offscreen
       offscreen
-      (do (set! suspend-set #{})
-          (let [next-managed (ap/as-managed vnode child-env)]
-            ;; destroy current offscreen immediately
-            (ap/destroy! offscreen)
-            (set! offscreen next-managed)
+      (do (ap/destroy! offscreen)
+          (.cancel! offscreen-scheduler)
 
-            ;; if not immediately suspended immediately swap
-            ;; otherwise continue offscreen
-            ;; naming of these helper fns doesn't quite match their intent
-            ;; but saves duplicating code
-            ;; FIXME: maybe clean up a bit
-            (if (empty? suspend-set)
-              (.maybe-swap! this)
-              (.start-offscreen! this))))
+          (let [scheduler
+                (SuspenseScheduler. parent-scheduler this false #{})
+
+                offscreen-env
+                (assoc parent-env ::gp/scheduler scheduler)
+
+                next-managed
+                (ap/as-managed vnode offscreen-env)]
+
+            (if-not (.did-suspend? scheduler)
+              (do (set! offscreen nil)
+                  (set! offscreen-scheduler nil)
+                  (.maybe-swap! this))
+              (do (set! offscreen next-managed)
+                  (set! offscreen-scheduler scheduler)
+                  (.set-should-trigger! scheduler)
+                  (.start-offscreen! this)))))
 
       ;; display supports updating, just update
       (ap/supports? display vnode)
       (ap/dom-sync! display vnode)
 
-      :else ;; replace display and maybe start offscreen again
-      (let [new (ap/as-managed vnode child-env)]
-        (if (empty? suspend-set)
-          (do (common/fragment-replace display new)
-              (set! display new)
+      ;; replace display and maybe start offscreen again
+      :else
+      (let [scheduler
+            (SuspenseScheduler. parent-scheduler this false #{})
+
+            offscreen-env
+            (assoc parent-env ::gp/scheduler scheduler)
+
+            next-managed
+            (ap/as-managed vnode offscreen-env)]
+
+        (if-not (.did-suspend? scheduler)
+          (do (common/fragment-replace display next-managed)
+              (set! display next-managed)
               (when dom-entered?
-                (ap/dom-entered! new)))
-          (do (set! offscreen new)
-              (.start-offscreen! this)
+                (ap/dom-entered! next-managed)))
+
+          ;; display might not be the fallback
+          ;; keep showing it until timeout
+          (do (set! offscreen next-managed)
+              (set! offscreen-scheduler scheduler)
+              (.set-should-trigger! scheduler)
               (.schedule-timeout! this)
-              )))))
+              (.start-offscreen! this))))))
 
   (dom-insert [this parent anchor]
     (.insertBefore parent marker anchor)
@@ -94,40 +149,28 @@
     (when display
       (ap/destroy! display))
     (when offscreen
+      (.cancel! offscreen-scheduler)
       (ap/destroy! offscreen)))
-
-  gp/IScheduleUpdates
-  (schedule-update! [this target]
-    (gp/schedule-update! parent-scheduler target))
-
-  (unschedule! [this target]
-    (gp/unschedule! parent-scheduler target))
-
-  (run-now! [this action]
-    (gp/run-now! parent-scheduler action))
-
-  (did-suspend! [this target]
-    ;; (js/console.log "did-suspend!" suspend-set target)
-    ;; FIXME: suspend parent scheduler when going offscreen?
-    (set! suspend-set (conj suspend-set target)))
-
-  (did-finish! [this target]
-    ;; (js/console.log "did-finish!" suspend-set target)
-    (set! suspend-set (disj suspend-set target))
-    (when (and offscreen (empty? suspend-set))
-      (js/goog.async.nextTick #(.maybe-swap! this))))
 
   Object
   (init! [this]
     ;; can't be done in as-managed since it needs the this pointer
-    (let [next-env (assoc parent-env ::gp/scheduler this)
-          next-managed (ap/as-managed vnode next-env)]
-      (set! child-env next-env)
-      (if (empty? suspend-set)
+    (let [scheduler
+          (SuspenseScheduler. parent-scheduler this false #{})
+
+          offscreen-env
+          (assoc parent-env ::gp/scheduler scheduler)
+
+          next-managed
+          (ap/as-managed vnode offscreen-env)]
+
+      (if-not (.did-suspend? scheduler)
         (set! display next-managed)
         (do (set! offscreen next-managed)
-            (.start-offscreen! this)
-            (set! display (ap/as-managed (:fallback opts) parent-env))))))
+            (set! offscreen-scheduler scheduler)
+            (set! display (ap/as-managed (:fallback opts) parent-env))
+            (.set-should-trigger! scheduler)
+            (.start-offscreen! this)))))
 
   (schedule-timeout! [this]
     (when-not timeout
@@ -141,7 +184,7 @@
   (did-timeout! [this]
     (set! timeout nil)
     (when offscreen
-      (let [fallback (ap/as-managed (:fallback opts) child-env)
+      (let [fallback (ap/as-managed (:fallback opts) parent-env)
             old-display display]
         ;; (js/console.log "using fallback after timeout")
         (set! display (common/fragment-replace old-display fallback))
@@ -149,27 +192,38 @@
           (ap/dom-entered! display)
           ))))
 
-  (maybe-swap! [this]
-    (when (and offscreen (empty? suspend-set))
-      (ap/dom-insert offscreen (.-parentElement marker) marker)
-      (ap/destroy! display)
-      (set! display offscreen)
-      (set! offscreen nil)
+  (tree-did-finish! [this]
+    (ap/dom-insert offscreen (.-parentElement marker) marker)
+    (ap/destroy! display)
+    (set! display offscreen)
+    (set! offscreen nil)
+    (set! offscreen-scheduler nil)
 
-      (when dom-entered?
-        (ap/dom-entered! display))
+    (when dom-entered?
+      (ap/dom-entered! display))
 
-      (when-some [key (:key opts)]
-        (swap! (::suspense-keys parent-env) dissoc key))
+    (when-some [key (:key opts)]
+      (swap! (::suspense-keys parent-env) dissoc key))
 
-      (when timeout
-        (js/clearTimeout timeout)
-        (set! timeout nil)
-        ))))
+    (when timeout
+      (js/clearTimeout timeout)
+      (set! timeout nil)
+      )))
 
 (deftype SuspenseInit [opts vnode]
   ap/IConstruct
   (as-managed [this env]
-    (doto (SuspenseRoot. opts vnode (common/dom-marker env) env (::gp/scheduler env) nil nil nil #{} nil false)
+    (doto (SuspenseRoot.
+            opts
+            vnode
+            (common/dom-marker env)
+            env
+            (::gp/scheduler env)
+            nil ;; display
+            nil ;; offscreen
+            nil ;; offscreen-scheduler
+            nil ;; timeout
+            false ;; dom-entered?
+            )
       (.init!))))
 
