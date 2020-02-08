@@ -82,8 +82,8 @@
       (let [{:keys [items]} msg]
         (doseq [item items]
           (let [el (.make-item this item)]
-            (.appendChild inner-el el))
-          ))
+            (.insertBefore inner-el el (.-firstChild inner-el))
+            )))
 
       ;; FIXME: don't delete all, try to dom-sync!
       :reset

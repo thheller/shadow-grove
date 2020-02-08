@@ -37,21 +37,21 @@
   (hook-destroy! [this]
     (remove-watch the-atom this)))
 
-(deftype AtomWatch [the-atom path ^:mutable val component idx]
+(deftype AtomWatch [the-atom access-fn ^:mutable val component idx]
   gp/IBuildHook
   (hook-build [this c i]
-    (AtomWatch. the-atom path nil c i))
+    (AtomWatch. the-atom access-fn nil c i))
 
   gp/IHook
   (hook-init! [this]
-    (set! val (get-in @the-atom path))
+    (set! val (access-fn nil @the-atom))
     (add-watch the-atom this
-      (fn [_ _ _ update]
+      (fn [_ _ old new]
         ;; check immediately and only invalidate if actually changed
         ;; avoids kicking off too much work
         ;; FIXME: maybe shouldn't check equiv? only identical?
         ;; pretty likely that something changed after all
-        (let [next-val (get-in update path)]
+        (let [next-val (access-fn old new)]
           (when (not= val next-val)
             (set! val next-val)
             (comp/hook-invalidate! component idx))))))

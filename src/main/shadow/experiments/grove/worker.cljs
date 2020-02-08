@@ -277,6 +277,7 @@
                 (js/console.warn "stream not found, can't add" stream-key stream-item)
                 (let [{:keys [subs ^CircularBuffer buffer]} stream
                       stream-item (assoc stream-item :added-at (js/Date.now))]
+
                   (.add buffer stream-item)
                   (reduce
                     (fn [_ sub-id]
@@ -300,8 +301,7 @@
                   (let [{:keys [subs ^CircularBuffer buffer opts]} stream
                         new-items (->> (.getValues buffer)
                                        (into items)
-                                       (sort-by :added-at)
-                                       (reverse))
+                                       (sort-by :added-at))
 
                         buffer (CircularBuffer. (:capacity opts 1000))]
 

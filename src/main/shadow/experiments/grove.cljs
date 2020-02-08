@@ -252,10 +252,17 @@
       (dissoc env ::app-root ::root-el)))
 
 (defn watch
+  "hook that watches an atom and triggers an update on change
+   accepts an optional path-or-fn arg that can be used for quick diffs
+
+   (watch the-atom [:foo])
+   (watch the-atom (fn [old new] ...))"
   ([the-atom]
-   (watch the-atom []))
-  ([the-atom path]
-   (atoms/AtomWatch. the-atom path nil nil nil)))
+   (watch the-atom (fn [old new] new)))
+  ([the-atom path-or-fn]
+   (if (vector? path-or-fn)
+     (atoms/AtomWatch. the-atom (fn [old new] (get-in new path-or-fn)) nil nil nil)
+     (atoms/AtomWatch. the-atom path-or-fn nil nil nil))))
 
 (defn env-watch
   ([key-to-atom]
@@ -275,11 +282,4 @@
 
 (defn render-seq [coll key-fn render-fn]
   (sa/render-seq coll key-fn render-fn))
-
-;; TBD
-(defn form [defaults])
-
-(defn form-values [form])
-
-(defn form-reset! [form])
 
