@@ -55,6 +55,7 @@
   (hook-init! [this])
   (hook-ready? [this])
   (hook-value [this])
+  ;; true-ish return if component needs further updating
   (hook-deps-update! [this val])
   (hook-update! [this])
   (hook-destroy! [this]))

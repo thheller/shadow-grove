@@ -148,9 +148,7 @@
         (when hook
           (gp/hook-destroy! hook)))
       hooks)
-    (p/destroy! root)
-
-    (gp/perf-destroy! this))
+    (p/destroy! root))
 
   ;; FIXME: figure out default event handler
   ;; don't want to declare all events all the time
@@ -188,8 +186,6 @@
         (when-not (gobj/get e "shadow$handled")
           (js/console.warn "event not handled" ev-id e ev-args)))))
 
-
-
   gp/IWork
   (work-priority [this] 10) ;; FIXME: could allow setting this via config
   (work-depth [this] (::depth component-env))
@@ -206,11 +202,6 @@
     (when-not (gp/work-pending? this)
       (gp/unschedule! scheduler this)))
 
-  gp/IProfile
-  (perf-count! [this counter-id])
-  (perf-start! [this])
-  (perf-destroy! [this])
-
   ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
   ;; can't do this in the ComponentInit.as-managed since we need the this pointer
@@ -222,8 +213,6 @@
               (assoc ::dom-refs (atom {}))
               ;; (assoc ::component-id (str (.-component-name config) "@" (next-component-id)))
               (assoc ::component this))]
-
-      (gp/perf-start! this)
 
       (set! component-env child-env)
 
@@ -302,7 +291,6 @@
             (aset hooks current-idx hook)
 
             (gp/hook-init! hook)
-            (gp/perf-count! this [::hook-init! current-idx])
 
             (set! updated-hooks (bit-set updated-hooks current-idx))
 
@@ -330,13 +318,6 @@
                 (if deps-updated?
                   (gp/hook-deps-update! hook (run this))
                   (gp/hook-update! hook))]
-
-            (if deps-updated?
-              (gp/perf-count! this [::hook-deps-update! current-idx])
-              (gp/perf-count! this [::hook-update! current-idx]))
-
-            (when did-update?
-              (gp/perf-count! this [::hook-did-update! current-idx]))
 
             #_(js/console.log "Component:hook-update!"
                 (:component-name config)
@@ -380,12 +361,8 @@
     (set! updated-hooks (int 0))
     (set! dirty-from-args (int 0))
 
-    (if-not needs-render?
-      (gp/perf-count! this [::render-skip])
-
+    (when needs-render?
       (let [frag (. config (render-fn this))]
-
-        (gp/perf-count! this [::render])
 
         (set! rendered-args args)
         (set! needs-render? false)

@@ -2,11 +2,13 @@
   (:require
     [shadow.remote.runtime.cljs.env :as renv]
     [shadow.remote.runtime.api :as p]
+    [shadow.remote.runtime.shared :as shared]
     [shadow.experiments.grove.worker :as sw]
-    [shadow.experiments.grove.db :as db]))
+    [shadow.experiments.grove.db :as db]
+    [clojure.set :as set]))
 
 (defn get-databases [{:keys [runtime]} msg]
-  (p/reply runtime msg
+  (shared/reply runtime msg
     {:op :db/list-databases
      ;; just keywords or more details? don't actually have any?
      :databases
@@ -19,29 +21,38 @@
         data @data-ref
         {::db/keys [ident-types]} (meta data)]
 
-    (p/reply runtime msg
+    (shared/reply runtime msg
       {:op :db/list-tables
        ;; just keywords or more details? don't actually have any?
        :tables (conj ident-types :db/globals)})))
 
-(defn get-rows [{:keys [runtime]} {:keys [db table offset count] :as msg}]
+(defn get-table-columns [{:keys [runtime]} {:keys [db table] :as msg}]
   (let [env-ref (get @sw/known-envs-ref db)
         data-ref (get @env-ref ::sw/data-ref)
         db @data-ref
+
+        ;; FIXME: likely doesn't need all rows, should just take a random sample
+        known-keys-of-table
+        (->> (db/all-of db table)
+             (mapcat keys)
+             (set))]
+
+    (shared/reply runtime msg
+      {:op :db/list-table-columns
+       :columns known-keys-of-table})))
+
+(defn get-rows [{:keys [runtime]} {:keys [db table offset count] :as msg}]
+  (let [env-ref (get @sw/known-envs-ref db)
+        data-ref (get @env-ref ::sw/data-ref)
+        data @data-ref
         rows
-        (if (keyword-identical? table :db/globals)
-          (->> (keys db)
-               (filter keyword?)
-               (sort)
-               (vec))
-          (->> (db/all-idents-of db table)
-               (map second)
-               (sort)
-               (vec)))]
+        (->> (db/all-of data table)
+             (sort-by :db/ident)
+             (vec))]
 
     ;; FIXME: slice data, don't send everything
 
-    (p/reply runtime msg
+    (shared/reply runtime msg
       {:op :db/list-rows
        :rows rows})))
 
@@ -54,7 +65,7 @@
         ident (if (= table :db/globals) row (db/make-ident table row))
         val (get db ident)]
 
-    (p/reply runtime msg
+    (shared/reply runtime msg
       {:op :db/entry :row val})))
 
 (renv/init-extension! ::db-explorer #{}
@@ -69,6 +80,7 @@
         {:ops
          {:db/get-databases #(get-databases svc %)
           :db/get-tables #(get-tables svc %)
+          :db/get-table-columns #(get-table-columns svc %)
           :db/get-rows #(get-rows svc %)
           :db/get-entry #(get-entry svc %)}
          ;; :on-tool-disconnect #(tool-disconnect svc %)

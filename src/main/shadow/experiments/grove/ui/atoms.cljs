@@ -62,6 +62,7 @@
     ;; only gets here if value changed
     true)
   (hook-deps-update! [this new-val]
+    ;; FIXME: its ok to change the access-fn
     (throw (ex-info "shouldn't have changing deps?" {})))
   (hook-destroy! [this]
     (remove-watch the-atom this)))
