@@ -1,11 +1,10 @@
 (ns shadow.experiments.grove.preload
   (:require
-    [shadow.remote.runtime.cljs.env :as renv]
     [shadow.remote.runtime.api :as p]
     [shadow.remote.runtime.shared :as shared]
+    [shadow.cljs.devtools.client.shared :as cljs-shared]
     [shadow.experiments.grove.worker :as sw]
-    [shadow.experiments.grove.db :as db]
-    [clojure.set :as set]))
+    [shadow.experiments.grove.db :as db]))
 
 (defn get-databases [{:keys [runtime]} msg]
   (shared/reply runtime msg
@@ -68,7 +67,7 @@
     (shared/reply runtime msg
       {:op :db/entry :row val})))
 
-(renv/init-extension! ::db-explorer #{}
+(cljs-shared/init-extension! ::db-explorer #{}
   (fn [{:keys [runtime] :as env}]
     (let [svc
           {:runtime runtime}]

@@ -39,8 +39,7 @@
     container-el)
 
   (dom-entered! [this]
-    (set! dom-entered? true)
-    (js/console.log "stream entered" this))
+    (set! dom-entered? true))
 
   (destroy! [this]
     (.remove container-el))
