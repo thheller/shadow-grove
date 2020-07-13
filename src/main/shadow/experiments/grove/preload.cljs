@@ -4,7 +4,8 @@
     [shadow.remote.runtime.shared :as shared]
     [shadow.cljs.devtools.client.shared :as cljs-shared]
     [shadow.experiments.grove.worker :as sw]
-    [shadow.experiments.grove.db :as db]))
+    [shadow.experiments.grove.db :as db]
+    [clojure.core.protocols :as cp]))
 
 (defn get-databases [{:keys [runtime]} msg]
   (shared/reply runtime msg
@@ -67,7 +68,7 @@
     (shared/reply runtime msg
       {:op :db/entry :row val})))
 
-(cljs-shared/init-extension! ::db-explorer #{}
+(cljs-shared/add-plugin! ::db-explorer #{}
   (fn [{:keys [runtime] :as env}]
     (let [svc
           {:runtime runtime}]
@@ -87,3 +88,14 @@
       svc))
   (fn [{:keys [runtime] :as svc}]
     (p/del-extension runtime ::db-explorer)))
+
+(extend-type sw/ActiveQuery
+  cp/Datafiable
+  (datafy [this]
+    {:env (.-env this)
+     :query-id (.-query-id this)
+     :query (.-query this)
+     :read-keys (.-read-keys this)
+     :read-result (.-read-result this)
+     :pending? (.-pending? this)
+     :destroyed? (.-destroyed? this)}))
