@@ -71,7 +71,9 @@
    opts
    check-args-fn
    render-deps
-   render-fn])
+   render-fn
+   events
+   effects])
 
 (defprotocol IQueryEngine
   (query-init [this key query config callback])

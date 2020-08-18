@@ -77,7 +77,7 @@
                       ^not-native item (get items key)
                       data (nth new-coll idx)
                       updated (conj! updated key)
-                      rendered (render-fn data #_#_idx key)]
+                      rendered (render-fn data idx key)]
 
                   (if-not item
                     ;; new item added to list, nothing to compare to just insert
@@ -180,7 +180,7 @@
 
           (let [val (nth coll idx)
                 key (key-fn val)
-                rendered (render-fn val #_#_idx key)
+                rendered (render-fn val idx key)
                 managed (p/as-managed rendered env)]
 
             (recur
@@ -247,7 +247,7 @@
       (dotimes [idx max-idx]
         (let [item (aget items idx)
               new-val (nth new-coll idx)
-              new-rendered (render-fn new-val)]
+              new-rendered (render-fn new-val idx)]
 
           (if (p/supports? item new-rendered)
             (p/dom-sync! item new-rendered)
@@ -274,7 +274,7 @@
         (dotimes [idx (- nc oc)]
           (let [idx (+ max-idx idx)
                 val (nth new-coll idx)
-                rendered (render-fn val)
+                rendered (render-fn val idx)
                 managed (p/as-managed rendered env)]
             (.push items managed)
             (p/dom-insert managed dom-parent marker-after)
@@ -297,9 +297,10 @@
           arr (js/Array.)]
 
       (reduce
-        (fn [_ val]
-          (.push arr (p/as-managed (render-fn val) env)))
-        nil
+        (fn [idx val]
+          (.push arr (p/as-managed (render-fn val idx) env))
+          (inc idx))
+        0
         coll)
 
       (SimpleCollection. env coll render-fn arr marker-before marker-after false)))

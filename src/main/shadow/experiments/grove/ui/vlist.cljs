@@ -65,7 +65,7 @@
   (init! [this]
     ;; FIXME: this (.-config config) stuff sucks
     ;; only have it because config is VirtualConfig class which we check identical? on
-    (let [{:keys [scroll-delay box-style] :or {scroll-delay 50}} (.-config config)]
+    (let [{:keys [scroll-delay box-style] :or {scroll-delay 16}} (.-config config)]
 
       (set! container-el (js/document.createElement "div"))
       (gs/setStyle container-el

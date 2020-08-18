@@ -19,6 +19,9 @@
 (defonce components-ref (atom {}))
 (defonce instances-ref (atom #{}))
 
+(defn get-component [env]
+  (::component env))
+
 ;; called on start for hot-reload purposes
 ;; otherwise components may decide to skip rendering and preventing nested UI updates
 ;; will be stripped in release builds
@@ -84,6 +87,69 @@
       idx
       (recur (bit-shift-right search 1) (inc idx)))))
 
+(defprotocol DidUpdateHook
+  (-comp-did-update! [this]))
+
+(declare get-env)
+
+(deftype EffectHook
+  [^:mutable deps
+   ^:mutable callback
+   ^:mutable callback-result
+   ^:mutable should-call?
+   ^:mutable component
+   idx]
+
+  gp/IBuildHook
+  (hook-build [this c i]
+    (EffectHook. deps callback callback-result should-call? c i))
+
+  gp/IHook
+  (hook-init! [this])
+  (hook-ready? [this] true)
+  (hook-value [this] ::effect-hook)
+  (hook-update! [this] false)
+
+  (hook-deps-update! [this ^EffectHook new]
+    (assert (instance? EffectHook new))
+    ;; comp-did-update! will call it
+    ;; FIXME: (sg/effect :mount (fn [] ...)) is only called once ever
+    ;; should it be called in case it uses other hook data?
+    (set! callback (.-callback new))
+
+    ;; run after each render
+    ;; (sg/effect :render (fn [env] ...))
+
+    ;; run once on mount, any constant really works
+    ;; (sg/effect :mount (fn [env] ...))
+
+    ;; when when [a b] changes
+    ;; (sg/effect [a b] (fn [env] ....))
+
+    (let [new-deps (.-deps new)]
+      (when (not= new-deps :render)
+        (set! should-call? (not= deps new-deps))
+        (set! deps new-deps)))
+
+    ;; doesn't have a usable output
+    false)
+
+  (hook-destroy! [this]
+    (when (fn? callback-result)
+      (callback-result)))
+
+  DidUpdateHook
+  (-comp-did-update! [this]
+    (when should-call?
+      (when (fn? callback-result)
+        (callback-result))
+
+      (set! callback-result (callback (get-env component)))
+
+      (when (not= deps :render)
+        (set! should-call? false))
+      )))
+
 (deftype ManagedComponent
   [^not-native scheduler ;; called often, need to avoid map lookup
    ^not-native ^:mutable parent-env
@@ -91,7 +157,6 @@
    ^:mutable args
    ^:mutable rendered-args
    ^ComponentConfig ^:mutable config
-   ^not-native ^:mutable events
    ^:mutable root
    ^:mutable slots
    ^number ^:mutable current-idx
@@ -160,7 +225,7 @@
             ev-id
 
             (keyword? ev-id)
-            (or (get events ev-id)
+            (or (get (.-events config) ev-id)
                 (get (.-opts config) ev-id))
 
             :else
@@ -210,7 +275,6 @@
           (-> parent-env
               (update ::depth safe-inc)
               (assoc ::parent (::component parent-env))
-              (assoc ::dom-refs (atom {}))
               ;; (assoc ::component-id (str (.-component-name config) "@" (next-component-id)))
               (assoc ::component this))]
 
@@ -367,19 +431,19 @@
         (set! rendered-args args)
         (set! needs-render? false)
 
-        ;; FIXME: let scheduler decide if frag should be applied
-        (p/update! root frag)
+        (p/update! root frag)))
 
-        ;; FIXME: run dom after effects
-        ))
+    (.did-update! this needs-render?)
 
     (gp/did-finish! scheduler this))
 
-  (register-event! [this event-id callback]
-    (set! events (assoc events event-id callback)))
-
-  (unregister-event! [this event-id callback]
-    (set! events (dissoc events event-id)))
+  (did-update! [this did-render?]
+    (.forEach hooks
+      (fn [item]
+        ;; FIXME: should maybe keep this in a separate array or so
+        ;; checking on every render is sort of overkill since we know after the first time
+        (when (implements? DidUpdateHook item)
+          (-comp-did-update! item)))))
 
   (get-slot [this slot-id]
     (get slots slot-id))
@@ -403,7 +467,6 @@
           args
           args ;; rendered-args
           config
-          {} ;; event handlers
           nil ;; root
           {} ;; slots
           (int 0) ;; current-idx
@@ -500,14 +563,6 @@
   (fn [env node oval nval]
     (event-attr env node :mouseout oval nval)))
 
-(a/add-attr :dom/ref
-  (fn [{::keys [dom-refs] :as env} node oval nval]
-    (when-not dom-refs
-      (throw (ex-info "ref used outside component" {:val nval :env env})))
-    (when (and oval (not= oval nval))
-      (swap! dom-refs dissoc oval))
-    (swap! dom-refs assoc nval node)))
-
 (deftype HookConfig [depends-on affects run])
 
 (defn make-hook-config
@@ -518,6 +573,15 @@
          (fn? run)]}
   (HookConfig. depends-on affects run))
 
+(deftype EffectConfig [depends-on run])
+
+(defn make-effect-config
+  "used by defc macro, do not use directly"
+  [depends-on run]
+  {:pre [(int? depends-on)
+         (fn? run)]}
+  (EffectConfig. depends-on run))
+
 (defn make-component-config
   "used by defc macro, do not use directly"
   [component-name
@@ -525,14 +589,18 @@
    opts
    check-args-fn
    render-deps
-   render-fn]
+   render-fn
+   events
+   effects]
   {:pre [(string? component-name)
          (array? hooks)
          (every? #(instance? HookConfig %) hooks)
          (map? opts)
          (fn? check-args-fn)
          (nat-int? render-deps)
-         (fn? render-fn)]}
+         (fn? render-fn)
+         (map? events)
+         (array? effects)]}
 
   (let [cfg
         (gp/ComponentConfig.
@@ -541,7 +609,9 @@
           opts
           check-args-fn
           render-deps
-          render-fn)]
+          render-fn
+          events
+          effects)]
 
     (when ^boolean js/goog.DEBUG
       (swap! components-ref assoc component-name cfg))
@@ -559,9 +629,6 @@
 
 (defn arg-triggers-render! [^ManagedComponent comp idx]
   (.set-render-required! comp))
-
-(defn get-dom-ref [{::keys [dom-refs] :as env} ref-id]
-  (get @dom-refs ref-id))
 
 (defn get-slot [^ManagedComponent comp slot-id]
   {:pre [(keyword? slot-id)]}
@@ -581,38 +648,6 @@
 
 (defn hook-ready! [^ManagedComponent comp idx]
   (.ready-hook! comp idx))
-
-
-(deftype EventHook
-  [event-id
-   ^ManagedComponent component
-   idx
-   ^:mutable callback]
-  gp/IBuildHook
-  (hook-build [this c i]
-    (EventHook. event-id c i callback))
-
-  gp/IHook
-  (hook-init! [this]
-    (.register-event! component event-id callback))
-  (hook-ready? [this]
-    true)
-  (hook-value [this]
-    ;; only accessed by debugging aids, code can't actually reference this
-    event-id)
-  (hook-update! [this]
-    ;; can't affect anything else since nothing can refer to it directly
-    false)
-  (hook-deps-update! [this new-val]
-    (set! callback new-val)
-    (.register-event! component event-id new-val))
-  (hook-destroy! [this]
-    (.unregister-event! component event-id)))
-
-;; called from macro for ::event-id ...
-(defn event-hook [ev-id callback]
-  {:pre [(fn? callback)]}
-  (EventHook. ev-id nil nil callback))
 
 (deftype SimpleVal [^:mutable val]
   gp/IHook

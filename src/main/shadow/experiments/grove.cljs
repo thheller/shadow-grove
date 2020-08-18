@@ -14,7 +14,7 @@
     [shadow.experiments.grove.ui.suspense :as suspense]
     [shadow.experiments.grove.ui.streams :as streams]
     [shadow.experiments.grove.ui.atoms :as atoms]
-    ))
+    [shadow.experiments.arborist.attributes :as a]))
 
 ;; these are private - should not be accessed from the outside
 (defonce active-roots-ref (atom {}))
@@ -280,6 +280,74 @@
 (defn stream [stream-key opts item-fn]
   (streams/StreamInit. stream-key opts item-fn))
 
+(defn simple-seq [coll render-fn]
+  (sa/render-seq coll nil render-fn))
+
 (defn render-seq [coll key-fn render-fn]
   (sa/render-seq coll key-fn render-fn))
 
+
+(deftype TrackChange [^:mutable val ^:mutable trigger-fn ^:mutable result env component idx]
+  gp/IBuildHook
+  (hook-build [this c i]
+    (TrackChange. val trigger-fn nil (comp/get-env c) c i))
+
+  gp/IHook
+  (hook-init! [this]
+    (set! result (trigger-fn env nil val)))
+
+  (hook-ready? [this] true)
+  (hook-value [this] result)
+  (hook-update! [this] false)
+
+  (hook-deps-update! [this ^TrackChange new-track]
+    (assert (instance? TrackChange new-track))
+
+    (let [next-val (.-val new-track)
+          prev-result result]
+      (when (not= val next-val)
+
+        (set! result (.. new-track (trigger-fn env val next-val)))
+        (set! val next-val)
+        (set! trigger-fn (.-trigger-fn new-track)))
+
+      (not= result prev-result)))
+
+  (hook-destroy! [this]
+    ))
+
+(defn track-change [val trigger-fn]
+  (TrackChange. val trigger-fn nil nil nil nil))
+
+(deftype DomRef [^:mutable current]
+  cljs.core/IDeref
+  (-deref [this]
+    current)
+  cljs.core/IFn
+  (-invoke [this env val]
+    (set! current val)))
+
+(a/add-attr :dom/ref
+  (fn [env node oval nval]
+    (nval env node)))
+
+(defn dom-ref []
+  (DomRef. nil))
+
+(defn effect
+  "runs passed effect callback when provided deps argument changes
+   effect runs after render.
+
+   callback can return a function which will be called if cleanup is required"
+  [deps callback]
+  (comp/EffectHook. deps callback nil true nil nil))
+
+(defn render-effect
+  "call callback after every render"
+  [callback]
+  (comp/EffectHook. :render callback nil true nil nil))
+
+(defn mount-effect
+  "call callback on mount once"
+  [callback]
+  (comp/EffectHook. :mount callback nil true nil nil))
