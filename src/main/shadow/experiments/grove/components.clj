@@ -184,15 +184,9 @@
 
 (defn add-data-binding
   [{:keys [comp-sym hook-idx bindings] :as state}
-   {:keys [body]}]
+   [binding & body]]
 
-  ;; don't want to deal with render using bindings not yet declared
-  (when (contains? state :render-fn)
-    (throw (ex-info "data bindings can only be defined before render" {})))
-
-  (let [[binding & body] body
-
-        binding-name
+  (let [binding-name
         (cond
           (simple-symbol? binding)
           binding
@@ -213,11 +207,15 @@
         ;; must track these here by id since names may be shadowed later
         (update-affects deps hook-idx)
 
-        (assoc-in [:bindings binding-name]
-          {:type :hook
-           :idx hook-idx
-           :name binding-name
-           :deps deps})
+        (cond->
+          ;; don't make _ an accessible name when using (bind _ "something")
+          ;; should be convention for unused name, accessing it should be an error
+          (not= '_ binding-name)
+          (assoc-in [:bindings binding-name]
+            {:type :hook
+             :idx hook-idx
+             :name binding-name
+             :deps deps}))
 
         (update :hooks conj
           {:all-deps deps
@@ -237,15 +235,24 @@
           (map? binding)
           (hook-destructure-map binding-name binding)))))
 
-(defmethod analyze-hook 'data [state hook]
-  (add-data-binding state hook))
+(defmethod analyze-hook 'bind [state {:keys [body]}]
+  ;; (bind some-name (something-producing-a-value-or-hook))
 
-(defmethod analyze-hook 'bind [state hook]
-  (add-data-binding state hook))
+  ;; don't want to deal with render using bindings not yet declared
+  (when (contains? state :render-fn)
+    (throw (ex-info "data bindings can only be defined before render" {})))
+
+  (add-data-binding state body))
+
+(defmethod analyze-hook 'hook [state {:keys [body]}]
+  ;; (hook (some-hook-without-output))
+
+  ;; purely for side effects where the hook may hook into the lifecycle of the component
+  (add-data-binding state (into ['_] body)))
 
 (defmethod analyze-hook 'render
   [{:keys [comp-sym bindings] :as state} {:keys [body] :as hook}]
-
+  ;; (render something)
   (when (contains? state :render-fn)
     (throw (ex-info "render already defined" {})))
 
@@ -260,6 +267,7 @@
 
 (defmethod analyze-hook 'event
   [{:keys [comp-sym bindings] :as state} {:keys [body] :as hook}]
+  ;; (event ::ev-id [env e] (do-something))
   (let [[ev-id ev-args & body] body]
 
     (when-not (qualified-keyword? ev-id)
@@ -318,56 +326,6 @@
       :else
       (throw (ex-info "invalid event declaration" :body body)))))
 
-(defmethod analyze-hook 'effect
-  [{:keys [comp-sym bindings] :as state} {:keys [body] :as hook}]
-  (let [[deps fn-args & body] body]
-
-    ;; FIXME: enforce deps
-    ;; should be one off
-    ;; :mount - mount effect (once only)
-    ;; :render - for render effect (always)
-    ;; :auto - for when used deps change
-    ;; [a] - when a changes only, even if using more deps?
-
-    (when-not (vector? fn-args)
-      (throw (ex-info "expected args vector" {})))
-
-    (let [inner-bindings
-          (reduce
-            (fn [bindings arg]
-              (cond
-                (symbol? arg)
-                (dissoc bindings arg)
-
-                (and (map? arg) (:as arg))
-                (dissoc bindings (:as arg))
-
-                ;; FIXME: should support [a b :as x], should remove x.
-                (vector? arg)
-                (throw (ex-info "vector destructure not yet supported" {}))
-
-                :else
-                bindings))
-
-            bindings
-            fn-args)
-
-          used-deps
-          (find-used-bindings #{} inner-bindings body)
-
-          ;; ok to inject comp arg here
-          fn-args
-          (into [comp-sym] fn-args)]
-
-      (update state :effects conj
-        `(make-effect-config
-           ~deps ;; FIXME: turn into bitset
-           (fn ~fn-args
-             (let ~(let-bindings state used-deps)
-               ~@body)))))
-
-    ))
-
 (defn hook-symbol? [x]
   (and (symbol? x)
        (contains? (methods analyze-hook) x)))
@@ -400,7 +358,6 @@
              :args []
              :hooks []
              :events {}
-             :effects []
              :opts opts
              :effect-idx 0
              :hook-idx 0}
@@ -412,8 +369,6 @@
 
         render-args
         (bindings-indexes-of-type state render-used :arg)]
-
-    (clojure.pprint/pprint state)
 
     ;; assume 30 bits is safe for ints?
     ;; FIXME: JS numbers are weird, how many bits are actually safe to use?
@@ -459,7 +414,6 @@
          ~(reduce bit-set 0 render-deps)
          ~render-fn
          ~(:events state)
-         (cljs.core/array ~@(:effects state))
          ))))
 
 (comment

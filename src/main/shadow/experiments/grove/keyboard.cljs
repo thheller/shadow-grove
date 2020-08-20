@@ -39,8 +39,8 @@
   (hook-value [this] ::key-hook)
   (hook-update! [this] false)
 
-  (hook-deps-update! [this new-val]
-    (assert (instance? new-val KeyHook))
+  (hook-deps-update! [this ^KeyHook new-val]
+    (assert (instance? KeyHook new-val))
     (set! keys (desugar-keys (.-keys new-val)))
     false)
 

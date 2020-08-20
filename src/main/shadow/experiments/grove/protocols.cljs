@@ -33,7 +33,8 @@
   (work-pending? [this]))
 
 (defprotocol IHandleEvents
-  (handle-event! [this ev-id e ev-args]))
+  (handle-dom-event! [this ev-id e ev-args])
+  (handle-event! [this ev-id ev-args]))
 
 (defprotocol IScheduleUpdates
   (schedule-update! [this target])
@@ -60,6 +61,9 @@
   (hook-update! [this])
   (hook-destroy! [this]))
 
+(defprotocol IHookDomEffect
+  (hook-did-update! [this did-render?]))
+
 (defprotocol IBuildHook
   (hook-build [this component idx]))
 
@@ -72,8 +76,7 @@
    check-args-fn
    render-deps
    render-fn
-   events
-   effects])
+   events])
 
 (defprotocol IQueryEngine
   (query-init [this key query config callback])

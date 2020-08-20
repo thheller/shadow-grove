@@ -87,17 +87,14 @@
       idx
       (recur (bit-shift-right search 1) (inc idx)))))
 
-(defprotocol DidUpdateHook
-  (-comp-did-update! [this]))
-
 (declare get-env)
 
 (deftype EffectHook
   [^:mutable deps
-   ^:mutable callback
+   ^function ^:mutable callback
    ^:mutable callback-result
-   ^:mutable should-call?
-   ^:mutable component
+   ^boolean ^:mutable should-call?
+   ^not-native ^:mutable component
    idx]
 
   gp/IBuildHook
@@ -138,9 +135,9 @@
     (when (fn? callback-result)
       (callback-result)))
 
-  DidUpdateHook
-  (-comp-did-update! [this]
-    (when should-call?
+  gp/IHookDomEffect
+  (hook-did-update! [this ^boolean did-render?]
+    (when (and did-render? should-call?)
       (when (fn? callback-result)
         (callback-result))
 
@@ -161,6 +158,7 @@
    ^:mutable slots
    ^number ^:mutable current-idx
    ^array ^:mutable hooks
+   ^array ^:mutable hooks-with-effects
    ^number ^:mutable dirty-from-args
    ^number ^:mutable dirty-hooks
    ^number ^:mutable updated-hooks
@@ -218,7 +216,7 @@
   ;; FIXME: figure out default event handler
   ;; don't want to declare all events all the time
   gp/IHandleEvents
-  (handle-event! [this ev-id e ev-args]
+  (handle-dom-event! [this ev-id e ev-args]
     (let [handler
           (cond
             (fn? ev-id)
@@ -247,9 +245,26 @@
     ;; fn events always run directly in the component that triggered it
     (when (keyword? ev-id)
       (if-let [parent (::component parent-env)]
-        (gp/handle-event! parent ev-id e ev-args)
+        (gp/handle-dom-event! parent ev-id e ev-args)
         (when-not (gobj/get e "shadow$handled")
           (js/console.warn "event not handled" ev-id e ev-args)))))
+
+  (handle-event! [this ev-id ev-args]
+    (let [handler
+          (cond
+            (keyword? ev-id)
+            (or (get (.-events config) ev-id)
+                (get (.-opts config) ev-id))
+
+            :else
+            (throw (ex-info "unknown event" {:ev-id ev-id :ev-args ev-args})))]
+
+      (if handler
+        (apply handler component-env ev-args)
+        ;; FIXME: only bubble up until handled?
+        (if-let [parent (::component parent-env)]
+          (gp/handle-event! parent ev-id ev-args)
+          (js/console.warn "event not handled" ev-id ev-args)))))
 
   gp/IWork
   (work-priority [this] 10) ;; FIXME: could allow setting this via config
@@ -361,6 +376,9 @@
             (when (bit-test (.-render-deps config) current-idx)
               (set! needs-render? true))
 
+            (when (satisfies? gp/IHookDomEffect hook)
+              (.push hooks-with-effects hook))
+
             (if (gp/hook-ready? hook)
               (set! current-idx (inc current-idx))
               (.suspend! this)))
@@ -438,12 +456,9 @@
     (gp/did-finish! scheduler this))
 
   (did-update! [this did-render?]
-    (.forEach hooks
-      (fn [item]
-        ;; FIXME: should maybe keep this in a separate array or so
-        ;; checking on every render is sort of overkill since we know after the first time
-        (when (implements? DidUpdateHook item)
-          (-comp-did-update! item)))))
+    (.forEach hooks-with-effects
+      (fn [^not-native item]
+        (gp/hook-did-update! item did-render?))))
 
   (get-slot [this slot-id]
     (get slots slot-id))
@@ -471,6 +486,7 @@
           {} ;; slots
           (int 0) ;; current-idx
           nil ;; hooks, array created in component-init!
+          #js [] ;; hooks-with-effects (added when hooks are created)
           (int 0) ;; dirty-from-args bits
           (int 0) ;; dirty-hooks bits
           (int 0) ;; updated-hooks bits
@@ -499,7 +515,7 @@
   (when-not component
     (throw (ex-info "event handlers can only be used in components" {:env env :ev-id ev-id :e e :ev-args ev-args})))
 
-  (gp/run-now! (.-scheduler component) #(gp/handle-event! component ev-id e ev-args)))
+  (gp/run-now! (.-scheduler component) #(gp/handle-dom-event! component ev-id e ev-args)))
 
 (defn event-attr [env node event oval [ev-id & ev-args :as nval]]
 
@@ -563,6 +579,10 @@
   (fn [env node oval nval]
     (event-attr env node :mouseout oval nval)))
 
+(a/add-attr :on-mouseleave
+  (fn [env node oval nval]
+    (event-attr env node :mouseleave oval nval)))
+
 (deftype HookConfig [depends-on affects run])
 
 (defn make-hook-config
@@ -590,8 +610,7 @@
    check-args-fn
    render-deps
    render-fn
-   events
-   effects]
+   events]
   {:pre [(string? component-name)
          (array? hooks)
          (every? #(instance? HookConfig %) hooks)
@@ -599,8 +618,7 @@
          (fn? check-args-fn)
          (nat-int? render-deps)
          (fn? render-fn)
-         (map? events)
-         (array? effects)]}
+         (map? events)]}
 
   (let [cfg
         (gp/ComponentConfig.
@@ -610,8 +628,7 @@
           check-args-fn
           render-deps
           render-fn
-          events
-          effects)]
+          events)]
 
     (when ^boolean js/goog.DEBUG
       (swap! components-ref assoc component-name cfg))

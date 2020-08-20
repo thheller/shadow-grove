@@ -83,6 +83,12 @@
 (defn run-now! [env callback]
   (gp/run-now! (::gp/scheduler env) callback))
 
+(defn dispatch-up! [{::comp/keys [^not-native component] :as env} ev-id & ev-args]
+  {:pre [(map? env)
+         (qualified-keyword? ev-id)]}
+  ;; FIXME: should schedule properly when it isn't in event handler already
+  (gp/handle-event! component ev-id ev-args))
+
 (deftype QueryHook
   [^:mutable ident
    ^:mutable query

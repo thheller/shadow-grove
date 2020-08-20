@@ -67,6 +67,9 @@
 (add-attr :style
   (fn [env ^js node oval nval]
     (cond
+      (and (nil? oval) (nil? nval))
+      :empty
+
       (map? nval)
       (let [style (.-style node)]
         (reduce-kv
@@ -78,8 +81,12 @@
       (string? nval)
       (set! (.. node -style -cssText) nval)
 
+      ;; nil, undefined
+      (not (some? nval))
+      (set! (.. node -style -cssText) "")
+
       :else
-      (throw (ex-info "invalid value for :class" {:node node :val nval}))
+      (throw (ex-info "invalid value for :style" {:node node :val nval}))
       )))
 
 (add-attr :class
