@@ -443,15 +443,16 @@
     (set! updated-hooks (int 0))
     (set! dirty-from-args (int 0))
 
-    (when needs-render?
-      (let [frag (. config (render-fn this))]
+    (let [did-render? needs-render?]
+      (when needs-render?
+        (let [frag (. config (render-fn this))]
 
-        (set! rendered-args args)
-        (set! needs-render? false)
+          (set! rendered-args args)
+          (set! needs-render? false)
 
-        (p/update! root frag)))
+          (p/update! root frag)))
 
-    (.did-update! this needs-render?)
+      (.did-update! this did-render?))
 
     (gp/did-finish! scheduler this))
 
