@@ -52,22 +52,6 @@
     :worker
     {:init-fn todomvc.split.worker/init
      :web-worker true
-     :depends-on #{:shared}}}
-   :devtools {:browser-inject :main}}
-
-  :conduit
-  {:target :browser
-   :output-dir "examples/conduit/js"
-   :modules
-   {:shared
-    {:entries []}
-    :main
-    {:init-fn conduit.frontend.main/init
-     :preloads [shadow.experiments.grove.dev-support]
-     :depends-on #{:shared}}
-    :worker
-    {:init-fn conduit.frontend.worker/init
-     :web-worker true
      :depends-on #{:shared}}}}
 
   :bench-db
