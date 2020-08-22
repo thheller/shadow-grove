@@ -1,133 +1,122 @@
-;; FIXME: should remain identical to simple.views
-;; need to sort out ns structure it can be actually identical
 (ns todomvc.split.views
   (:require
-    [shadow.experiments.arborist :as sa :refer (<< defc)]
-    [shadow.experiments.arborist.effects :as sfx]
-    [shadow.experiments.grove :as sg]
+    [shadow.experiments.grove :as sg :refer (<< defc)]
     [todomvc.model :as m]))
 
-(defc ui-todo-item
-  {::m/edit-update!
-   (fn [env e todo]
-     (case (.-which e)
-       13 ;; enter
-       (.. e -target (blur))
-       27 ;; escape
-       (sg/run-tx env [::m/edit-cancel! todo])
-       ;; default do nothing
-       nil))
+(defc todo-item [todo]
+  (event ::m/edit-update! [env e todo]
+    (case (.-which e)
+      13 ;; enter
+      (.. e -target (blur))
+      27 ;; escape
+      (sg/run-tx env [::m/edit-cancel! todo])
+      ;; default do nothing
+      nil))
 
-   ::m/edit-complete!
-   (fn [env e todo]
-     (sg/run-tx env [::m/edit-save! {:todo todo :text (.. e -target -value)}]))
+  (event ::m/edit-complete! [env e todo]
+    (sg/run-tx env [::m/edit-save! {:todo todo :text (.. e -target -value)}]))
 
-   ::m/delete! sg/tx
-   ::m/toggle-completed! sg/tx
-   ::m/edit-start! sg/tx}
-  [todo]
-  [{::m/keys [completed? editing? todo-text] :as data}
-   (sg/query-ident todo [::m/todo-text
-                         ::m/editing?
-                         ::m/completed?])]
+  (event ::m/toggle-completed! sg/tx)
+  (event ::m/edit-start! sg/tx)
+  (event ::m/delete! sg/tx)
 
-  (<< [:li {:class {:completed completed?
-                    :editing editing?}}
-       [:div.view
-        [:input.toggle {:type "checkbox"
-                        :checked completed?
-                        :on-change [::m/toggle-completed! todo]}]
-        [:label {:on-dblclick [::m/edit-start! todo]} todo-text]
-        [:button.destroy {:on-click [::m/delete! todo]}]]
+  (bind {::m/keys [completed? editing? todo-text] :as data}
+    (sg/query-ident todo
+      [::m/todo-text
+       ::m/editing?
+       ::m/completed?]))
 
-       (when editing?
-         (<< [:input#edit.edit {:autofocus true
-                                :on-keydown [::m/edit-update! todo]
-                                :on-blur [::m/edit-complete! todo]
-                                :value todo-text}]))]))
+  (render
+    (<< [:li {:class {:completed completed?
+                      :editing editing?}}
+         [:div.view
+          [:input.toggle {:type "checkbox"
+                          :checked completed?
+                          :on-change [::m/toggle-completed! todo]}]
+          [:label {:on-dblclick [::m/edit-start! todo]} todo-text]
+          [:button.destroy {:on-click [::m/delete! todo]}]]
 
+         (when editing?
+           (<< [:input#edit.edit {:autofocus true
+                                  :on-keydown [::m/edit-update! todo]
+                                  :on-blur [::m/edit-complete! todo]
+                                  :value todo-text}]))])))
 
 (defc ui-filter-select []
-  [{::m/keys [current-filter]}
-   (sg/query-root [::m/current-filter])
+  (bind {::m/keys [current-filter]}
+    (sg/query-root
+      [::m/current-filter]))
 
-   filter-options
-   [{:label "All" :value :all}
-    {:label "Active" :value :active}
-    {:label "Completed" :value :completed}]]
+  (bind
+    filter-options
+    [{:label "All" :value :all}
+     {:label "Active" :value :active}
+     {:label "Completed" :value :completed}])
 
-  (<< [:ul.filters
-       (sa/render-seq filter-options nil
-         (fn [{:keys [label value]}]
-           (<< [:li [:a
-                     {:class {:selected (= current-filter value)}
-                      :href "#"
-                      :on-click [::m/set-filter! value]}
-                     label]])))]))
+  (render
+    (<< [:ul.filters
+         (sg/render-seq filter-options :value
+           (fn [{:keys [label value]}]
+             (<< [:li [:a
+                       {:class {:selected (= current-filter value)}
+                        :href "#"
+                        :on-click [::m/set-filter! value]}
+                       label]])))])))
 
 (defc ui-todo-list []
-  [{::m/keys [filtered-todos] :as query}
-   (sg/query-root [::m/filtered-todos])]
+  (bind {::m/keys [filtered-todos] :as query}
+    (sg/query-root
+      [::m/filtered-todos]))
 
-  (<< [:ul.todo-list (sa/render-seq filtered-todos identity ui-todo-item)])
-  #_(sa/suspense
-      (<< [:ul.todo-list (sa/render-seq filtered-todos identity ui-todo-item)])
+  (render
+    (<< [:ul.todo-list (sg/render-seq filtered-todos identity todo-item)])))
 
-      {:fallback (<< [:div "Loading ..."])
-       :timeout 100}))
+(defc ui-root []
+  (event ::m/set-filter! sg/tx)
+  (event ::m/create-new! [env ^js e]
+    (when (= 13 (.-keyCode e))
+      (let [input (.-target e)
+            text (.-value input)]
 
-(defc ui-root
-  {::m/set-filter! sg/tx
-   ::m/create-new!
-   (fn [env ^js e]
-     (when (= 13 (.-keyCode e))
-       (let [input (.-target e)
-             text (.-value input)]
+        (when (seq text)
+          (set! input -value "") ;; FIXME: this triggers a paint so should probably be delayed?
+          (sg/run-tx env [::m/create-new! {::m/todo-text text}])))))
 
-         (when (seq text)
-           (set! input -value "") ;; FIXME: this triggers a paint so should probably be delayed?
-           (sg/run-tx env [::m/create-new! {::m/todo-text text}])))))
+  (event ::m/clear-completed! sg/tx)
+  (event ::m/shuffle! sg/tx)
 
-   ::m/clear-completed! sg/tx
-   ::m/shuffle! sg/tx
-   ::m/toggle-all!
-   (fn [env e]
-     (sg/run-tx env [::m/toggle-all! {:completed? (-> e .-target .-checked)}]))}
+  (event ::m/toggle-all! [env e]
+    (sg/run-tx env [::m/toggle-all! {:completed? (-> e .-target .-checked)}]))
 
-  []
-  [{::m/keys [num-total num-active num-completed] :as query}
-   (sg/query-root
-     [::m/editing
-      ::m/num-total
-      ::m/num-active
-      ::m/num-completed])]
+  (bind {::m/keys [num-total num-active num-completed] :as query}
+    (sg/query-root
+      [::m/editing
+       ::m/num-total
+       ::m/num-active
+       ::m/num-completed]))
 
-  (<< [:div {:on-click [::m/shuffle!]} "shuffle todos"]
-      [:header.header
-       [:h1 "todos"]
-       [:input.new-todo {:on-keydown [::m/create-new!]
-                         :placeholder "What needs to be done?"
-                         :autofocus true}]]
+  (render
+    (<< [:header.header
+         [:h1 "todos"]
+         [:input.new-todo {:on-keydown [::m/create-new!]
+                           :placeholder "What needs to be done?"
+                           :autofocus true}]]
 
-      (when (pos? num-total)
-        (<< [:section.main
-             [:input#toggle-all.toggle-all
-              {:type "checkbox"
-               :on-change [::m/toggle-all!]
-               :checked false}]
-             [:label {:for "toggle-all"} "Mark all as complete"]
+        (when (pos? num-total)
+          (<< [:section.main
+               [:input#toggle-all.toggle-all
+                {:type "checkbox"
+                 :on-change [::m/toggle-all!]
+                 :checked false}]
+               [:label {:for "toggle-all"} "Mark all as complete"]
 
-             ;; test extract to see if shuffle gets faster
-             ;; since all the other stuff doesn't need to happen here when only the todos are shuffled
-             ;; does have an impact overall but its all very efficient already so doesn't matter much
-             ;; even with 6x slowdown
-             (ui-todo-list)
+               (ui-todo-list)
 
-             [:footer.footer
-              [:span.todo-count
-               [:strong num-active] (if (= num-active 1) " item" " items") " left"]
+               [:footer.footer
+                [:span.todo-count
+                 [:strong num-active] (if (= num-active 1) " item" " items") " left"]
 
-              (ui-filter-select)
+                (ui-filter-select)
 
-              (when (pos? num-completed)
-                (<< [:button.clear-completed {:on-click [::m/clear-completed!]} "Clear completed"]))]]))))
+                (when (pos? num-completed)
+                  (<< [:button.clear-completed {:on-click [::m/clear-completed!]} "Clear completed"]))]])))))

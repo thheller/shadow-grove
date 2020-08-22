@@ -281,7 +281,7 @@
 
       ;; (event ::some-id [env e] do-stuff)
       ;; removing [env e] from bindings since they would otherwise override the actual args
-      (and (vector? ev-args) (some? body))
+      (vector? ev-args)
       (let [inner-bindings
             (reduce
               (fn [bindings arg]
@@ -324,7 +324,7 @@
                nil))))
 
       :else
-      (throw (ex-info "invalid event declaration" :body body)))))
+      (throw (ex-info "invalid event declaration" {:hook hook})))))
 
 (defn hook-symbol? [x]
   (and (symbol? x)
