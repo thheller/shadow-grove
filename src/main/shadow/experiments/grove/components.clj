@@ -17,6 +17,43 @@
 ;; would make env a dependency of some-hook although it isn't
 ;; should be rather unlikely though so doesn't matter for now
 
+(defn get-map-destructure-names [m]
+  (reduce-kv
+    (fn [names key val]
+      (cond
+        (symbol? key)
+        (conj names key)
+
+        (= :as key)
+        (conj names val)
+
+        (vector? val)
+        (into names val)
+
+        :else
+        names))
+    #{}
+    m))
+
+(defn get-vec-destructure-names [v]
+  (reduce
+    (fn [names val]
+      (cond
+        (= '& val)
+        names
+
+        (symbol? val)
+        (conj names val)
+
+        :else
+        names))
+    #{}
+    v))
+
+(comment
+  (get-map-destructure-names '{:keys [foo] ::keys [bar] baz :baz :as x})
+  (get-vec-destructure-names '[a b c & d :as x]))
+
 (defn find-fn-args [args]
   {:pre [(vector? args)]}
   (reduce
@@ -25,12 +62,14 @@
         (symbol? arg)
         (conj names arg)
 
-        (and (map? arg) (:as arg))
-        (conj names (:as arg))
+        (map? arg)
+        (set/union names (get-map-destructure-names arg))
 
         (vector? arg)
-        (throw (ex-info "too lazy for vector removal right now" {:arg arg}))
-        ))
+        (set/union names (get-vec-destructure-names arg))
+
+        :else
+        names))
     #{}
     args))
 
