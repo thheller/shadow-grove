@@ -1,6 +1,8 @@
 (ns todomvc.simple
   (:require
-    [shadow.experiments.grove :as sg :refer (defc <<)]))
+    [shadow.experiments.grove :as sg :refer (defc <<)]
+    [shadow.experiments.grove.css-transition :as cfx]
+    ))
 
 ;; simple single file todomvc impl
 ;; without any db abstraction and directly manipulating atom data
@@ -17,15 +19,25 @@
 
   (bind editing? (= editing todo-id))
 
+  (bind fade
+    (cfx/class-transition "fade"))
+
+  (event ::delete-me! [env e]
+    (cfx/trigger-out! fade
+      (fn []
+        (sg/dispatch-up! env ::delete! todo-id))))
+
   (render
-    (<< [:li {:class {:completed completed?
+    (<< [:li {::cfx/ref fade
+              :class {:completed completed?
                       :editing editing?}}
          [:div.view
           [:input.toggle {:type "checkbox"
                           :checked completed?
                           :on-change [::toggle-completed! todo-id]}]
-          [:label {:on-dblclick [::edit-start! todo-id]} todo-text]
-          [:button.destroy {:on-click [::delete! todo-id]}]]
+          [:label {:on-dblclick [::edit-start! todo-id]}
+           todo-text]
+          [:button.destroy {:on-click [::delete-me!]}]]
 
          (when editing?
            (<< [:input#edit.edit {:autofocus true
@@ -167,7 +179,7 @@
   (event ::toggle-completed! [{:keys [data-ref] :as env} e todo-id]
     (swap! data-ref update-in [:todos todo-id :completed?] not))
 
-  (event ::delete! [{:keys [data-ref] :as env} e todo-id]
+  (event ::delete! [{:keys [data-ref] :as env} #_e todo-id]
     (swap! data-ref update :todos dissoc todo-id)))
 
 (defn ^:dev/after-load start []

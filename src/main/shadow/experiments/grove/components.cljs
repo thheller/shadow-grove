@@ -219,9 +219,6 @@
   (handle-dom-event! [this ev-id e ev-args]
     (let [handler
           (cond
-            (fn? ev-id)
-            ev-id
-
             (keyword? ev-id)
             (or (get (.-events config) ev-id)
                 (get (.-opts config) ev-id))
@@ -229,25 +226,14 @@
             :else
             (throw (ex-info "unknown event" {:ev-id ev-id :e e :ev-args ev-args})))]
 
-      (when handler
-        (let [ev-env
-              (assoc component-env
-                ::e e
-                ::ev-id ev-id)]
+      (if handler
+        (let [ev-env (assoc component-env ::e e ::ev-id ev-id)]
+          (apply handler ev-env e ev-args))
 
-          ;; abuse fact that e is mutable anyways
-          ;; just need to keep track if something at least attempted to handle the event
-          (gobj/set e "shadow$handled" true)
-
-          (apply handler ev-env e ev-args))))
-
-    ;; FIXME: should all keyword events bubble up by default?
-    ;; fn events always run directly in the component that triggered it
-    (when (keyword? ev-id)
-      (if-let [parent (::component parent-env)]
-        (gp/handle-dom-event! parent ev-id e ev-args)
-        (when-not (gobj/get e "shadow$handled")
-          (js/console.warn "event not handled" ev-id e ev-args)))))
+        ;; no handler, try parent
+        (if-some [parent (::component parent-env)]
+          (gp/handle-dom-event! parent ev-id e ev-args)
+          (js/console.warn "event not handled" ev-id ev-args)))))
 
   (handle-event! [this ev-id ev-args]
     (let [handler
