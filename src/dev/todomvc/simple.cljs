@@ -8,7 +8,10 @@
 
 (defonce root-el (js/document.getElementById "app"))
 
-(defc todo-item [{:keys [todo-id todo-text completed?] :as todo}]
+(defc todo-item [todo-id]
+  (bind {:keys [todo-text completed?] :as todo}
+    (sg/env-watch :data-ref [:todos todo-id]))
+
   (bind editing
     (sg/env-watch :data-ref [:editing]))
 
@@ -62,6 +65,7 @@
 
       (->> (vals todos)
            (filter filter-fn)
+           (map :todo-id)
            (vec))))
 
   (render
@@ -79,7 +83,7 @@
                  :checked false}]
                [:label {:for "toggle-all"} "Mark all as complete"]
 
-               [:ul.todo-list (sg/render-seq filtered-todos :todo-id todo-item)]
+               [:ul.todo-list (sg/render-seq filtered-todos identity todo-item)]
 
                [:footer.footer
                 [:span.todo-count
