@@ -18,7 +18,8 @@
    query-id
    ^:mutable query
    ident
-   opts
+   ^:mutable opts
+   ^:mutable last-result
    ^:mutable items
    ^:mutable ^js container-el ;; the other scroll container
    ^:mutable ^js inner-el ;; the inner container providing the height
@@ -33,8 +34,16 @@
          (= ident (:ident (.-opts next)))))
 
   (dom-sync! [this ^VirtualInit next]
-    (when (not= opts (.-opts next))
-      (js/console.log "vlist sync, opts changed" this next)))
+    (let [next-opts (.-opts next)]
+      (when (not= opts next-opts)
+        (set! opts next-opts)
+
+        ;; FIXME: this is least efficient way to re-render all items
+        ;; should be smarter here
+        (.handle-query-result! this last-result)
+
+        ;; (js/console.log "vlist sync, opts changed" this next)
+        )))
 
   (dom-insert [this parent anchor]
     (.insertBefore parent container-el anchor))
@@ -105,72 +114,73 @@
     (gp/query-init query-engine query-id query {} #(.handle-query-result! this %)))
 
   (handle-query-result! [this result]
-    (ds/write!
-      (let [{:keys [item-count offset slice] :as data}
-            (if ident (get-in result [ident (.-attr config)] (get result (.-attr config))))
+    (let [{:keys [item-count offset slice] :as data}
+          (if ident (get-in result [ident (.-attr config)] (get result (.-attr config))))
 
-            {:keys [item-height]}
-            (.-config config)]
+          {:keys [item-height]}
+          (.-config config)]
 
-        ;; FIXME: rewrite this!
-        ;; sparse array makes no sense anymore. only ever keeping the elements visible anyways
+      (set! last-result result)
 
-        (cond
-          (not items)
-          (do (set! items (js/Array. item-count))
-              (gs/setStyle inner-el "height" (str (* item-count item-height) "px")))
+      ;; FIXME: rewrite this!
+      ;; sparse array makes no sense anymore. only ever keeping the elements visible anyways
 
-          ;; FIXME: this needs to be handled differently, shouldn't just throw everything away
-          (not= item-count (.-length items))
-          (do (.forEach items ;; sparse array, doseq processes too many
-                (fn [item idx]
-                  (ap/destroy! item)))
-              (set! items (js/Array. item-count))
-              (set! container-el -scrollTop 0)
-              (gs/setStyle inner-el "height" (str (* item-count item-height) "px")))
+      (cond
+        (not items)
+        (do (set! items (js/Array. item-count))
+            (gs/setStyle inner-el "height" (str (* item-count item-height) "px")))
 
-          :else
-          nil)
+        ;; FIXME: this needs to be handled differently, shouldn't just throw everything away
+        (not= item-count (.-length items))
+        (do (.forEach items ;; sparse array, doseq processes too many
+              (fn [item idx]
+                (ap/destroy! item)))
+            (set! items (js/Array. item-count))
+            (set! container-el -scrollTop 0)
+            (gs/setStyle inner-el "height" (str (* item-count item-height) "px")))
 
-        ;; FIXME: can do this directly on scroll?
-        (gs/setStyle box-el "top" (str (* item-height offset) "px"))
+        :else
+        nil)
 
-        (.cleanup! this)
+      ;; FIXME: can do this directly on scroll?
+      (gs/setStyle box-el "top" (str (* item-height offset) "px"))
 
-        ;; FIXME: this would likely be more efficient DOM wise when traversing backwards
-        ;; easier to keep track of anchor-el for dom-insert
-        (reduce-kv
-          (fn [_ offset-idx val]
-            (let [idx (+ offset-idx offset)]
-              ;; might have scrolled out while query was loading
-              ;; can skip render of elements that will be immediately replaced
-              (when (.in-visible-range? this idx)
-                ;; render and update/insert
-                (let [rendered (. config (item-fn val idx opts))]
-                  (if-let [current (aget items idx)]
-                    ;; current exists, try to update or replace
-                    (if (ap/supports? current rendered)
-                      (ap/dom-sync! current rendered)
-                      (let [new-managed (common/replace-managed env current rendered)]
-                        (aset items idx new-managed)
-                        (when dom-entered?
-                          (ap/dom-entered! new-managed)
-                          )))
-                    ;; doesn't exist, create managed and insert at correct DOM position
-                    (let [managed (ap/as-managed rendered env)
-                          ;; FIXME: would be easier with wrapper elements
-                          ;; just create them once and replace the contents
-                          ;; but no wrappers means potentially supporting CSS grid?
-                          next-item (.find-next-item this idx)
-                          anchor-el (when next-item (ap/dom-first next-item))]
+      (.cleanup! this)
 
-                      ;; insert before next item, or append if it doesn't exist
-                      (ap/dom-insert managed box-el anchor-el)
+      ;; FIXME: this would likely be more efficient DOM wise when traversing backwards
+      ;; easier to keep track of anchor-el for dom-insert
+      (reduce-kv
+        (fn [_ offset-idx val]
+          (let [idx (+ offset-idx offset)]
+            ;; might have scrolled out while query was loading
+            ;; can skip render of elements that will be immediately replaced
+            (when (.in-visible-range? this idx)
+              ;; render and update/insert
+              (let [rendered (. config (item-fn val idx opts))]
+                (if-let [current (aget items idx)]
+                  ;; current exists, try to update or replace
+                  (if (ap/supports? current rendered)
+                    (ap/dom-sync! current rendered)
+                    (let [new-managed (common/replace-managed env current rendered)]
+                      (aset items idx new-managed)
                       (when dom-entered?
-                        (ap/dom-entered! managed))
-                      (aset items idx managed)))))))
-          nil
-          slice))))
+                        (ap/dom-entered! new-managed)
+                        )))
+                  ;; doesn't exist, create managed and insert at correct DOM position
+                  (let [managed (ap/as-managed rendered env)
+                        ;; FIXME: would be easier with wrapper elements
+                        ;; just create them once and replace the contents
+                        ;; but no wrappers means potentially supporting CSS grid?
+                        next-item (.find-next-item this idx)
+                        anchor-el (when next-item (ap/dom-first next-item))]
+
+                    ;; insert before next item, or append if it doesn't exist
+                    (ap/dom-insert managed box-el anchor-el)
+                    (when dom-entered?
+                      (ap/dom-entered! managed))
+                    (aset items idx managed)))))))
+        nil
+        slice)))
 
   ;; sparse array, idx might be 6 and the next item is 10
   ;; FIXME: should maintain the rendered items better and avoid all this logic
@@ -233,6 +243,7 @@
               nil
               (:ident opts)
               opts
+              nil ;; last-result
               nil
               nil
               nil

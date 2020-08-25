@@ -83,11 +83,11 @@
 (defn run-now! [env callback]
   (gp/run-now! (::gp/scheduler env) callback))
 
-(defn dispatch-up! [{::comp/keys [^not-native component] :as env} ev-id & ev-args]
+(defn dispatch-up! [{::comp/keys [^not-native parent] :as env} ev-id & ev-args]
   {:pre [(map? env)
          (qualified-keyword? ev-id)]}
   ;; FIXME: should schedule properly when it isn't in event handler already
-  (gp/handle-event! component ev-id ev-args))
+  (gp/handle-event! parent ev-id ev-args))
 
 (deftype QueryHook
   [^:mutable ident
@@ -311,11 +311,10 @@
 
     (let [next-val (.-val new-track)
           prev-result result]
-      (when (not= val next-val)
 
-        (set! result (.. new-track (trigger-fn env val next-val)))
-        (set! val next-val)
-        (set! trigger-fn (.-trigger-fn new-track)))
+      (set! trigger-fn (.-trigger-fn new-track))
+      (set! result (trigger-fn env val next-val))
+      (set! val next-val)
 
       (not= result prev-result)))
 
