@@ -6,6 +6,12 @@
     [goog.style :as gs]
     [shadow.experiments.grove.ui.util :as util]))
 
+
+;; an attempt at a totally mutable element that doesn't try to reconstruct the whole dom
+;; every time. turns out that is pretty tricky and probably not worth.
+;; bunch of tradeoffs when trying to merge state from different sources
+;; and not knowing that the DOM is actually currently displaying
+
 (util/assert-not-in-worker!)
 
 (declare StreamInit)
@@ -24,9 +30,7 @@
 
   ap/IManaged
   (supports? [this ^StreamInit next]
-    (and (instance? StreamInit next)
-         (keyword-identical? stream-key (.-stream-key next))
-         (identical? item-fn (.-item-fn next))))
+    (identical? this next))
 
   (dom-sync! [this ^StreamInit next]
     ;; not sure what this should sync. shouldn't really need updating
@@ -42,7 +46,13 @@
     (set! dom-entered? true))
 
   (destroy! [this]
-    (.remove container-el))
+    (gp/stream-destroy stream-engine stream-id stream-key)
+
+    (.remove container-el)
+
+    (doseq [^goog div (array-seq (.-children inner-el))]
+      (let [managed (.-shadow$managed div)]
+        (ap/destroy! managed))))
 
   Object
   (init! [this]
@@ -67,10 +77,21 @@
       (:stream-opts opts {})
       #(.handle-stream-msg this %)))
 
+  (clear! [this]
+    (gp/stream-clear stream-engine stream-key)
+
+    (loop []
+      (when-some [^goog div (.-lastElementChild inner-el)]
+        (let [managed (.-shadow$managed div)]
+          (ap/destroy! managed)
+          (.remove div)
+          (recur)))))
+
   (make-item [this item]
     (let [el (js/document.createElement "div")
           rendered (item-fn item)
           managed (ap/as-managed rendered env)]
+      (set! (.. el -style -height) (str (:item-height opts) "px"))
       (set! el -shadow$managed managed)
       (ap/dom-insert managed el nil)
       el))
@@ -84,28 +105,46 @@
             (.insertBefore inner-el el (.-firstChild inner-el))
             )))
 
-      ;; FIXME: don't delete all, try to dom-sync!
-      :reset
-      (do (doseq [^Element child (into [] (array-seq (.-children inner-el)))
-                  :let [managed (.-shadow$managed child)]]
-            (ap/destroy! managed)
-            (.remove child))
-          (.handle-stream-msg this (assoc msg :op :init)))
-
       :add
       (let [{:keys [item]} msg
             el (.make-item this item)]
-        (.insertBefore inner-el el (.-firstChild inner-el)))
+        (.insertBefore inner-el el (.-firstChild inner-el))
+
+        ;; FIXME: take actual capacity config, 1000 is arbitrary
+        (when (> (.-childElementCount inner-el) 1000)
+          (let [^goog last (.-lastElementChild inner-el)
+                managed (.-shadow$managed last)]
+
+            (ap/destroy! managed)
+            (.remove last))))
 
       (js/console.log "unhandled stream msg" op msg)
       )))
 
-(deftype StreamInit [stream-key opts item-fn]
+(defprotocol StreamHandleActions
+  (clear! [this]))
+
+(deftype StreamHandle [stream-key opts item-fn ^clj ^:mutable mounted]
   ap/IConstruct
   (as-managed [this env]
     (let [stream-engine (::gp/query-engine env)]
       (when-not (satisfies? gp/IStreamEngine stream-engine)
         (throw (ex-info "engine does not implement streaming features" {:env env})))
 
-      (doto (StreamRoot. env stream-engine (util/next-id) stream-key opts item-fn nil nil false)
-        (.init!)))))
+      (let [root (doto (StreamRoot. env stream-engine (util/next-id) stream-key opts item-fn nil nil false)
+                   (.init!))]
+
+        (set! mounted root)
+
+        root)))
+
+  StreamHandleActions
+  (clear! [this]
+    (when-not mounted
+      (throw (ex-info "not mounted!" {:this this})))
+
+    (.clear! mounted)))
+
+(defn init [stream-key opts item-fn]
+  (StreamHandle. stream-key opts item-fn nil))
+

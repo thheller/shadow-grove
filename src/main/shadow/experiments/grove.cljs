@@ -12,7 +12,6 @@
     [shadow.experiments.grove.components :as comp]
     [shadow.experiments.grove.ui.util :as util]
     [shadow.experiments.grove.ui.suspense :as suspense]
-    [shadow.experiments.grove.ui.streams :as streams]
     [shadow.experiments.grove.ui.atoms :as atoms]
     [shadow.experiments.arborist.attributes :as a]))
 
@@ -283,9 +282,6 @@
 
 (defn suspense [opts vnode]
   (suspense/SuspenseInit. opts vnode))
-
-(defn stream [stream-key opts item-fn]
-  (streams/StreamInit. stream-key opts item-fn))
 
 (defn simple-seq [coll render-fn]
   (sa/render-seq coll nil render-fn))

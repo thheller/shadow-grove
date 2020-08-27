@@ -89,4 +89,5 @@
 
 (defprotocol IStreamEngine
   (stream-init [this env stream-id stream-key opts callback])
-  (stream-destroy [this stream-id]))
+  (stream-destroy [this stream-id stream-key])
+  (stream-clear [this stream-key]))

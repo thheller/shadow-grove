@@ -206,7 +206,7 @@
 (defmethod worker-message :tx [env [_ tx]]
   (tx* env tx))
 
-(defmethod worker-message :stream-init
+(defmethod worker-message :stream-sub-init
   [{::keys [active-streams-ref] :as env} [_ stream-id stream-key opts :as msg]]
   ;; (js/console.log "stream-init" env stream-key msg)
   (let [{:keys [^CircularBuffer buffer] :as stream-info} (get @active-streams-ref stream-key)]
@@ -217,8 +217,24 @@
             [:stream-msg stream-id {:op :init
                                     :item-count (.getCount buffer)
                                     :items (.getNewestValues buffer
-                                             (js/Math.min 10 (.getCount buffer)))}]
+                                             (js/Math.min 50 (.getCount buffer)))}]
             )))))
+
+(defmethod worker-message :stream-sub-destroy
+  [{::keys [active-streams-ref] :as env} [_ stream-id stream-key :as msg]]
+  ;; (js/console.log "stream-init" env stream-key msg)
+  (let [{:keys [^CircularBuffer buffer] :as stream-info} (get @active-streams-ref stream-key)]
+    (if-not stream-info
+      (js/console.warn "stream not found, can't destroy" msg)
+      (swap! active-streams-ref update-in [stream-key :subs] disj stream-id)
+      )))
+
+(defmethod worker-message :stream-clear
+  [{::keys [active-streams-ref] :as env} [_ stream-key :as msg]]
+  ;; (js/console.log "stream-init" env stream-key msg)
+  (let [{:keys [^CircularBuffer buffer opts] :as stream-info} (get @active-streams-ref stream-key)]
+    (swap! active-streams-ref assoc-in [stream-key :buffer] (CircularBuffer. (:capacity opts 1000)))
+    ))
 
 ;; FIXME: this shouldn't be worker dependent
 (defonce known-envs-ref (atom {}))
@@ -279,6 +295,7 @@
                       stream-item (assoc stream-item :added-at (js/Date.now))]
 
                   (.add buffer stream-item)
+
                   (reduce
                     (fn [_ sub-id]
                       (send-to-main env [:stream-msg
@@ -289,40 +306,6 @@
                     subs)))))
           nil
           items)))
-
-    (reg-fx app-ref :stream-merge
-      (fn [env m]
-        (reduce-kv
-          (fn [env stream-key items]
-            (when (seq items)
-              (let [stream (get @active-streams-ref stream-key)]
-                (if-not stream
-                  (js/console.warn "stream not found, can't merge" stream-key items)
-                  (let [{:keys [subs ^CircularBuffer buffer opts]} stream
-                        new-items (->> (.getValues buffer)
-                                       (into items)
-                                       (sort-by :added-at))
-
-                        buffer (CircularBuffer. (:capacity opts 1000))]
-
-                    (doseq [item new-items]
-                      (.add buffer item))
-
-                    (swap! active-streams-ref assoc-in [stream-key :buffer] buffer)
-
-                    (let [new-head (into [] (take 10) new-items)]
-                      (reduce
-                        (fn [_ sub-id]
-                          (send-to-main env [:stream-msg
-                                             sub-id
-                                             {:op :reset
-                                              :item-count (.getCount buffer)
-                                              :items new-head}]))
-                        nil
-                        subs))))))
-            env)
-          env
-          m)))
 
     (reg-fx app-ref :stream-init
       (fn [{::keys [active-streams-ref] :as env} m]

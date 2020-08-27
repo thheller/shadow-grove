@@ -23,8 +23,14 @@
   gp/IStreamEngine
   (stream-init [this env stream-id stream-key opts callback]
     (swap! active-streams-ref assoc stream-id callback)
-    (send! [:stream-init stream-id stream-key opts])
-    ))
+    (send! [:stream-sub-init stream-id stream-key opts]))
+
+  (stream-destroy [this stream-id stream-key]
+    (swap! active-streams-ref dissoc stream-id)
+    (send! [:stream-sub-destroy stream-id stream-key]))
+
+  (stream-clear [this stream-key]
+    (send! [:stream-clear stream-key])))
 
 (defn add-msg-handler [{::keys [msg-handlers-ref] :as env} msg-id handler-fn]
   (swap! msg-handlers-ref assoc msg-id handler-fn)

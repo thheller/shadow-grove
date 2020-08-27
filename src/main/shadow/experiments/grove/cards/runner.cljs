@@ -28,7 +28,7 @@
        :items []})
 
     (js/console.log "stream-init" env stream-id stream-key opts callback))
-  (stream-destroy [this stream-id]
+  (stream-destroy [this stream-id stream-key]
     (js/console.log "stream-destroy" stream-id)))
 
 (defn test-query-engine [schema static-db static-streams]
