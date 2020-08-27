@@ -191,11 +191,9 @@
   (gp/transact! query-engine tx))
 
 (defn tx [env ev-vec e]
-  (js/console.log "tx" env ev-vec e)
   (tx* env ev-vec))
 
 (defn run-tx [env tx]
-  (js/console.log "run-tx" env tx)
   (tx* env tx))
 
 (defn init* [app-id init-env init-features]
