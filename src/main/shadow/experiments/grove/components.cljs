@@ -216,40 +216,22 @@
   ;; FIXME: figure out default event handler
   ;; don't want to declare all events all the time
   gp/IHandleEvents
-  (handle-dom-event! [this ev-id e ev-args]
+  (handle-event! [this [ev-id & ev-args :as ev-vec] e]
     (let [handler
           (cond
-            (keyword? ev-id)
+            (qualified-keyword? ev-id)
             (or (get (.-events config) ev-id)
                 (get (.-opts config) ev-id))
 
             :else
-            (throw (ex-info "unknown event" {:ev-id ev-id :e e :ev-args ev-args})))]
+            (throw (ex-info "unknown event" {:event ev-vec})))]
 
       (if handler
-        (let [ev-env (assoc component-env ::e e ::ev-id ev-id)]
-          (apply handler ev-env e ev-args))
+        (handler component-env ev-vec e)
 
         ;; no handler, try parent
         (if-some [parent (::component parent-env)]
-          (gp/handle-dom-event! parent ev-id e ev-args)
-          (js/console.warn "event not handled" ev-id ev-args)))))
-
-  (handle-event! [this ev-id ev-args]
-    (let [handler
-          (cond
-            (keyword? ev-id)
-            (or (get (.-events config) ev-id)
-                (get (.-opts config) ev-id))
-
-            :else
-            (throw (ex-info "unknown event" {:ev-id ev-id :ev-args ev-args})))]
-
-      (if handler
-        (apply handler component-env ev-args)
-        ;; FIXME: only bubble up until handled?
-        (if-let [parent (::component parent-env)]
-          (gp/handle-event! parent ev-id ev-args)
+          (gp/handle-event! parent ev-vec e)
           (js/console.warn "event not handled" ev-id ev-args)))))
 
   gp/IWork
@@ -498,17 +480,18 @@
 (defn component-init? [x]
   (instance? ComponentInit x))
 
-(defn call-event-fn [{::keys [^ManagedComponent component] :as env} ev-id e ev-args]
+
+(defn call-event-fn [{::keys [^ManagedComponent component] :as env} ev-vec e]
   (when-not component
-    (throw (ex-info "event handlers can only be used in components" {:env env :ev-id ev-id :e e :ev-args ev-args})))
+    (throw (ex-info "event handlers can only be used in components" {:env env :event ev-vec})))
 
-  (gp/run-now! (.-scheduler component) #(gp/handle-dom-event! component ev-id e ev-args)))
+  (gp/run-now! (.-scheduler component) #(gp/handle-event! component ev-vec e)))
 
-(defn event-attr [env node event oval [ev-id & ev-args :as nval]]
+(defn event-attr [env node event oval [ev-id & ev-args :as ev-vec]]
 
   (when ^boolean js/goog.DEBUG
-    (when-not (vector? nval)
-      (throw (ex-info "event handler expects a vector arg" {:event event :node node :nval nval}))))
+    (when-not (vector? ev-vec)
+      (throw (ex-info "event handler expects a vector arg" {:event event :node node :nval ev-vec}))))
 
   (let [ev-key (str "__shadow$" (name event))]
     (when-let [ev-fn (gobj/get node ev-key)]
@@ -516,12 +499,12 @@
 
     ;(js/console.log "adding ev fn" val)
 
-    (let [ev-fn #(call-event-fn env ev-id % ev-args)
+    (let [ev-fn #(call-event-fn env ev-vec %)
           ev-opts #js {}]
 
       ;; FIXME: need to track if once already happened. otherwise may re-attach and actually fire more than once
       ;; but it should be unlikely to have a changing val with ^:once?
-      (when-let [m (meta nval)]
+      (when-let [m (meta ev-vec)]
         (when (:once m)
           (gobj/set ev-opts "once" true))
 
@@ -580,14 +563,20 @@
          (fn? run)]}
   (HookConfig. depends-on affects run))
 
-(deftype EffectConfig [depends-on run])
-
-(defn make-effect-config
-  "used by defc macro, do not use directly"
-  [depends-on run]
-  {:pre [(int? depends-on)
-         (fn? run)]}
-  (EffectConfig. depends-on run))
+;; apply helper for macro event fns
+;; (fn [env event-vector browser-event])
+;; safes some annoying event destructuring
+;; (event ::some-event! [env [event-kw data] e])
+;; (event ::some-event! [env [_ data] e])
+;; so instead can do
+;; (event ::some-event! [env data e])
+(defn make-event-fn [callback]
+  (fn [env ev e]
+    (apply callback env
+      (-> (subvec ev 1)
+          (cond->
+            (some? e)
+            (conj e))))))
 
 (defn make-component-config
   "used by defc macro, do not use directly"

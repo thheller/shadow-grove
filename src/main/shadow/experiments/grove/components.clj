@@ -354,23 +354,25 @@
 
         (assoc-in state [:events ev-id]
           (if (empty? deps)
-            `(fn ~fn-name ~ev-args
-               ~@body
-               ;; ev-fn return value is ignored anyways, don't turn above into expression
-               nil)
-            `(fn ~fn-name ~arg-syms
-               ;; FIXME: this is kinda hacky, the component calls (event-fn env e ...)
-               ;; and then we get the component out of the env
-               ;; but I don't want the component to be part of the event signature
-               ;; and I don't want to rewrite the ev-args to add the comp binding
-               ;; since I can't to that for (event ::foo some-fn) without going through too much apply
-               (let ~(-> []
-                         (conj comp-sym `(get-component ~(first arg-syms)))
-                         (into (mapcat vector ev-args arg-syms))
-                         (into (let-bindings state deps)))
-                 ~@body)
-               ;; ev-fn return value is ignored anyways, don't turn above into expression
-               nil))))
+            `(make-event-fn
+               (fn ~fn-name ~ev-args
+                 ~@body
+                 ;; ev-fn return value is ignored anyways, don't turn above into expression
+                 nil))
+            `(make-event-fn
+               (fn ~fn-name ~arg-syms
+                 ;; FIXME: this is kinda hacky, the component calls (event-fn env e ...)
+                 ;; and then we get the component out of the env
+                 ;; but I don't want the component to be part of the event signature
+                 ;; and I don't want to rewrite the ev-args to add the comp binding
+                 ;; since I can't to that for (event ::foo some-fn) without going through too much apply
+                 (let ~(-> []
+                           (conj comp-sym `(get-component ~(first arg-syms)))
+                           (into (mapcat vector ev-args arg-syms))
+                           (into (let-bindings state deps)))
+                   ~@body)
+                 ;; ev-fn return value is ignored anyways, don't turn above into expression
+                 nil)))))
 
       :else
       (throw (ex-info "invalid event declaration" {:hook hook})))))
@@ -474,16 +476,16 @@
           {sx :sx ::keys [sy sz] :as s}
           unused-arg]
 
-         (data {:keys [a]}
+         (bind {:keys [a]}
            (hello-hook 1 p))
 
-         (data {:keys [b2] :as b}
+         (bind {:keys [b2] :as b}
            (hello-hook 2 s))
 
-         (data c
+         (bind c
            (hello-hook 3 {:hello a :world b}))
 
-         (data d
+         (bind d
            (hello-hook 4 [a b c x y z sy sz]))
 
          (event ::some-event! [env e a]
@@ -491,7 +493,7 @@
 
          (event ::some-event handled-elsewhere!)
 
-         (data a (hello-hook 5 [:shadow a]))
+         (bind a (hello-hook 5 [:shadow a]))
 
          (render
            [:div a [:h1 d]])))))

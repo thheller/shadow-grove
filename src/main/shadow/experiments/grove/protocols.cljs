@@ -33,8 +33,7 @@
   (work-pending? [this]))
 
 (defprotocol IHandleEvents
-  (handle-dom-event! [this ev-id e ev-args])
-  (handle-event! [this ev-id ev-args]))
+  (handle-event! [this ev-vec e]))
 
 (defprotocol IScheduleUpdates
   (schedule-update! [this target])

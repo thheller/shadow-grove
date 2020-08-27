@@ -25,7 +25,7 @@
   (event ::delete-me! [env e]
     (cfx/trigger-out! fade
       (fn []
-        (sg/dispatch-up! env ::delete! todo-id))))
+        (sg/dispatch-up! env [::delete! todo-id]))))
 
   (render
     (<< [:li {::cfx/ref fade
@@ -114,7 +114,7 @@
                 (when (pos? num-completed)
                   (<< [:button.clear-completed {:on-click [::clear-completed!]} "Clear completed"]))]]))))
 
-  (event ::set-filter! [{:keys [data-ref] :as env} e filter]
+  (event ::set-filter! [{:keys [data-ref] :as env} filter]
     (swap! data-ref assoc :current-filter filter))
 
   (event ::clear-completed! [{:keys [data-ref] :as env} e]
@@ -156,10 +156,10 @@
                                              :completed? false})
                   (update :id-seq inc))))))))
 
-  (event ::edit-start! [{:keys [data-ref] :as env} e todo-id]
+  (event ::edit-start! [{:keys [data-ref] :as env} todo-id e]
     (swap! data-ref assoc :editing todo-id))
 
-  (event ::edit-update! [{:keys [data-ref] :as env} e todo-id]
+  (event ::edit-update! [{:keys [data-ref] :as env} todo-id e]
     (case (.-which e)
       13 ;; enter
       (.. e -target (blur))
@@ -168,7 +168,7 @@
       ;; default do nothing
       nil))
 
-  (event ::edit-complete! [{:keys [data-ref] :as env} e todo-id]
+  (event ::edit-complete! [{:keys [data-ref] :as env} todo-id e]
     (let [new-text (.. e -target -value)]
       (swap! data-ref
         (fn [db]
@@ -176,10 +176,10 @@
               (assoc :editing nil)
               (assoc-in [:todos todo-id :todo-text] new-text))))))
 
-  (event ::toggle-completed! [{:keys [data-ref] :as env} e todo-id]
+  (event ::toggle-completed! [{:keys [data-ref] :as env} todo-id e]
     (swap! data-ref update-in [:todos todo-id :completed?] not))
 
-  (event ::delete! [{:keys [data-ref] :as env} #_e todo-id]
+  (event ::delete! [{:keys [data-ref] :as env} todo-id]
     (swap! data-ref update :todos dissoc todo-id)))
 
 (defn ^:dev/after-load start []

@@ -4,7 +4,7 @@
     [todomvc.model :as m]))
 
 (defc todo-item [todo]
-  (event ::m/edit-update! [env e todo]
+  (event ::m/edit-update! [env todo e]
     (case (.-which e)
       13 ;; enter
       (.. e -target (blur))
@@ -13,7 +13,7 @@
       ;; default do nothing
       nil))
 
-  (event ::m/edit-complete! [env e todo]
+  (event ::m/edit-complete! [env todo e]
     (sg/run-tx env [::m/edit-save! {:todo todo :text (.. e -target -value)}]))
 
   (event ::m/toggle-completed! sg/tx)

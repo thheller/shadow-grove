@@ -83,11 +83,12 @@
 (defn run-now! [env callback]
   (gp/run-now! (::gp/scheduler env) callback))
 
-(defn dispatch-up! [{::comp/keys [^not-native parent] :as env} ev-id & ev-args]
+(defn dispatch-up! [{::comp/keys [^not-native parent] :as env} ev-vec]
   {:pre [(map? env)
-         (qualified-keyword? ev-id)]}
+         (vector? ev-vec)
+         (qualified-keyword? (first ev-vec))]}
   ;; FIXME: should schedule properly when it isn't in event handler already
-  (gp/handle-event! parent ev-id ev-args))
+  (gp/handle-event! parent ev-vec nil))
 
 (deftype QueryHook
   [^:mutable ident
@@ -189,10 +190,12 @@
   (assert query-engine "missing query-engine in env")
   (gp/transact! query-engine tx))
 
-(defn tx [env e & params]
-  (tx* env (into [(::comp/ev-id env)] params)))
+(defn tx [env ev-vec e]
+  (js/console.log "tx" env ev-vec e)
+  (tx* env ev-vec))
 
 (defn run-tx [env tx]
+  (js/console.log "run-tx" env tx)
   (tx* env tx))
 
 (defn init* [app-id init-env init-features]
