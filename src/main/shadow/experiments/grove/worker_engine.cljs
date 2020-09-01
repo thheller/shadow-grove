@@ -7,7 +7,7 @@
     [shadow.experiments.grove.ui.util :as util]))
 
 (deftype WorkerEngine
-  [^function send! active-queries-ref active-streams-ref]
+  [^function send! active-queries-ref active-streams-ref pending-tx-ref]
   gp/IQueryEngine
   (query-init [this query-id query config callback]
     (swap! active-queries-ref assoc query-id callback)
@@ -17,8 +17,19 @@
     (swap! active-queries-ref dissoc query-id)
     (send! [:query-destroy query-id]))
 
-  (transact! [this tx]
-    (send! [:tx tx]))
+  (transact! [this tx with-return?]
+    (if-not with-return?
+      (send! [:tx tx])
+      (let [tx-id (util/next-id)]
+        (send! [:tx-return tx-id tx])
+        (js/Promise.
+          (fn [resolve reject]
+            (swap! pending-tx-ref assoc tx-id
+              {:tx-id tx-id
+               :tx tx
+               :resolve resolve
+               :reject reject})
+            )))))
 
   gp/IStreamEngine
   (stream-init [this env stream-id stream-key opts callback]
@@ -59,6 +70,9 @@
            active-streams-ref
            (atom {})
 
+           pending-tx-ref
+           (atom {})
+
            send!
            (fn send! [msg]
              ;; (js/console.log "to-worker" (first msg) msg)
@@ -70,7 +84,7 @@
            env
            (assoc env
              ::worker worker
-             engine-key (->WorkerEngine send! active-queries-ref active-streams-ref)
+             engine-key (->WorkerEngine send! active-queries-ref active-streams-ref pending-tx-ref)
              ::msg-handlers-ref msg-handlers-ref
              ::transit-read transit-read
              ::transit-str transit-str)]
@@ -98,6 +112,17 @@
                      ^function callback (get @active-streams-ref stream-id)]
                  (when (some? callback)
                    (util/next-tick #(callback result))))
+
+               :tx-result
+               (let [[tx-id tx-result] args
+                     {:keys [resolve timeout]} (get @pending-tx-ref tx-id)]
+
+                 (swap! pending-tx-ref dissoc tx-id)
+
+                 (when timeout
+                   (js/clearTimeout timeout))
+
+                 (resolve tx-result))
 
                (let [handler-fn (get @msg-handlers-ref op)]
                  (if-not handler-fn

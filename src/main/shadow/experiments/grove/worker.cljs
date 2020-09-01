@@ -64,7 +64,7 @@
                        ::tx tx
                        :db tx-db)
 
-            {^clj tx-after :db :as result}
+            {^clj tx-after :db return-value :return :as result}
             (apply handler-fn tx-env params)]
 
         ;; FIXME: move all of this out to interceptor chain. including DB stuff
@@ -84,7 +84,7 @@
                       (assoc env :transact! transact-fn)]
                   (fx-fn fx-env value)))))
           nil
-          (dissoc result :db))
+          (dissoc result :db :return))
 
         (when (seq interceptors)
           (js/console.warn "TBD, ignored interceptors for event" ev-id))
@@ -111,7 +111,9 @@
 
               (swap! invalidate-keys-ref set/union keys-to-invalidate))
 
-            data))))))
+            ))
+
+        return-value))))
 
 (defn run-tx [env tx]
   {:pre [(vector? tx)
@@ -205,6 +207,11 @@
 
 (defmethod worker-message :tx [env [_ tx]]
   (tx* env tx))
+
+(defmethod worker-message :tx-return [env [_ tx-id tx]]
+  (let [result (tx* env tx)]
+    (send-to-main env [:tx-result tx-id result])
+    ))
 
 (defmethod worker-message :stream-sub-init
   [{::keys [active-streams-ref] :as env} [_ stream-id stream-key opts :as msg]]

@@ -137,7 +137,7 @@
 
   gp/IHookDomEffect
   (hook-did-update! [this ^boolean did-render?]
-    (when (and did-render? should-call?)
+    (when (or did-render? should-call?)
       (when (fn? callback-result)
         (callback-result))
 
@@ -239,10 +239,14 @@
   (work-depth [this] (::depth component-env))
   (work-id [this] (::component-id component-env))
 
+  ;; FIXME: rework the entire Work scheduling thing
+  ;; this is kind of pointless and should be done in one shot
   (work-pending? [this]
     (and (not destroyed?)
          (not suspended?)
-         (or (pos? dirty-hooks) needs-render?)))
+         (or (pos? dirty-hooks)
+             needs-render?
+             (>= (alength (.-hooks config)) current-idx))))
 
   (work! [this]
     (.run-next! this)
@@ -253,7 +257,7 @@
   ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
   ;; can't do this in the ComponentInit.as-managed since we need the this pointer
-  (component-init! [^ComponentInstance this]
+  (component-init! [^ManagedComponent this]
     (let [child-env
           (-> parent-env
               (update ::depth safe-inc)
@@ -317,7 +321,7 @@
     (set! needs-render? true))
 
   (run-next! [^not-native this]
-    ;; (js/console.log "Component:run-next!" (:component-name config) current-idx)
+    ;; (js/console.log "Component:run-next!" (.-component-name config) current-idx (alength (.-hooks config)) this)
     (if (identical? current-idx (alength (.-hooks config)))
       ;; all hooks done
       (.component-render! this)
@@ -405,7 +409,7 @@
   (unschedule! [this]
     (gp/unschedule! scheduler this))
 
-  (component-render! [^ComponentInstance this]
+  (component-render! [^ManagedComponent this]
     (assert (zero? dirty-hooks) "Got to render while hooks are dirty")
     ;; (js/console.log "Component:render!" (.-component-name config) updated-hooks needs-render? suspended? destroyed? this)
     (set! updated-hooks (int 0))
@@ -421,6 +425,9 @@
           (p/update! root frag)))
 
       (.did-update! this did-render?))
+
+    ;; must keep this for work scheduling so it knows its done
+    (set! current-idx (inc current-idx))
 
     (gp/did-finish! scheduler this))
 

@@ -85,7 +85,7 @@
   ;; would still do a bunch of needless work
   ;; only had one case where this might have been useful, maybe it isn't worth adding?
   ;; (query-once [this query config callback])
-  (transact! [this tx]))
+  (transact! [this tx with-return?]))
 
 (defprotocol IStreamEngine
   (stream-init [this env stream-id stream-key opts callback])

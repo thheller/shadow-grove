@@ -185,15 +185,18 @@
    (QueryHook. nil query config nil nil nil nil nil false nil)))
 
 (defn tx*
-  [{::gp/keys [query-engine] :as env} tx]
+  [{::gp/keys [query-engine] :as env} tx with-return?]
   (assert query-engine "missing query-engine in env")
-  (gp/transact! query-engine tx))
+  (gp/transact! query-engine tx with-return?))
 
 (defn tx [env ev-vec e]
-  (tx* env ev-vec))
+  (tx* env ev-vec false))
 
 (defn run-tx [env tx]
-  (tx* env tx))
+  (tx* env tx false))
+
+(defn run-tx-with-return [env tx]
+  (tx* env tx true))
 
 (defn init* [app-id init-env init-features]
   {:pre [(some? app-id)

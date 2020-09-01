@@ -43,6 +43,8 @@
     container-el)
 
   (dom-entered! [this]
+    ;; (.focus container-el)
+
     (set! dom-entered? true))
 
   (destroy! [this]
@@ -63,6 +65,20 @@
            "overflow-y" "auto"
            "width" "100%"
            "height" "100%"})
+
+    ;; prep for keyboard support somehow
+    ;; needs a lot more changes in the framework before this can work
+
+    #_(set! container-el -tabIndex 0)
+
+    #_(.addEventListener container-el "focus"
+        (fn [e]
+          (js/console.log "focused" this)))
+
+    #_(.addEventListener container-el "blur"
+        (fn [e]
+          (js/console.log "blur" this)))
+
 
     (set! inner-el (js/document.createElement "div"))
     (gs/setStyle inner-el
