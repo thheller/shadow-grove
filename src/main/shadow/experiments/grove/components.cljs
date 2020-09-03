@@ -186,7 +186,10 @@
 
   (dom-entered! [this]
     (set! dom-entered? true)
-    (p/dom-entered! root))
+    (p/dom-entered! root)
+
+    ;; trigger first on mount
+    (.did-update! this true))
 
   (supports? [this next]
     (and (component-init? next)
@@ -424,7 +427,9 @@
 
           (p/update! root frag)))
 
-      (.did-update! this did-render?))
+      ;; only trigger dom effects when mounted
+      (when dom-entered?
+        (.did-update! this did-render?)))
 
     ;; must keep this for work scheduling so it knows its done
     (set! current-idx (inc current-idx))
