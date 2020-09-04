@@ -81,21 +81,24 @@
 
     (.listen key-handler "key" #_js/goog.events.KeyHandler.EventType
       (fn [^goog e]
-        (let [pretty-key (keyboard/describe-key e)]
-          (cond
-            (= pretty-key ["arrowup" #{}])
-            (.focus-move! this -1)
+        (let [pretty-key (keyboard/str-key e)]
+          (case pretty-key
+            "arrowup"
+            (do (.focus-move! this -1)
+                (.preventDefault e))
 
-            (= pretty-key ["pageup" #{}])
-            (.focus-move! this -10)
+            "pageup"
+            (do (.focus-move! this -10)
+                (.preventDefault e))
 
-            (= pretty-key ["arrowdown" #{}])
-            (.focus-move! this 1)
+            "arrowdown"
+            (do (.focus-move! this 1)
+                (.preventDefault e))
 
-            (= pretty-key ["pagedown" #{}])
-            (.focus-move! this 10)
+            "pagedown"
+            (do (.focus-move! this 10)
+                (.preventDefault e))
 
-            :else
             nil
             ))))
 

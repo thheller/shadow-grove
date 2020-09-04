@@ -77,7 +77,7 @@
 
   (destroy! [this]
     (.remove marker)
-    (. code (destroy-fn exports))))
+    (. code (destroy-fn env exports vals))))
 
 (deftype FragmentInit [vals element-ns ^FragmentCode code]
   p/IConstruct
@@ -120,6 +120,7 @@
 (defn set-attr [env node key oval nval]
   (a/set-attr env node key oval nval))
 
+
 (defn append-child
   ;; {:jsdoc ["@noinline"]}
   [parent child]
@@ -159,6 +160,10 @@
     (let [el (aget nodes idx)]
       (set-attr env el attr oval nval))))
 
+(defn clear-attr [env nodes idx attr oval]
+  (let [node (aget nodes idx)]
+    (a/set-attr env node attr oval nil)))
+
 ;; just so the macro doesn't have to use dot interop
 ;; will likely be inlined by closure anyways
 (defn dom-insert-before [^js parent node anchor]
@@ -169,3 +174,4 @@
 
 (defn css-join [from-el from-attrs]
   [from-el from-attrs])
+

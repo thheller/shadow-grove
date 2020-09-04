@@ -309,9 +309,6 @@
   ;; (event ::ev-id [env e] (do-something))
   (let [[ev-id ev-args & body] body]
 
-    (when-not (qualified-keyword? ev-id)
-      (throw (ex-info "event requires qualified keyword identifier" {:ev-id ev-id})))
-
     (cond
       ;; (event ::some-id some-other-fn)
       ;; no access to hook data, just calls fn
@@ -346,21 +343,18 @@
             arg-syms
             (vec (take (count ev-args) (repeatedly gensym)))
 
-            fn-name
-            (symbol (name ev-id))
-
             deps
             (find-used-bindings #{} inner-bindings body)]
 
         (assoc-in state [:events ev-id]
           (if (empty? deps)
             `(make-event-fn
-               (fn ~fn-name ~ev-args
+               (fn ~ev-args
                  ~@body
                  ;; ev-fn return value is ignored anyways, don't turn above into expression
                  nil))
             `(make-event-fn
-               (fn ~fn-name ~arg-syms
+               (fn ~arg-syms
                  ;; FIXME: this is kinda hacky, the component calls (event-fn env e ...)
                  ;; and then we get the component out of the env
                  ;; but I don't want the component to be part of the event signature

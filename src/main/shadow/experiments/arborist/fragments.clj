@@ -394,6 +394,8 @@
 (defn make-destroy-impl [ast sym->idx]
   (let [this-sym (gensym "this")
         exports-sym (gensym "exports")
+        env-sym (gensym "env")
+        oldv-sym (gensym "oldv")
 
         destroy-calls
         (reduce
@@ -412,11 +414,29 @@
                   (conj `(managed-remove (aget ~exports-sym ~(get sym->idx sym))))
                   (reduce-> step-fn (:children ast)))
 
+              ;; only clean up qualified keywords
+              :static-attr
+              (if-not (qualified-keyword? (:attr ast))
+                calls
+                (-> calls
+                    (conj
+                      `(clear-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) ~(:value ast))
+                      )))
+
+
+              :dynamic-attr
+              (if-not (qualified-keyword? (:attr ast))
+                calls
+                (-> calls
+                    (conj
+                      `(clear-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) (aget ~oldv-sym ~(-> ast :value :ref-id)))
+                      )))
+
               calls))
           []
           ast)]
 
-    `(fn [~exports-sym]
+    `(fn [~env-sym ~exports-sym ~oldv-sym]
        ~@destroy-calls)))
 
 (def shadow-analyze-top

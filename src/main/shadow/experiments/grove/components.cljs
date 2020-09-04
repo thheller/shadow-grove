@@ -648,6 +648,9 @@
 (defn get-hook-value [^ManageComponent comp idx]
   (.get-hook-value comp idx))
 
+(defn get-events [^ManagedComponent comp]
+  (.. comp -config -events))
+
 (defn hook-invalidate! [^ManagedComponent comp idx]
   (.invalidate-hook! comp idx))
 

@@ -327,14 +327,19 @@
 (deftype DomRef [^:mutable current]
   cljs.core/IDeref
   (-deref [this]
-    current)
-  cljs.core/IFn
-  (-invoke [this env val]
-    (set! current val)))
+    current))
 
 (a/add-attr :dom/ref
   (fn [env node oval nval]
-    (nval env node)))
+    (cond
+      (nil? nval)
+      (set! (.-current oval) nil)
+
+      (some? nval)
+      (set! (.-current nval) node)
+
+      :else
+      nil)))
 
 (defn dom-ref []
   (DomRef. nil))
