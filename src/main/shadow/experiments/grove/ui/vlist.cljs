@@ -84,6 +84,8 @@
              "min-height" "100%"
              "height" "100%"})
 
+      (set! container-el -tabIndex 0)
+
       (set! inner-el (js/document.createElement "div"))
       (gs/setStyle inner-el
         #js {"width" "100%"

@@ -19,68 +19,8 @@
 (defonce active-roots-ref (atom {}))
 (defonce active-apps-ref (atom {}))
 
-(deftype TreeScheduler [^:mutable work-arr ^:mutable update-pending?]
-  gp/IScheduleUpdates
-  (did-suspend! [this work-task])
-  (did-finish! [this work-task])
-
-  (schedule-update! [this work-task]
-    ;; FIXME: now possible a task is scheduled multiple times
-    ;; but the assumption is that task will only schedule themselves once
-    ;; doesn't matter if its in the arr multiple times too much
-    (.push work-arr work-task)
-
-    ;; schedule was added in some async work
-    (when-not update-pending?
-      (set! update-pending? true)
-      (util/next-tick #(.process-pending! this))))
-
-  (unschedule! [this work-task]
-    ;; FIXME: might be better to track this in the task itself and just check when processing
-    ;; and just remove it then. the array might get long?
-    (set! work-arr (.filter work-arr (fn [x] (not (identical? x work-task))))))
-
-  (run-now! [this callback]
-    (set! update-pending? true)
-    (callback)
-    (.process-pending! this))
-
-  Object
-  (process-pending! [this]
-    ;; FIXME: this now processes in FCFS order
-    ;; should be more intelligent about prioritizing
-    ;; should use requestIdleCallback or something to schedule in batch
-    (let [start (util/now)
-          done
-          (loop []
-            (if-not (pos? (alength work-arr))
-              true
-              (let [next (aget work-arr 0)]
-                (when-not (gp/work-pending? next)
-                  (throw (ex-info "work was scheduled but isn't pending?" {:next next})))
-                (gp/work! next)
-
-                ;; FIXME: using this causes a lot of intermediate paints
-                ;; which means things take way longer especially when rendering collections
-                ;; so there really needs to be a Suspense style node that can at least delay
-                ;; inserting nodes into the actual DOM until they are actually ready
-                (let [diff (- (util/now) start)]
-                  ;; FIXME: more logical timeouts
-                  ;; something like IdleTimeout from requestIdleCallback?
-                  ;; dunno if there is a polyfill for that?
-                  ;; not 16 to let the runtime do other stuff
-                  (when (< diff 10)
-                    (recur))))))]
-
-      (if done
-        (set! update-pending? false)
-        (js/goog.async.nextTick #(.process-pending! this))))
-
-    ;; FIXME: dom effects
-    ))
-
 (defn run-now! [env callback]
-  (gp/run-now! (::gp/scheduler env) callback))
+  (gp/run-now! (::comp/scheduler env) callback))
 
 (defn dispatch-up! [{::comp/keys [^not-native parent] :as env} ev-vec]
   {:pre [(map? env)
@@ -198,18 +138,50 @@
 (defn run-tx-with-return [env tx]
   (tx* env tx true))
 
+(deftype RootScheduler [^:mutable update-pending? ^:mutable work-set]
+  gp/IScheduleUpdates
+  (schedule-update! [this work-task]
+    (set! work-set (conj work-set work-task))
+
+    (when-not update-pending?
+      (set! update-pending? true)
+      (util/next-tick #(.process-work! this))))
+
+  (unschedule! [this work-task]
+    (set! work-set (disj work-set work-task)))
+
+  (did-suspend! [this target])
+  (did-finish! [this target])
+
+  (run-now! [this action]
+    (set! update-pending? true)
+    (action)
+    (.process-work! this))
+
+  Object
+  (process-work! [this]
+    (loop []
+      (when-some [x (first work-set)]
+        (gp/work! x)
+
+        ;; should time slice later and only continue work
+        ;; until a given time budget is consumed
+        (recur)))
+
+    (set! update-pending? false)))
+
 (defn init* [app-id init-env init-features]
   {:pre [(some? app-id)
          (map? init-env)
          (sequential? init-features)
          (every? fn? init-features)]}
 
-  (let [scheduler (TreeScheduler. (array) false)
+  (let [scheduler (RootScheduler. false #{})
 
         env
         (assoc init-env
           ::app-id app-id
-          ::gp/scheduler scheduler
+          ::comp/scheduler scheduler
           ::suspense-keys (atom {}))
 
         env

@@ -16,6 +16,43 @@
 ;; this file is an exercise in writing the least idiomatic clojure code possible
 ;; shield your eyes and beware!
 
+(deftype ComponentScheduler [^not-native parent ^:mutable ^not-native work-set]
+  gp/IScheduleUpdates
+  (did-suspend! [this work-task]
+    (gp/did-suspend! parent work-task))
+
+  (did-finish! [this work-task]
+    (gp/did-finish! parent work-task))
+
+  (schedule-update! [this work-task]
+    (when (empty? work-set)
+      (gp/schedule-update! parent this))
+
+    (set! work-set (conj work-set work-task)))
+
+  (unschedule! [this work-task]
+    (set! work-set (disj work-set work-task))
+    (when (empty? work-set)
+      (gp/unschedule! parent this)))
+
+  (run-now! [this callback]
+    (gp/run-now! parent callback))
+
+  ;; parent tells us to work
+  gp/IWork
+  (work! [this]
+    (loop []
+      (when-some [x (first work-set)]
+        (gp/work! x)
+
+        ;; should time slice later and only continue work
+        ;; until a given time budget is consumed
+        (recur)))
+
+    ;; FIXME: should this trigger something in the component when completed?
+    ;; effect hooks should kinda only fire when the entire child tree is done right?
+    ))
+
 (defonce components-ref (atom {}))
 (defonce instances-ref (atom #{}))
 
@@ -199,7 +236,7 @@
   (dom-sync! [this ^ComponentInit next]
     (. config (check-args-fn this args (.-args next)))
     (set! args (.-args next))
-    (when (gp/work-pending? this)
+    (when (.work-pending? this)
       (.schedule! this)))
 
   (destroy! [this]
@@ -238,24 +275,9 @@
           (js/console.warn "event not handled" ev-id ev-args)))))
 
   gp/IWork
-  (work-priority [this] 10) ;; FIXME: could allow setting this via config
-  (work-depth [this] (::depth component-env))
-  (work-id [this] (::component-id component-env))
-
-  ;; FIXME: rework the entire Work scheduling thing
-  ;; this is kind of pointless and should be done in one shot
-  (work-pending? [this]
-    (and (not destroyed?)
-         (not suspended?)
-         (or (pos? dirty-hooks)
-             needs-render?
-             (>= (alength (.-hooks config)) current-idx))))
-
   (work! [this]
-    (.run-next! this)
-
-    (when-not (gp/work-pending? this)
-      (gp/unschedule! scheduler this)))
+    (while (.work-pending? this)
+      (.run-next! this)))
 
   ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
@@ -264,9 +286,9 @@
     (let [child-env
           (-> parent-env
               (update ::depth safe-inc)
-              (assoc ::parent (::component parent-env))
-              ;; (assoc ::component-id (str (.-component-name config) "@" (next-component-id)))
-              (assoc ::component this))]
+              (assoc ::parent (::component parent-env)
+                     ::component this
+                     ::scheduler (ComponentScheduler. scheduler #{})))]
 
       (set! component-env child-env)
 
@@ -284,10 +306,9 @@
       (set! current-idx (int 0))
       (set! hooks (js/Array. (alength (.-hooks config))))
 
-      ;; FIXME: should this schedule instead?
-      ;; doing as much work as possible in as-managed removes a bunch of overhead though
-      (while (and (false? suspended?) (gp/work-pending? this))
-        (gp/work! this))
+      ;; do as much work as possible now
+      ;; only go async when suspended
+      (gp/work! this)
 
       true))
 
@@ -295,7 +316,7 @@
     (gp/hook-value (aget hooks idx)))
 
   (invalidate-hook! [this idx]
-    ;; (js/console.log "invalidate-hook!" idx (:component-name config) this)
+    ;; (js/console.log "invalidate-hook!" idx (.-component-name config) this)
 
     (set! dirty-hooks (bit-set dirty-hooks idx))
     (when (< idx current-idx)
@@ -304,10 +325,11 @@
     (.schedule! this))
 
   (ready-hook! [this idx]
-    ;; (js/console.log "invalidate-hook!" idx (:component-name config) this)
+    ;; (js/console.log "ready-hook!" idx (.-component-name config) this)
 
-    (when (not= current-idx idx)
-      (js/console.warn "hook become ready while not being the current?" current-idx idx this))
+    ;; not actually an issue, happens if parent decides to re-render component while suspended
+    #_(when (not= current-idx idx)
+        (js/console.warn "hook become ready while not being the current?" current-idx idx this))
 
     (set! suspended? false)
     (.schedule! this))
@@ -399,6 +421,13 @@
           :else
           (set! current-idx (inc current-idx))))))
 
+  (work-pending? [this]
+    (and (not destroyed?)
+         (not suspended?)
+         (or (pos? dirty-hooks)
+             needs-render?
+             (>= (alength (.-hooks config)) current-idx))))
+
   (suspend! [this hook-causing-suspend]
     ;; just in case we were already scheduled. should really track this more efficiently
     (.unschedule! this)
@@ -434,7 +463,8 @@
     ;; must keep this for work scheduling so it knows its done
     (set! current-idx (inc current-idx))
 
-    (gp/did-finish! scheduler this))
+    (gp/did-finish! scheduler this)
+    (.unschedule! this))
 
   (did-update! [this did-render?]
     (.forEach hooks-with-effects
@@ -457,7 +487,7 @@
   ;; (js/console.log "component-create" (.-component-name config) args)
   (doto (ManagedComponent.
           ;; FIXME: this is way too many args, there must be a way to simplifiy
-          (::gp/scheduler env)
+          (::scheduler env)
           env ;; parent-env
           nil ;; component-env (created in component-init! since it needs this pointer)
           args

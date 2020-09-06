@@ -1,10 +1,12 @@
 (ns shadow.experiments.grove.ui.loadable
   (:require-macros [shadow.experiments.grove.ui.loadable])
   (:require
+    [shadow.lazy :as lazy]
     [shadow.experiments.arborist.protocols :as ap]
-    [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.arborist.common :as common]
-    [shadow.lazy :as lazy]))
+    [shadow.experiments.grove.protocols :as gp]
+    [shadow.experiments.grove.components :as comp]
+    ))
 
 ;; FIXME: shadow.lazy is only available with shadow-cljs since it requires compiler support
 ;; must not use this namespace directly in the framework elsewhere since that would
@@ -95,7 +97,7 @@
   ap/IConstruct
   (as-managed [this env]
     ;; (js/console.log ::as-managed this env)
-    (doto (->LoadableRoot env (::gp/scheduler env) loadable (common/dom-marker env) nil opts false)
+    (doto (->LoadableRoot env (::comp/scheduler env) loadable (common/dom-marker env) nil opts false)
       (.init!))))
 
 (defn wrap-loadable [loadable]

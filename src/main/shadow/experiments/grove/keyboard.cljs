@@ -11,6 +11,8 @@
 
 (util/assert-not-in-worker!)
 
+;; FIXME: this produces alt+alt, ctrl+ctrl for blank alt/control presses
+;; not interested in those for now
 (defn str-key [^goog e]
   (->> [(and (.-ctrlKey e) "ctrl")
         (and (.-altKey e) "alt")
@@ -36,6 +38,7 @@
           (.listen key-handler "key"
             (fn [^goog e]
               (let [event-id (keyword this-ns (str-key e))]
+                ;; (js/console.log "checking event" event-id comp env)
                 (when-some [handler (get (comp/get-events comp) event-id)]
                   ;; FIXME: needs fixing when using to event maps
                   (handler env [event-id] e))))))
@@ -43,7 +46,6 @@
         ;; on->off
         (and (not nval) oval)
         (when-some [key-handler (.-shadow$key-handler node)]
-          (js/console.log "disposing of key-handler" env node key-handler)
           (.dispose key-handler))
 
         ;; on->on

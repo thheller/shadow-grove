@@ -26,11 +26,7 @@
 
 
 (defprotocol IWork
-  (work-priority [this] "number, higher number = higher priority")
-  (work-depth [this] "number, tree depth, higher = lower priority")
-  (work-id [this] "string")
-  (work! [this])
-  (work-pending? [this]))
+  (work! [this]))
 
 (defprotocol IHandleEvents
   (handle-event! [this ev-vec e]))
