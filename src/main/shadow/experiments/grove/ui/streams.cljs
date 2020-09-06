@@ -2,11 +2,13 @@
   (:require
     [goog.style :as gs]
     [goog.object :as gobj]
+    [shadow.dom :as dom]
     [shadow.experiments.arborist.protocols :as ap]
     [shadow.experiments.arborist.attributes :as attr]
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.ui.util :as util]
-    [shadow.experiments.grove.keyboard :as keyboard])
+    [shadow.experiments.grove.keyboard :as keyboard]
+    [shadow.experiments.grove.components :as comp])
 
   (:import [goog.events KeyHandler]))
 
@@ -75,32 +77,36 @@
            "width" "100%"
            "height" "100%"})
 
-    (gobj/set (.. container-el -dataset) "keyboardFocus" true)
-
     (set! key-handler (KeyHandler. container-el))
 
     (.listen key-handler "key" #_js/goog.events.KeyHandler.EventType
       (fn [^goog e]
-        (let [pretty-key (keyboard/str-key e)]
-          (case pretty-key
-            "arrowup"
-            (do (.focus-move! this -1)
-                (.preventDefault e))
+        (case (keyboard/str-key e)
+          "arrowup"
+          (do (.focus-move! this -1)
+              (dom/ev-stop e))
 
-            "pageup"
-            (do (.focus-move! this -10)
-                (.preventDefault e))
+          "pageup"
+          (do (.focus-move! this -10)
+              (dom/ev-stop e))
 
-            "arrowdown"
-            (do (.focus-move! this 1)
-                (.preventDefault e))
+          "arrowdown"
+          (do (.focus-move! this 1)
+              (dom/ev-stop e))
 
-            "pagedown"
-            (do (.focus-move! this 10)
-                (.preventDefault e))
+          "pagedown"
+          (do (.focus-move! this 10)
+              (dom/ev-stop e))
 
-            nil
-            ))))
+          "enter"
+          (when-some [select-event (:select-event opts)]
+            (let [{:keys [data]} (aget items focus-idx)
+                  comp (comp/get-component env)]
+
+              (gp/handle-event! comp (conj select-event data) nil)))
+
+          nil
+          )))
 
     (set! container-el -tabIndex 0)
 
@@ -190,6 +196,13 @@
       (js/console.log "unhandled stream msg" op msg)
       ))
 
+  (focus-set! [this next-idx]
+    (let [current (aget items focus-idx)
+          next (aget items next-idx)]
+      (ap/dom-sync! (:managed current) (item-fn (:data current) {:focus false}))
+      (ap/dom-sync! (:managed next) (item-fn (:data next) {:focus true}))
+      (set! focus-idx next-idx)))
+
   (focus-move! [this dir]
     (let [max
           (dec (alength items))
@@ -200,12 +213,7 @@
               (js/Math.max 0))]
 
       (when (<= 0 next-idx max)
-        (let [current (aget items focus-idx)
-              next (aget items next-idx)]
-          (ap/dom-sync! (:managed current) (item-fn (:data current) {:focus false}))
-          (ap/dom-sync! (:managed next) (item-fn (:data next) {:focus true}))
-          (set! focus-idx next-idx))
-        ))))
+        (.focus-set! this next-idx)))))
 
 (defprotocol StreamHandleActions
   (clear! [this]))
