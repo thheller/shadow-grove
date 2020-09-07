@@ -296,25 +296,23 @@
 (defn track-change [val trigger-fn]
   (TrackChange. val trigger-fn nil nil nil nil))
 
-(deftype DomRef [^:mutable current]
-  cljs.core/IDeref
-  (-deref [this]
-    current))
-
 (a/add-attr :dom/ref
   (fn [env node oval nval]
     (cond
       (nil? nval)
-      (set! (.-current oval) nil)
+      (vreset! oval nil)
 
       (some? nval)
-      (set! (.-current nval) node)
+      (vreset! nval node)
 
       :else
       nil)))
 
-(defn dom-ref []
-  (DomRef. nil))
+;; using volatile so nobody gets any ideas about add-watch
+;; pretty sure that would cause havoc on the entire rendering
+;; if sometimes does work immediately on set before render can even complete
+(defn ref []
+  (volatile! nil))
 
 (defn effect
   "runs passed effect callback when provided deps argument changes

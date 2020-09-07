@@ -34,13 +34,19 @@
          (= ident (:ident (.-opts next)))))
 
   (dom-sync! [this ^VirtualInit next]
-    (let [next-opts (.-opts next)]
+    (let [{:keys [tabindex] :as next-opts} (.-opts next)]
       (when (not= opts next-opts)
+
+        (when (not= (:tabindex opts) tabindex)
+          (set! container-el -tabIndex tabindex))
+
         (set! opts next-opts)
 
         ;; FIXME: this is least efficient way to re-render all items
         ;; should be smarter here
         (.handle-query-result! this last-result)
+
+
 
         ;; (js/console.log "vlist sync, opts changed" this next)
         )))
@@ -84,7 +90,8 @@
              "min-height" "100%"
              "height" "100%"})
 
-      (set! container-el -tabIndex 0)
+      (when-some [tabindex (:tabindex opts)]
+        (set! container-el -tabIndex tabindex))
 
       (set! inner-el (js/document.createElement "div"))
       (gs/setStyle inner-el

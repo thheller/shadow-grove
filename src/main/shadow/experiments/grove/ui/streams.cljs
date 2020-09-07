@@ -20,14 +20,17 @@
 
 (util/assert-not-in-worker!)
 
-(declare StreamInit)
+(defprotocol StreamActions
+  (clear! [this]))
+
+(declare StreamHandle)
 
 (deftype StreamRoot
   [env
    stream-engine
    stream-id
    stream-key
-   opts
+   ^:mutable ^not-native opts
    item-fn
    ^:mutable container-el
    ^:mutable inner-el
@@ -37,12 +40,23 @@
    items]
 
   ap/IManaged
-  (supports? [this ^StreamInit next]
-    (identical? this next))
+  (supports? [this ^StreamHandle next]
+    (instance? StreamHandle next))
 
   (dom-sync! [this ^StreamInit next]
-    ;; not sure what this should sync. shouldn't really need updating
-    )
+    ;; can't update this dynamically
+    (assert (keyword-identical? stream-key (.-stream-key next)))
+
+    ;; FIXME: support updating this, needs to re-render in cases where fn captured bindings
+    (assert (identical? item-fn (.-item-fn next)))
+
+    (let [{:keys [tabindex] :as next-opts} (.-opts next)]
+      ;; FIXME: better handle opts that can't change like :ref
+
+      (when (not= (:tabindex opts) tabindex)
+        (set! container-el -tabIndex tabindex))
+
+      (set! opts next-opts)))
 
   (dom-insert [this parent anchor]
     (.insertBefore parent container-el anchor))
@@ -64,8 +78,21 @@
     (doseq [{:keys [managed]} (array-seq items)]
       (ap/destroy! managed))
 
+    (when-some [ref (:ref opts)]
+      (vreset! ref nil))
+
     (set! items -length 0))
 
+  StreamActions
+  (clear! [this]
+    (gp/stream-clear stream-engine stream-key)
+
+    (loop []
+      (when-some [^goog div (.-lastElementChild inner-el)]
+        (let [managed (.-shadow$managed div)]
+          (ap/destroy! managed)
+          (.remove div)
+          (recur)))))
 
   Object
   (init! [this]
@@ -76,6 +103,9 @@
            "overflow-y" "auto"
            "width" "100%"
            "height" "100%"})
+
+    (when-some [ref (:ref opts)]
+      (vreset! ref this))
 
     (set! key-handler (KeyHandler. container-el))
 
@@ -108,7 +138,8 @@
           nil
           )))
 
-    (set! container-el -tabIndex 0)
+    (when-some [tabindex (:tabindex opts)]
+      (set! container-el -tabIndex tabindex))
 
     (.addEventListener container-el "focus"
       (fn [e]
@@ -128,15 +159,6 @@
       (:stream-opts opts {})
       #(.handle-stream-msg this %)))
 
-  (clear! [this]
-    (gp/stream-clear stream-engine stream-key)
-
-    (loop []
-      (when-some [^goog div (.-lastElementChild inner-el)]
-        (let [managed (.-shadow$managed div)]
-          (ap/destroy! managed)
-          (.remove div)
-          (recur)))))
 
   (make-item [this data item-idx]
     (let [el (js/document.createElement "div")
@@ -215,30 +237,16 @@
       (when (<= 0 next-idx max)
         (.focus-set! this next-idx)))))
 
-(defprotocol StreamHandleActions
-  (clear! [this]))
-
-(deftype StreamHandle [stream-key opts item-fn ^clj ^:mutable mounted]
+(deftype StreamHandle [stream-key opts item-fn]
   ap/IConstruct
   (as-managed [this env]
     (let [stream-engine (::gp/query-engine env)]
       (when-not (satisfies? gp/IStreamEngine stream-engine)
         (throw (ex-info "engine does not implement streaming features" {:env env})))
 
-      (let [root (doto (StreamRoot. env stream-engine (util/next-id) stream-key opts item-fn nil nil false nil 0 #js [])
-                   (.init!))]
+      (doto (StreamRoot. env stream-engine (util/next-id) stream-key opts item-fn nil nil false nil 0 #js [])
+        (.init!)))))
 
-        (set! mounted root)
-
-        root)))
-
-  StreamHandleActions
-  (clear! [this]
-    (when-not mounted
-      (throw (ex-info "not mounted!" {:this this})))
-
-    (.clear! mounted)))
-
-(defn init [stream-key opts item-fn]
-  (StreamHandle. stream-key opts item-fn nil))
+(defn embed [stream-key opts item-fn]
+  (StreamHandle. stream-key opts item-fn))
 

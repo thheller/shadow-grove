@@ -343,7 +343,8 @@
     (.mark-hooks-dirty! this dirty-bits))
 
   (set-render-required! [this]
-    (set! needs-render? true))
+    (set! needs-render? true)
+    (set! current-idx (js/Math.min current-idx (alength (.-hooks config)))))
 
   (run-next! [^not-native this]
     ;; (js/console.log "Component:run-next!" (.-component-name config) current-idx (alength (.-hooks config)) this)
