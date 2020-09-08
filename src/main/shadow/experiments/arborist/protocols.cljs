@@ -21,4 +21,10 @@
   (update! [this next]))
 
 (defprotocol IConstruct
+  :extend-via-metadata true
   (as-managed [this env]))
+
+(defn identical-creator? [a b]
+  (let [am (get (meta a) `as-managed)
+        bm (get (meta b) `as-managed)]
+    (and am bm (identical? am bm))))
