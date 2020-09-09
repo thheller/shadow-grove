@@ -37,6 +37,7 @@
    ^boolean ^:mutable dom-entered?
    ^goog ^:mutable key-handler
    ^:mutable focus-idx
+   ^:mutable focused?
    items]
 
   ap/IManaged
@@ -143,7 +144,14 @@
 
     (.addEventListener container-el "focus"
       (fn [e]
-        ;; FIXME: should this focus the actual sub element or retain focus itself?
+        (set! focused? true)
+        (.update-item! this focus-idx)
+        ))
+
+    (.addEventListener container-el "blur"
+      (fn [e]
+        (set! focused? false)
+        (.update-item! this focus-idx)
         ))
 
     (set! inner-el (js/document.createElement "div"))
@@ -162,7 +170,7 @@
 
   (make-item [this data item-idx]
     (let [el (js/document.createElement "div")
-          rendered (item-fn data {:focus (= item-idx focus-idx)})
+          rendered (item-fn data {:focus (and focused? (= item-idx focus-idx))})
           managed (ap/as-managed rendered env)]
       ;; (set! (.. el -style -height) (str (:item-height opts) "px"))
       (set! el -shadow$managed managed)
@@ -218,12 +226,15 @@
       (js/console.log "unhandled stream msg" op msg)
       ))
 
+  (update-item! [this idx]
+    (let [item (aget items idx)]
+      (ap/dom-sync! (:managed item) (item-fn (:data item) {:focus (and focused? (= focus-idx idx))}))))
+
   (focus-set! [this next-idx]
-    (let [current (aget items focus-idx)
-          next (aget items next-idx)]
-      (ap/dom-sync! (:managed current) (item-fn (:data current) {:focus false}))
-      (ap/dom-sync! (:managed next) (item-fn (:data next) {:focus true}))
-      (set! focus-idx next-idx)))
+    (let [old-idx focus-idx]
+      (set! focus-idx next-idx)
+      (.update-item! this old-idx)
+      (.update-item! this next-idx)))
 
   (focus-move! [this dir]
     (let [max
@@ -244,7 +255,7 @@
       (when-not (satisfies? gp/IStreamEngine stream-engine)
         (throw (ex-info "engine does not implement streaming features" {:env env})))
 
-      (doto (StreamRoot. env stream-engine (util/next-id) stream-key opts item-fn nil nil false nil 0 #js [])
+      (doto (StreamRoot. env stream-engine (util/next-id) stream-key opts item-fn nil nil false nil 0 false #js [])
         (.init!)))))
 
 (defn embed [stream-key opts item-fn]
