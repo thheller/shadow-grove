@@ -24,7 +24,6 @@
          (keyword-identical? entity-type (.-entity-type other))
          (= id (.-id other)))))
 
-
 (defprotocol IWork
   (work! [this]))
 

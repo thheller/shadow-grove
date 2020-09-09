@@ -2,6 +2,7 @@
   (:require-macros [shadow.experiments.grove.components])
   (:require
     [goog.object :as gobj]
+    [shadow.cljs.modern :refer (defclass)]
     [shadow.experiments.arborist.common :as common]
     [shadow.experiments.arborist.protocols :as p]
     [shadow.experiments.arborist.attributes :as a]
@@ -184,25 +185,54 @@
         (set! should-call? false))
       )))
 
-(deftype ManagedComponent
-  [^not-native scheduler ;; called often, need to avoid map lookup
-   ^not-native ^:mutable parent-env
-   ^not-native ^:mutable component-env
-   ^:mutable args
-   ^:mutable rendered-args
-   ^ComponentConfig ^:mutable config
-   ^:mutable root
-   ^:mutable slots
-   ^number ^:mutable current-idx
-   ^array ^:mutable hooks
-   ^array ^:mutable hooks-with-effects
-   ^number ^:mutable dirty-from-args
-   ^number ^:mutable dirty-hooks
-   ^number ^:mutable updated-hooks
-   ^boolean ^:mutable needs-render?
-   ^boolean ^:mutable suspended?
-   ^boolean ^:mutable destroyed?
-   ^boolean ^:mutable dom-entered?]
+(defclass ManagedComponent
+  (field ^not-native scheduler)
+  (field ^not-native parent-env)
+  (field ^not-native component-env)
+  (field ^ComponentConfig config)
+  (field root)
+  (field args)
+  (field rendered-args)
+  (field slots {})
+  (field ^number current-idx (int 0))
+  (field ^array hooks)
+  (field ^array hooks-with-effects #js [])
+  (field ^number dirty-from-args (int 0))
+  (field ^number dirty-hooks (int 0))
+  (field ^number updated-hooks (int 0))
+  (field ^boolean needs-render? true) ;; initially needs a render
+  (field ^boolean suspended? false)
+  (field ^boolean destroyed? false)
+  (field ^boolean dom-entered? false)
+
+  (constructor [this e c a]
+    (set! parent-env e)
+    (set! config c)
+    (set! args a)
+    (set! scheduler (::scheduler parent-env))
+    (set! component-env
+      (-> parent-env
+          (update ::depth safe-inc)
+          (assoc ::parent (::component parent-env)
+                 ::component this
+                 ::scheduler (ComponentScheduler. scheduler #{}))))
+
+    ;; marks component boundaries in dev mode for easier inspect
+    (when DEBUG
+      (swap! instances-ref conj this)
+      (set! (.-marker-before this)
+        (doto (js/document.createComment (str "component: " (.-component-name config)))
+          (set! -shadow$instance this)))
+      (set! (.-marker-after this)
+        (doto (js/document.createComment (str "/component: " (.-component-name config)))
+          (set! -shadow$instance this))))
+
+    (set! root (common/managed-root component-env))
+    (set! hooks (js/Array. (alength (.-hooks config))))
+
+    ;; do as much work as possible now
+    ;; only go async when suspended
+    (gp/work! this))
 
   cljs.core/IHash
   (-hash [this]
@@ -281,37 +311,6 @@
 
   ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
-  ;; can't do this in the ComponentInit.as-managed since we need the this pointer
-  (component-init! [^ManagedComponent this]
-    (let [child-env
-          (-> parent-env
-              (update ::depth safe-inc)
-              (assoc ::parent (::component parent-env)
-                     ::component this
-                     ::scheduler (ComponentScheduler. scheduler #{})))]
-
-      (set! component-env child-env)
-
-      ;; marks component boundaries in dev mode for easier inspect
-      (when DEBUG
-        (swap! instances-ref conj this)
-        (set! (.-marker-before this)
-          (doto (js/document.createComment (str "component: " (.-component-name config)))
-            (set! -shadow$instance this)))
-        (set! (.-marker-after this)
-          (doto (js/document.createComment (str "/component: " (.-component-name config)))
-            (set! -shadow$instance this))))
-
-      (set! root (common/managed-root child-env))
-      (set! current-idx (int 0))
-      (set! hooks (js/Array. (alength (.-hooks config))))
-
-      ;; do as much work as possible now
-      ;; only go async when suspended
-      (gp/work! this)
-
-      true))
-
   (get-hook-value [this idx]
     (gp/hook-value (aget hooks idx)))
 
@@ -485,29 +484,7 @@
     (when-not (instance? gp/ComponentConfig config)
       (throw (ex-info "not a component definition" {:config config :props args}))))
 
-  ;; (js/console.log "component-create" (.-component-name config) args)
-  (doto (ManagedComponent.
-          ;; FIXME: this is way too many args, there must be a way to simplifiy
-          (::scheduler env)
-          env ;; parent-env
-          nil ;; component-env (created in component-init! since it needs this pointer)
-          args
-          args ;; rendered-args
-          config
-          nil ;; root
-          {} ;; slots
-          (int 0) ;; current-idx
-          nil ;; hooks, array created in component-init!
-          #js [] ;; hooks-with-effects (added when hooks are created)
-          (int 0) ;; dirty-from-args bits
-          (int 0) ;; dirty-hooks bits
-          (int 0) ;; updated-hooks bits
-          true ;; needs-render?
-          false ;; suspended?
-          false ;; destroyed?
-          false ;; dom-entered?
-          )
-    (.component-init!)))
+  (ManagedComponent. env config args))
 
 (deftype ComponentInit [component args]
   p/IConstruct
@@ -522,7 +499,6 @@
 
 (defn component-init? [x]
   (instance? ComponentInit x))
-
 
 (defn call-event-fn [{::keys [^ManagedComponent component] :as env} ev-vec e]
   (when-not component
