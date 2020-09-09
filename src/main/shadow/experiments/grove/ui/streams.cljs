@@ -3,20 +3,14 @@
     [goog.style :as gs]
     [goog.object :as gobj]
     [shadow.dom :as dom]
+    [shadow.cljs.modern :refer (defclass)]
     [shadow.experiments.arborist.protocols :as ap]
     [shadow.experiments.arborist.attributes :as attr]
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.ui.util :as util]
     [shadow.experiments.grove.keyboard :as keyboard]
     [shadow.experiments.grove.components :as comp])
-
   (:import [goog.events KeyHandler]))
-
-
-;; an attempt at a totally mutable element that doesn't try to reconstruct the whole dom
-;; every time. turns out that is pretty tricky and probably not worth.
-;; bunch of tradeoffs when trying to merge state from different sources
-;; and not knowing that the DOM is actually currently displaying
 
 (util/assert-not-in-worker!)
 
@@ -25,78 +19,36 @@
 
 (declare StreamHandle)
 
-(deftype StreamRoot
-  [env
-   stream-engine
-   stream-id
-   stream-key
-   ^:mutable ^not-native opts
-   item-fn
-   ^:mutable container-el
-   ^:mutable inner-el
-   ^boolean ^:mutable dom-entered?
-   ^goog ^:mutable key-handler
-   ^:mutable focus-idx
-   ^:mutable focused?
-   items]
+(defclass StreamRoot
+  (field env)
+  (field stream-engine)
+  (field stream-id)
+  (field stream-key)
+  (field ^not-native opts)
+  (field item-fn)
+  (field container-el)
+  (field inner-el)
+  (field ^goog key-handler)
+  (field ^boolean dom-entered? false)
+  (field focus-idx 0)
+  (field focused? false)
+  (field items #js [])
 
-  ap/IManaged
-  (supports? [this ^StreamHandle next]
-    (instance? StreamHandle next))
+  ;; FIXME: can the macro make these cleaner?
+  ;; cant have (constructor [this env]) and (set! env env)
+  (constructor [this env! stream-key! opts! item-fn!]
+    (set! env env!)
+    (set! opts opts!)
+    (set! item-fn item-fn!)
 
-  (dom-sync! [this ^StreamInit next]
-    ;; can't update this dynamically
-    (assert (keyword-identical? stream-key (.-stream-key next)))
+    (let [se (::gp/query-engine env)]
+      (when-not (satisfies? gp/IStreamEngine se)
+        (throw (ex-info "engine does not implement streaming features" {:env env})))
+      (set! stream-engine se))
 
-    ;; FIXME: support updating this, needs to re-render in cases where fn captured bindings
-    (assert (identical? item-fn (.-item-fn next)))
+    (set! stream-key stream-key!)
+    (set! stream-id (util/next-id))
 
-    (let [{:keys [tabindex] :as next-opts} (.-opts next)]
-      ;; FIXME: better handle opts that can't change like :ref
-
-      (when (not= (:tabindex opts) tabindex)
-        (set! container-el -tabIndex tabindex))
-
-      (set! opts next-opts)))
-
-  (dom-insert [this parent anchor]
-    (.insertBefore parent container-el anchor))
-
-  (dom-first [this]
-    container-el)
-
-  (dom-entered! [this]
-    ;; (.focus container-el)
-
-    (set! dom-entered? true))
-
-  (destroy! [this]
-    (gp/stream-destroy stream-engine stream-id stream-key)
-
-    (.dispose key-handler)
-    (.remove container-el)
-
-    (doseq [{:keys [managed]} (array-seq items)]
-      (ap/destroy! managed))
-
-    (when-some [ref (:ref opts)]
-      (vreset! ref nil))
-
-    (set! items -length 0))
-
-  StreamActions
-  (clear! [this]
-    (gp/stream-clear stream-engine stream-key)
-
-    (loop []
-      (when-some [^goog div (.-lastElementChild inner-el)]
-        (let [managed (.-shadow$managed div)]
-          (ap/destroy! managed)
-          (.remove div)
-          (recur)))))
-
-  Object
-  (init! [this]
     (set! container-el (js/document.createElement "div"))
     (gs/setStyle container-el
       #js {"outline" "none"
@@ -167,7 +119,62 @@
       (:stream-opts opts {})
       #(.handle-stream-msg this %)))
 
+  ap/IManaged
+  (supports? [this ^StreamHandle next]
+    (instance? StreamHandle next))
 
+  (dom-sync! [this ^StreamInit next]
+    ;; can't update this dynamically
+    (assert (keyword-identical? stream-key (.-stream-key next)))
+
+    ;; FIXME: support updating this, needs to re-render in cases where fn captured bindings
+    (assert (identical? item-fn (.-item-fn next)))
+
+    (let [{:keys [tabindex] :as next-opts} (.-opts next)]
+      ;; FIXME: better handle opts that can't change like :ref
+
+      (when (not= (:tabindex opts) tabindex)
+        (set! container-el -tabIndex tabindex))
+
+      (set! opts next-opts)))
+
+  (dom-insert [this parent anchor]
+    (.insertBefore parent container-el anchor))
+
+  (dom-first [this]
+    container-el)
+
+  (dom-entered! [this]
+    ;; (.focus container-el)
+
+    (set! dom-entered? true))
+
+  (destroy! [this]
+    (gp/stream-destroy stream-engine stream-id stream-key)
+
+    (.dispose key-handler)
+    (.remove container-el)
+
+    (doseq [{:keys [managed]} (array-seq items)]
+      (ap/destroy! managed))
+
+    (when-some [ref (:ref opts)]
+      (vreset! ref nil))
+
+    (set! items -length 0))
+
+  StreamActions
+  (clear! [this]
+    (gp/stream-clear stream-engine stream-key)
+
+    (loop []
+      (when-some [^goog div (.-lastElementChild inner-el)]
+        (let [managed (.-shadow$managed div)]
+          (ap/destroy! managed)
+          (.remove div)
+          (recur)))))
+
+  Object
   (make-item [this data item-idx]
     (let [el (js/document.createElement "div")
           rendered (item-fn data {:focus (and focused? (= item-idx focus-idx))})
@@ -251,12 +258,7 @@
 (deftype StreamHandle [stream-key opts item-fn]
   ap/IConstruct
   (as-managed [this env]
-    (let [stream-engine (::gp/query-engine env)]
-      (when-not (satisfies? gp/IStreamEngine stream-engine)
-        (throw (ex-info "engine does not implement streaming features" {:env env})))
-
-      (doto (StreamRoot. env stream-engine (util/next-id) stream-key opts item-fn nil nil false nil 0 false #js [])
-        (.init!)))))
+    (StreamRoot. env stream-key opts item-fn)))
 
 (defn embed [stream-key opts item-fn]
   (StreamHandle. stream-key opts item-fn))

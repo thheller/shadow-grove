@@ -30,8 +30,8 @@
   (field focused? false)
 
   (constructor [this e c o]
-    (set! config c)
     (set! env e)
+    (set! config c)
     (set! opts o)
     (set! query-id (util/next-id))
     (set! ident (:ident opts))
