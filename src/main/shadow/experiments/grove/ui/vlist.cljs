@@ -2,6 +2,7 @@
   (:require
     [goog.style :as gs]
     [goog.functions :as gfn]
+    [shadow.cljs.modern :refer (defclass)]
     [shadow.experiments.arborist.protocols :as ap]
     [shadow.experiments.arborist.dom-scheduler :as ds]
     [shadow.experiments.grove.protocols :as gp]
@@ -11,20 +12,81 @@
 
 (declare VirtualInit)
 
-(deftype VirtualList
-  [^VirtualConfig config
-   env
-   ^not-native query-engine
-   query-id
-   ^:mutable query
-   ident
-   ^:mutable opts
-   ^:mutable last-result
-   ^:mutable items
-   ^:mutable ^js container-el ;; the other scroll container
-   ^:mutable ^js inner-el ;; the inner container providing the height
-   ^:mutable ^js box-el ;; the box element moving inside inner-el
-   ^:mutable dom-entered?]
+(defclass VirtualList
+  (field ^VirtualConfig config)
+  (field env)
+  (field ^not-native query-engine)
+  (field query-id)
+  (field query)
+  (field ident)
+  (field opts)
+  (field last-result)
+  (field items)
+  (field ^js container-el) ;; the other scroll container
+  (field ^js inner-el) ;; the inner container providing the height
+  (field ^js box-el) ;; the box element moving inside inner-el
+  (field dom-entered? false)
+  (field focus-idx 0)
+  (field focused? false)
+
+  (constructor [this e c o]
+    (set! config c)
+    (set! env e)
+    (set! opts o)
+    (set! query-id (util/next-id))
+    (set! ident (:ident opts))
+
+    (let [qe (::gp/query-engine env)]
+      (when-not qe
+        (throw (ex-info "missing query engine" {:env env})))
+
+      (set! query-engine qe)
+
+      ;; FIXME: this (.-config config) stuff sucks
+      ;; only have it because config is VirtualConfig class which we check identical? on
+      (let [{:keys [scroll-delay box-style] :or {scroll-delay 16}} (.-config config)]
+
+        (set! container-el (js/document.createElement "div"))
+        (gs/setStyle container-el
+          #js {"outline" "none"
+               "overflow-y" "auto"
+               "width" "100%"
+               "min-height" "100%"
+               "height" "100%"})
+
+        (when-some [tabindex (:tabindex opts)]
+          (set! container-el -tabIndex tabindex))
+
+        (.addEventListener container-el "focus"
+          (fn [e]
+            (set! focused? true)
+            ;; (.update-item! this focus-idx)
+            ))
+
+        (.addEventListener container-el "blur"
+          (fn [e]
+            (set! focused? false)
+            ;; (.update-item! this focus-idx)
+            ))
+
+        (set! inner-el (js/document.createElement "div"))
+        (gs/setStyle inner-el
+          #js {"width" "100%"
+               "position" "relative"
+               "height" "0"})
+        (.appendChild container-el inner-el)
+
+        (set! box-el (js/document.createElement "div"))
+        (let [box-style (merge box-style {:position "absolute" :top "0px" :width "100%"})]
+          (a/set-attr env box-el :style nil box-style))
+        (.appendChild inner-el box-el)
+
+        (.addEventListener container-el "scroll"
+          (gfn/debounce #(.handle-scroll! this %)
+            ;; there is a good balance between too much work and too long wait
+            ;; every scroll update will trigger a potentially complex DOM change
+            ;; so it shouldn't do too much
+            scroll-delay)))))
 
   ap/IManaged
   (supports? [this ^VirtualInit next]
@@ -45,8 +107,6 @@
         ;; FIXME: this is least efficient way to re-render all items
         ;; should be smarter here
         (.handle-query-result! this last-result)
-
-
 
         ;; (js/console.log "vlist sync, opts changed" this next)
         )))
@@ -77,41 +137,6 @@
           (ap/destroy! item)))))
 
   Object
-  (init! [this]
-    ;; FIXME: this (.-config config) stuff sucks
-    ;; only have it because config is VirtualConfig class which we check identical? on
-    (let [{:keys [scroll-delay box-style] :or {scroll-delay 16}} (.-config config)]
-
-      (set! container-el (js/document.createElement "div"))
-      (gs/setStyle container-el
-        #js {"outline" "none"
-             "overflow-y" "auto"
-             "width" "100%"
-             "min-height" "100%"
-             "height" "100%"})
-
-      (when-some [tabindex (:tabindex opts)]
-        (set! container-el -tabIndex tabindex))
-
-      (set! inner-el (js/document.createElement "div"))
-      (gs/setStyle inner-el
-        #js {"width" "100%"
-             "position" "relative"
-             "height" "0"})
-      (.appendChild container-el inner-el)
-
-      (set! box-el (js/document.createElement "div"))
-      (let [box-style (merge box-style {:position "absolute" :top "0px" :width "100%"})]
-        (a/set-attr env box-el :style nil box-style))
-      (.appendChild inner-el box-el)
-
-      (.addEventListener container-el "scroll"
-        (gfn/debounce #(.handle-scroll! this %)
-          ;; there is a good balance between too much work and too long wait
-          ;; every scroll update will trigger a potentially complex DOM change
-          ;; so it shouldn't do too much
-          scroll-delay))))
-
   (update-query! [this offset num]
     (when query
       (gp/query-destroy query-engine query-id))
@@ -241,24 +266,7 @@
 (deftype VirtualInit [config opts]
   ap/IConstruct
   (as-managed [this env]
-    (let [query-engine (::gp/query-engine env)]
-      (when-not query-engine
-        (throw (ex-info "missing query engine" {:env env})))
-      (doto (VirtualList.
-              config
-              env
-              query-engine
-              (util/next-id)
-              nil
-              (:ident opts)
-              opts
-              nil ;; last-result
-              nil
-              nil
-              nil
-              nil
-              false)
-        (.init!)))))
+    (VirtualList. env config opts)))
 
 (deftype VirtualConfig [attr config item-fn]
   IFn
