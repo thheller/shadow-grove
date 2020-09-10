@@ -228,11 +228,7 @@
           (set! -shadow$instance this))))
 
     (set! root (common/managed-root component-env))
-    (set! hooks (js/Array. (alength (.-hooks config))))
-
-    ;; do as much work as possible now
-    ;; only go async when suspended
-    (gp/work! this))
+    (set! hooks (js/Array. (alength (.-hooks config)))))
 
   cljs.core/IHash
   (-hash [this]
@@ -484,7 +480,10 @@
     (when-not (instance? gp/ComponentConfig config)
       (throw (ex-info "not a component definition" {:config config :props args}))))
 
-  (ManagedComponent. env config args))
+  (doto (ManagedComponent. env config args)
+    ;; do as much work as possible now
+    ;; only go async when suspended
+    (gp/work!)))
 
 (deftype ComponentInit [component args]
   p/IConstruct
