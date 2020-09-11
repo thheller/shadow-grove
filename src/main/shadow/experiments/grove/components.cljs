@@ -65,7 +65,7 @@
 ;; will be stripped in release builds
 (defn mark-all-dirty! []
   (doseq [^ManagedComponent comp @instances-ref]
-    (set! comp -needs-render? true)))
+    (.set-render-required! comp)))
 
 (declare ^{:arglists '([x])} component-init?)
 (declare ComponentInit)
