@@ -17,43 +17,6 @@
 ;; this file is an exercise in writing the least idiomatic clojure code possible
 ;; shield your eyes and beware!
 
-(deftype ComponentScheduler [^not-native parent ^:mutable ^not-native work-set]
-  gp/IScheduleUpdates
-  (did-suspend! [this work-task]
-    (gp/did-suspend! parent work-task))
-
-  (did-finish! [this work-task]
-    (gp/did-finish! parent work-task))
-
-  (schedule-update! [this work-task]
-    (when (empty? work-set)
-      (gp/schedule-update! parent this))
-
-    (set! work-set (conj work-set work-task)))
-
-  (unschedule! [this work-task]
-    (set! work-set (disj work-set work-task))
-    (when (empty? work-set)
-      (gp/unschedule! parent this)))
-
-  (run-now! [this callback]
-    (gp/run-now! parent callback))
-
-  ;; parent tells us to work
-  gp/IWork
-  (work! [this]
-    (loop []
-      (when-some [x (first work-set)]
-        (gp/work! x)
-
-        ;; should time slice later and only continue work
-        ;; until a given time budget is consumed
-        (recur)))
-
-    ;; FIXME: should this trigger something in the component when completed?
-    ;; effect hooks should kinda only fire when the entire child tree is done right?
-    ))
-
 (defonce components-ref (atom {}))
 (defonce instances-ref (atom #{}))
 
@@ -204,6 +167,7 @@
   (field ^boolean suspended? false)
   (field ^boolean destroyed? false)
   (field ^boolean dom-entered? false)
+  (field ^not-native work-set #{}) ;; sub-tree pending work
 
   (constructor [this e c a]
     (set! parent-env e)
@@ -215,7 +179,7 @@
           (update ::depth safe-inc)
           (assoc ::parent (::component parent-env)
                  ::component this
-                 ::scheduler (ComponentScheduler. scheduler #{}))))
+                 ::scheduler this)))
 
     ;; marks component boundaries in dev mode for easier inspect
     (when DEBUG
@@ -300,10 +264,45 @@
           (gp/handle-event! parent ev-vec e)
           (js/console.warn "event not handled" ev-id ev-args)))))
 
+
+  gp/IScheduleUpdates
+  (did-suspend! [this work-task]
+    (gp/did-suspend! scheduler work-task))
+
+  (did-finish! [this work-task]
+    (gp/did-finish! scheduler work-task))
+
+  (schedule-update! [this work-task]
+    (when (empty? work-set)
+      (gp/schedule-update! scheduler this))
+
+    (set! work-set (conj work-set work-task)))
+
+  (unschedule! [this work-task]
+    (set! work-set (disj work-set work-task))
+    (when (empty? work-set)
+      (gp/unschedule! scheduler this)))
+
+  (run-now! [this callback]
+    (gp/run-now! scheduler callback))
+
+  ;; parent tells us to work
   gp/IWork
   (work! [this]
+    ;; always complete our own work first
+    ;; a re-render may cause the child tree to change
+    ;; and maybe some work to disappear
     (while (.work-pending? this)
-      (.run-next! this)))
+      (.run-next! this))
+
+    ;; FIXME: only process children when this is done and not suspended?
+    (loop []
+      (when-some [x (first work-set)]
+        (gp/work! x)
+
+        ;; should time slice later and only continue work
+        ;; until a given time budget is consumed
+        (recur))))
 
   ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
