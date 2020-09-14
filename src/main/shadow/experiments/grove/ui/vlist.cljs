@@ -8,9 +8,15 @@
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.ui.util :as util]
     [shadow.experiments.arborist.common :as common]
-    [shadow.experiments.arborist.attributes :as a]))
+    [shadow.experiments.arborist.attributes :as a]
+    [shadow.experiments.grove.keyboard :as keyboard]
+    [shadow.dom :as dom]
+    [shadow.experiments.grove.components :as comp])
+  (:import [goog.events KeyHandler]))
 
 (declare VirtualInit)
+
+(deftype ListItem [idx data managed])
 
 (defclass VirtualList
   (field ^VirtualConfig config)
@@ -22,10 +28,20 @@
   (field opts)
   (field last-result)
   (field items)
+
+  (field remote-count 0)
+
+  (field visible-offset 0)
+  (field visible-count 0)
+  (field visible-end 0)
+
   (field ^js container-el) ;; the other scroll container
   (field ^js inner-el) ;; the inner container providing the height
   (field ^js box-el) ;; the box element moving inside inner-el
   (field dom-entered? false)
+
+  (field ^KeyHandler key-handler)
+
   (field focus-idx 0)
   (field focused? false)
 
@@ -57,16 +73,48 @@
         (when-some [tabindex (:tabindex opts)]
           (set! container-el -tabIndex tabindex))
 
+        (set! key-handler (KeyHandler. container-el))
+
+        (.listen key-handler "key" #_js/goog.events.KeyHandler.EventType
+          (fn [^goog e]
+            (case (keyboard/str-key e)
+              "arrowup"
+              (do (.focus-move! this -1)
+                  (dom/ev-stop e))
+
+              "pageup"
+              (do (.focus-move! this -10)
+                  (dom/ev-stop e))
+
+              "arrowdown"
+              (do (.focus-move! this 1)
+                  (dom/ev-stop e))
+
+              "pagedown"
+              (do (.focus-move! this 10)
+                  (dom/ev-stop e))
+
+              "enter"
+              (when-some [select-event (:select-event opts)]
+                (let [item (aget items focus-idx)
+                      comp (comp/get-component env)]
+
+                  (gp/handle-event! comp (conj select-event focus-idx (.-data item)) nil)
+                  ))
+
+              nil
+              )))
+
         (.addEventListener container-el "focus"
           (fn [e]
             (set! focused? true)
-            ;; (.update-item! this focus-idx)
+            (.update-item! this focus-idx)
             ))
 
         (.addEventListener container-el "blur"
           (fn [e]
             (set! focused? false)
-            ;; (.update-item! this focus-idx)
+            (.update-item! this focus-idx)
             ))
 
         (set! inner-el (js/document.createElement "div"))
@@ -124,7 +172,7 @@
       ;; can only measure once added to the actual document
       ;; FIXME: should also add a resizeobserver in case things get resized
       (.measure! this)
-      (.update-query! this (.-visible-offset this) (.-max-items this))))
+      (.update-query! this)))
 
   (destroy! [this]
     (when query
@@ -133,15 +181,15 @@
     (.remove container-el)
     (when items ;; query might still be pending
       (.forEach items ;; sparse array, doseq processes too many
-        (fn [item idx]
-          (ap/destroy! item)))))
+        (fn [^ListItem item idx]
+          (ap/destroy! (.-managed item))))))
 
   Object
-  (update-query! [this offset num]
+  (update-query! [this]
     (when query
       (gp/query-destroy query-engine query-id))
 
-    (let [attr-opts {:offset offset :num num}
+    (let [attr-opts {:offset visible-offset :num visible-count}
           attr-with-opts (list (.-attr config) attr-opts)]
       (set! query (if ident [{ident [attr-with-opts]}] [attr-with-opts])))
 
@@ -156,19 +204,19 @@
 
       (set! last-result result)
 
-      ;; FIXME: rewrite this!
-      ;; sparse array makes no sense anymore. only ever keeping the elements visible anyways
+      (when (not= remote-count item-count)
+        (gs/setStyle inner-el "height" (str (* item-count item-height) "px"))
+        (set! remote-count item-count))
 
       (cond
         (not items)
-        (do (set! items (js/Array. item-count))
-            (gs/setStyle inner-el "height" (str (* item-count item-height) "px")))
+        (set! items (js/Array. item-count))
 
         ;; FIXME: this needs to be handled differently, shouldn't just throw everything away
         (not= item-count (.-length items))
         (do (.forEach items ;; sparse array, doseq processes too many
-              (fn [item idx]
-                (ap/destroy! item)))
+              (fn [^ListItem item idx]
+                (ap/destroy! (.-managed item))))
             (set! items (js/Array. item-count))
             (set! container-el -scrollTop 0)
             (gs/setStyle inner-el "height" (str (* item-count item-height) "px")))
@@ -190,49 +238,79 @@
             ;; can skip render of elements that will be immediately replaced
             (when (.in-visible-range? this idx)
               ;; render and update/insert
-              (let [rendered (. config (item-fn val idx opts))]
-                (if-let [current (aget items idx)]
-                  ;; current exists, try to update or replace
-                  (if (ap/supports? current rendered)
-                    (ap/dom-sync! current rendered)
-                    (let [new-managed (common/replace-managed env current rendered)]
-                      (aset items idx new-managed)
-                      (when dom-entered?
-                        (ap/dom-entered! new-managed)
-                        )))
-                  ;; doesn't exist, create managed and insert at correct DOM position
-                  (let [managed (ap/as-managed rendered env)
-                        ;; FIXME: would be easier with wrapper elements
-                        ;; just create them once and replace the contents
-                        ;; but no wrappers means potentially supporting CSS grid?
-                        next-item (.find-next-item this idx)
-                        anchor-el (when next-item (ap/dom-first next-item))]
-
-                    ;; insert before next item, or append if it doesn't exist
-                    (ap/dom-insert managed box-el anchor-el)
-                    (when dom-entered?
-                      (ap/dom-entered! managed))
-                    (aset items idx managed)))))))
+              (.render-item! this idx val))))
         nil
         slice)))
+
+  (update-item! [this idx]
+    ;; item may not be available yet, will render later
+    (when-some [^ListItem item (aget items idx)]
+      (let [item-opts
+            (assoc opts
+              :idx idx
+              :focus (and focused? (= focus-idx idx)))
+
+            rendered
+            (. config (item-fn (.-data item) item-opts))]
+
+        (if (ap/supports? (.-managed item) rendered)
+          (ap/dom-sync! (.-managed item) rendered)
+
+          ;; unsupported, swap
+          (let [new-managed (common/replace-managed env (.-managed item) rendered)]
+            (set! item -managed new-managed)
+            (when dom-entered?
+              (ap/dom-entered! new-managed)))))))
+
+  (render-item! [this idx val]
+    (let [^ListItem current (aget items idx)
+
+          item-opts
+          (assoc opts
+            :idx idx
+            :focus (and focused? (= focus-idx idx)))
+
+          rendered
+          (. config (item-fn val item-opts))]
+
+      (cond
+        ;; doesn't exist, create managed and insert at correct DOM position
+        (not current)
+        (let [managed (ap/as-managed rendered env)
+              ;; FIXME: would be easier with wrapper elements
+              ;; just create them once and replace the contents
+              ;; but no wrappers means potentially supporting CSS grid?
+              ^ListItem next-item (.find-next-item this idx)
+              anchor-el (when next-item (ap/dom-first (.-managed next-item)))]
+
+          ;; insert before next item, or append if it doesn't exist
+          (ap/dom-insert managed box-el anchor-el)
+          (when dom-entered?
+            (ap/dom-entered! managed))
+          (aset items idx (ListItem. idx val managed)))
+
+        ;; current exists
+        :else
+        (do (set! current -data val)
+            (.update-item! this idx)))))
 
   ;; sparse array, idx might be 6 and the next item is 10
   ;; FIXME: should maintain the rendered items better and avoid all this logic
   (find-next-item [this idx]
     (loop [idx (inc idx)]
-      (when (< idx (.-visible-end this))
+      (when (< idx visible-end)
         (if-some [item (aget items idx)]
           item
           (recur (inc idx))))))
 
   (in-visible-range? [this idx]
-    (<= (.-visible-offset this) idx (.-visible-end this)))
+    (<= visible-offset idx visible-end))
 
   (cleanup! [this]
     (.forEach items
-      (fn [item idx]
+      (fn [^ListItem item idx]
         (when-not (.in-visible-range? this idx)
-          (ap/destroy! item)
+          (ap/destroy! (.-managed item))
           (js-delete items idx)))))
 
   (measure! [this]
@@ -252,16 +330,34 @@
           max-items ;; inc to avoid half items
           (inc (js/Math.ceil (/ container-height item-height)))]
 
-      (set! this -visible-offset min-idx)
-      (set! this -max-items max-items)
-      (set! this -visible-end (+ min-idx max-items))
+      (set! visible-offset min-idx)
+      (set! visible-count max-items)
+      (set! visible-end (+ min-idx max-items))
       ))
 
   (handle-scroll! [this e]
     (ds/read!
       (.measure! this)
-      (.update-query! this (.-visible-offset this) (.-max-items this)))
-    ))
+      (.update-query! this)))
+
+  (focus-set! [this next-idx]
+    (let [old-idx focus-idx]
+      (set! focus-idx next-idx)
+      (.update-item! this old-idx)
+      (.update-item! this next-idx)))
+
+  ;; FIXME: need to load more data when moving out of visible area
+  (focus-move! [this dir]
+    (let [max
+          (dec (alength items))
+
+          next-idx
+          (-> (+ focus-idx dir)
+              (js/Math.min max)
+              (js/Math.max 0))]
+
+      (when (<= 0 next-idx max)
+        (.focus-set! this next-idx)))))
 
 (deftype VirtualInit [config opts]
   ap/IConstruct
