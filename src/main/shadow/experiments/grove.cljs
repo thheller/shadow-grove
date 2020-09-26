@@ -15,6 +15,8 @@
     [shadow.experiments.grove.ui.atoms :as atoms]
     [shadow.experiments.arborist.attributes :as a]))
 
+(set! *warn-on-infer* false)
+
 ;; these are private - should not be accessed from the outside
 (defonce active-roots-ref (atom {}))
 (defonce active-apps-ref (atom {}))

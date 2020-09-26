@@ -8,6 +8,8 @@
 
 (util/assert-not-in-worker!)
 
+(set! *warn-on-infer* false)
+
 (declare SuspenseInit)
 
 (deftype SuspenseScheduler

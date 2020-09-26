@@ -185,11 +185,24 @@
           (ap/destroy! (.-managed item))))))
 
   Object
+  ;; FIXME: this unfortunately has to fetch all visible rows
+  ;; since the query will also be responsible for pushing updates to us
+  ;; that means its very inefficient when scrolling down/up a single row
+  ;; assuming 50 visible rows we already have 49 of them yet fetch 50
+  ;; maybe the query abstraction is not the best for this
+  ;; or maybe handle it on the "server" side so that is still knows it
+  ;; needs to update us for the visible rows but only provide a subset
+  ;; initially sometimes?
+  ;; good enough for now to now worry about it but sometimes to
+  ;; optimize later.
+  ;; currently there is no "query-update" so it just destroys/creates
+  ;; a fresh query each time
   (update-query! [this]
     (when query
       (gp/query-destroy query-engine query-id))
 
-    (let [attr-opts {:offset visible-offset :num visible-count}
+    (let [attr-opts {:offset visible-offset
+                     :num visible-count}
           attr-with-opts (list (.-attr config) attr-opts)]
       (set! query (if ident [{ident [attr-with-opts]}] [attr-with-opts])))
 
@@ -224,9 +237,6 @@
         :else
         nil)
 
-      ;; FIXME: can do this directly on scroll?
-      (gs/setStyle box-el "top" (str (* item-height offset) "px"))
-
       (.cleanup! this)
 
       ;; FIXME: this would likely be more efficient DOM wise when traversing backwards
@@ -240,7 +250,10 @@
               ;; render and update/insert
               (.render-item! this idx val))))
         nil
-        slice)))
+        slice)
+
+
+      (gs/setStyle box-el "top" (str (* item-height visible-offset) "px"))))
 
   (update-item! [this idx]
     ;; item may not be available yet, will render later
@@ -332,8 +345,7 @@
 
       (set! visible-offset min-idx)
       (set! visible-count max-items)
-      (set! visible-end (+ min-idx max-items))
-      ))
+      (set! visible-end (+ min-idx max-items))))
 
   (handle-scroll! [this e]
     (ds/read!

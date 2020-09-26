@@ -26,5 +26,5 @@
    {:source-paths ["src/dev"]}
    :cljs-dev ;; using this in shadow-cljs so can't use dev profile (Cursive complains about circular dep)
    {:dependencies
-    [[thheller/shadow-cljs "2.11.2"]]}})
+    [[thheller/shadow-cljs "2.11.4"]]}})
 

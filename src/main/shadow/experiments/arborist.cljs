@@ -12,6 +12,8 @@
     [shadow.experiments.arborist.collections :as coll]
     [goog.async.nextTick]))
 
+(set! *warn-on-infer* false)
+
 (deftype TreeRoot [container ^:mutable env ^:mutable root]
   p/IDirectUpdate
   (update! [this next]
