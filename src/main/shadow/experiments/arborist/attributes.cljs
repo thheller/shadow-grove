@@ -91,29 +91,33 @@
 
 (add-attr :class
   (fn [env ^js node oval nval]
-    (cond
-      (nil? nval)
-      (set! node -className "")
+    (let [sval
+          (cond
+            (nil? nval)
+            ""
 
-      (string? nval)
-      (set! node -className nval)
+            (string? nval)
+            nval
 
-      ;; FIXME: classlist?
-      (vector? nval)
-      (if-let [s (vec->class nval)]
-        (set! node -className s)
-        (set! node -className ""))
+            ;; FIXME: classlist?
+            (vector? nval)
+            (if-let [s (vec->class nval)]
+              s
+              "")
 
-      (map? nval)
-      (if-let [s (map->class nval)]
-        (set! node -className s)
-        ;; FIXME: removeAttribute? nil?
-        (set! node -className ""))
+            (map? nval)
+            (if-let [s (map->class nval)]
+              s
+              "")
 
-      :else
-      (throw (ex-info "invalid value for :class" {:node node :val nval}))
-      )))
+            :else
+            (throw (ex-info "invalid value for :class" {:node node :val nval})))]
 
+      ;; FIXME: setting className directly doesn't work for SVG elements since its a SVGAnimatedString
+      ;; FIXME: whats better? using setAttribute or checking if we are in SVG territory?
+
+      ;; (set! node -className sval)
+      (.setAttribute node "class" sval))))
 
 (defn merge-attrs
   "merge attributes from old/new attr maps"
