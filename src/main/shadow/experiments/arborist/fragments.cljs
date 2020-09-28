@@ -83,7 +83,7 @@
   p/IConstruct
   (as-managed [_ env]
     (let [element-fn (if (nil? element-ns) (:dom/element-fn env) (get-element-fn env element-ns))
-          env (cond-> env (some? element-ns) (assoc :dom/element-fn element-fn))
+          env (cond-> env (some? element-ns) (assoc :dom/element-fn element-fn :dom/svg true))
           ;; create-fn creates all necessary nodes but only exports those that will be accessed later in an array
           ;; this might be faster if create-fn just closed over locals and returns the callbacks to be used later
           ;; svelte does this but CLJS doesn't allow to set! locals so it would require ugly js* code to make it work

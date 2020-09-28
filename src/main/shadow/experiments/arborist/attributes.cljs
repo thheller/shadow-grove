@@ -90,7 +90,7 @@
       )))
 
 (add-attr :class
-  (fn [env ^js node oval nval]
+  (fn [^not-native env ^js node oval nval]
     (let [sval
           (cond
             (nil? nval)
@@ -113,11 +113,11 @@
             :else
             (throw (ex-info "invalid value for :class" {:node node :val nval})))]
 
-      ;; FIXME: setting className directly doesn't work for SVG elements since its a SVGAnimatedString
-      ;; FIXME: whats better? using setAttribute or checking if we are in SVG territory?
-
-      ;; (set! node -className sval)
-      (.setAttribute node "class" sval))))
+      ;; setting className directly doesn't work for SVG elements since its a SVGAnimatedString
+      ;; FIXME: could set baseVal directly?
+      (if ^boolean (:dom/svg env)
+        (.setAttribute node "class" sval)
+        (set! node -className sval)))))
 
 (defn merge-attrs
   "merge attributes from old/new attr maps"
