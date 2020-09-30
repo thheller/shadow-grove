@@ -17,7 +17,7 @@
  :dev-http
  {3005 "public"
   3006 "examples/todomvc"
-  3007 "examples/todomvc-split"
+  3007 "examples/suspense"
   3008 "examples/conduit"
   3009 "examples/bench-fragment"}
 
@@ -37,6 +37,12 @@
   {:target :browser
    :output-dir "examples/todomvc/js"
    :modules {:main {:init-fn todomvc.simple/init
+                    :preloads [shadow.experiments.grove.dev-support]}}}
+
+  :suspense
+  {:target :browser
+   :output-dir "examples/suspense/js"
+   :modules {:main {:init-fn dummy.suspense/init
                     :preloads [shadow.experiments.grove.dev-support]}}}
 
   :todomvc-split

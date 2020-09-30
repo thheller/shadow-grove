@@ -3,6 +3,8 @@
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.components :as comp]))
 
+(set! *warn-on-infer* false)
+
 (deftype DelayHook [component idx max ^:mutable timeout]
   gp/IHook
   (hook-init! [this]
