@@ -11,6 +11,13 @@
   (render
     (<< [:div.border.shadow.m-4.p-4 "nested:" x])))
 
+(defn content []
+  (<< (nested 1)
+      (nested 2)
+      (nested 3)
+      (nested 4)
+      (nested 5)))
+
 (defc ui-root []
   (render
     (<< [:div.flex {:style "width: 500px;"}
@@ -19,19 +26,11 @@
           (sg/suspense
             {:fallback (<< [:div.pl-4 "Loading ..."])
              :timeout 500}
-            (<< (nested 1)
-                (nested 2)
-                (nested 3)
-                (nested 4)
-                (nested 5)))]
+            (content))]
 
          [:div.flex-1
           [:div.pl-4 "without"]
-          (nested 1)
-          (nested 2)
-          (nested 3)
-          (nested 4)
-          (nested 5)]])))
+          (content)]])))
 
 (defn ^:dev/after-load start []
   (sg/start ::ui root-el (ui-root)))
