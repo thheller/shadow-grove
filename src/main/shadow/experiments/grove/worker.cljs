@@ -8,6 +8,8 @@
     [shadow.experiments.grove.eql-query :as eql])
   (:import [goog.structs CircularBuffer]))
 
+(set! *warn-on-infer* false)
+
 (defn set-conj [x y]
   (if (nil? x) #{y} (conj x y)))
 

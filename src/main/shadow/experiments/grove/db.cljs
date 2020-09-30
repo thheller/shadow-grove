@@ -1,6 +1,8 @@
 (ns shadow.experiments.grove.db
   (:refer-clojure :exclude #{ident? remove}))
 
+(set! *warn-on-infer* false)
+
 (defn parse-entity-spec [entity-type {:keys [attrs] :as config}]
   {:pre [(keyword? entity-type)
          (map? attrs)]}

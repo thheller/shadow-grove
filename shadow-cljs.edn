@@ -17,8 +17,8 @@
  :dev-http
  {3005 "public"
   3006 "examples/todomvc"
-  3007 "examples/suspense"
-  3008 "examples/conduit"
+  3007 "examples/todomvc-split"
+  3008 "examples/suspense"
   3009 "examples/bench-fragment"}
 
  :build-defaults
