@@ -24,12 +24,12 @@
 (defn run-now! [env callback]
   (gp/run-now! (::comp/scheduler env) callback))
 
-(defn dispatch-up! [{::comp/keys [^not-native parent] :as env} ev-vec]
+(defn dispatch-up! [{::comp/keys [^not-native parent] :as env} ev-map]
   {:pre [(map? env)
-         (vector? ev-vec)
-         (qualified-keyword? (first ev-vec))]}
+         (map? ev-map)
+         (qualified-keyword? (:e ev-map))]}
   ;; FIXME: should schedule properly when it isn't in event handler already
-  (gp/handle-event! parent ev-vec nil))
+  (gp/handle-event! parent ev-map nil))
 
 (deftype QueryHook
   [^:mutable ident
@@ -129,10 +129,11 @@
 (defn tx*
   [{::gp/keys [query-engine] :as env} tx with-return?]
   (assert query-engine "missing query-engine in env")
+  (assert (map? tx) "expected transaction to be a map")
   (gp/transact! query-engine tx with-return?))
 
-(defn tx [env ev-vec e]
-  (tx* env ev-vec false))
+(defn tx [env ev-map e]
+  (tx* env ev-map false))
 
 (defn run-tx [env tx]
   (tx* env tx false))

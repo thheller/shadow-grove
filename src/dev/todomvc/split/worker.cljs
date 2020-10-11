@@ -67,36 +67,36 @@
 
 (sw/reg-event-fx app-ref ::m/create-new!
   []
-  (fn [{:keys [db]} new-todo]
+  (fn [{:keys [db]} {::m/keys [todo-text]}]
     (let [{::m/keys [id-seq]} db]
       {:db
-       (let [new-todo (assoc new-todo ::m/todo-id id-seq)]
+       (let [new-todo {::m/todo-id id-seq ::m/todo-text todo-text}]
          (-> db
              (update ::m/id-seq inc)
              (db/add ::m/todo new-todo [::m/todos])))})))
 
 (sw/reg-event-fx app-ref ::m/delete!
   []
-  (fn [{:keys [db] :as env} todo]
+  (fn [{:keys [db] :as env} {:keys [todo]}]
     {:db (-> db
              (dissoc todo)
              (update ::m/todos without todo))}))
 
 (sw/reg-event-fx app-ref ::m/set-filter!
   []
-  (fn [{:keys [db] :as env} new-filter]
+  (fn [{:keys [db] :as env} {:keys [filter]}]
     {:db
-     (assoc db ::m/current-filter new-filter)}))
+     (assoc db ::m/current-filter filter)}))
 
 (sw/reg-event-fx app-ref ::m/toggle-completed!
   []
-  (fn [{:keys [db] :as env} todo]
+  (fn [{:keys [db] :as env} {:keys [todo]}]
     {:db
      (update-in db [todo ::m/completed?] not)}))
 
 (sw/reg-event-fx app-ref ::m/edit-start!
   []
-  (fn [{:keys [db] :as env} todo]
+  (fn [{:keys [db] :as env} {:keys [todo]}]
     {:db
      (assoc db ::m/editing todo)}))
 
@@ -110,7 +110,7 @@
 
 (sw/reg-event-fx app-ref ::m/edit-cancel!
   []
-  (fn [{:keys [db] :as env} todo]
+  (fn [{:keys [db] :as env} {:keys [todo]}]
     {:db
      (assoc db ::m/editing nil)}))
 

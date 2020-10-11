@@ -101,5 +101,6 @@
 
 (sa/add-attr ::ref
   (fn [env node oval nval]
-    (set-node! nval node)))
+    (when nval
+      (set-node! nval node))))
 

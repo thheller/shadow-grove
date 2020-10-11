@@ -86,7 +86,7 @@
             (let [{:keys [data]} (aget items focus-idx)
                   comp (comp/get-component env)]
 
-              (gp/handle-event! comp (conj select-event data) nil)))
+              (gp/handle-event! comp (assoc select-event :item data) nil)))
 
           nil
           )))

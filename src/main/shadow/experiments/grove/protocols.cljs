@@ -28,7 +28,7 @@
   (work! [this]))
 
 (defprotocol IHandleEvents
-  (handle-event! [this ev-vec e]))
+  (handle-event! [this ev-map e]))
 
 (defprotocol IScheduleUpdates
   (schedule-update! [this target])

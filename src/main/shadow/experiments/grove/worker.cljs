@@ -45,16 +45,16 @@
 
 (defn tx*
   [{::keys [event-config fx-config data-ref invalidate-keys-ref] :as env}
-   [ev-id & params :as tx]]
-  {:pre [(vector? tx)
+   {ev-id :e :as tx}]
+  {:pre [(map? tx)
          (keyword? ev-id)]}
-  ;; (js/console.log ::db-tx ev-id tx env)
+  ;; (js/console.log ::worker-tx ev-id tx env)
 
   (let [{:keys [interceptors ^function handler-fn] :as event}
         (get event-config ev-id)]
 
     (if-not event
-      (js/console.warn "no event handler for" ev-id params env)
+      (js/console.warn "no event handler for" ev-id tx env)
 
       (let [before @data-ref
 
@@ -67,7 +67,7 @@
                        :db tx-db)
 
             {^clj tx-after :db return-value :return :as result}
-            (apply handler-fn tx-env params)]
+            (handler-fn tx-env tx)]
 
         ;; FIXME: move all of this out to interceptor chain. including DB stuff
 
@@ -118,8 +118,8 @@
         return-value))))
 
 (defn run-tx [env tx]
-  {:pre [(vector? tx)
-         (keyword? (first tx))]}
+  {:pre [(map? tx)
+         (keyword? (:e tx))]}
   (tx* env tx))
 
 (defn reg-event-fx [app-ref ev-id interceptors handler-fn]

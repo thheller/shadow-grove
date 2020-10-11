@@ -233,11 +233,11 @@
             (::on-error env))]
     (if-not on-error
       (js/console.warn "request result in error response without handler" env request-def xhr-req status)
-      (trigger env (conj on-error result status sent-request)))))
+      (trigger env (assoc on-error :result result :status status :sent-request sent-request)))))
 
 (defn handle-success [config env request result]
   (let [on-success (:on-success request)]
-    (trigger env (conj on-success result))))
+    (trigger env (assoc on-success :result result))))
 
 (defn merge-right [left right]
   (merge right left))

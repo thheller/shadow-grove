@@ -339,7 +339,7 @@
               ev-args)
 
             ;; need to rebind arguments since we need the first arg but it may not have a "name"
-            ;; (event :something [{:keys [foo]} e] ...)
+            ;; (event :something [{:keys [foo]} data e] ...)
             arg-syms
             (vec (take (count ev-args) (repeatedly gensym)))
 
@@ -348,25 +348,25 @@
 
         (assoc-in state [:events ev-id]
           (if (empty? deps)
-            `(make-event-fn
-               (fn ~ev-args
-                 ~@body
-                 ;; ev-fn return value is ignored anyways, don't turn above into expression
-                 nil))
-            `(make-event-fn
-               (fn ~arg-syms
-                 ;; FIXME: this is kinda hacky, the component calls (event-fn env e ...)
-                 ;; and then we get the component out of the env
-                 ;; but I don't want the component to be part of the event signature
-                 ;; and I don't want to rewrite the ev-args to add the comp binding
-                 ;; since I can't to that for (event ::foo some-fn) without going through too much apply
-                 (let ~(-> []
-                           (conj comp-sym `(get-component ~(first arg-syms)))
-                           (into (mapcat vector ev-args arg-syms))
-                           (into (let-bindings state deps)))
-                   ~@body)
-                 ;; ev-fn return value is ignored anyways, don't turn above into expression
-                 nil)))))
+            `(fn ~ev-args
+              ~@body
+              ;; ev-fn return value is ignored anyways, don't turn above into expression
+              nil)
+            `(fn ~arg-syms
+              ;; FIXME: this is kinda hacky, the component calls (event-fn env e ...)
+              ;; and then we get the component out of the env
+              ;; but I don't want the component to be part of the event signature
+              ;; and I don't want to rewrite the ev-args to add the comp binding
+              ;; since I can't to that for (event ::foo some-fn) without going through too much apply
+              (let ~(-> []
+                        (conj comp-sym `(get-component ~(first arg-syms)))
+                        ;; let binding from hooks first
+                        (into (let-bindings state deps))
+                        ;; then function args because they may shadow let names
+                        (into (mapcat vector ev-args arg-syms)))
+                ~@body)
+              ;; ev-fn return value is ignored anyways, don't turn above into expression
+              nil))))
 
       :else
       (throw (ex-info "invalid event declaration" {:hook hook})))))

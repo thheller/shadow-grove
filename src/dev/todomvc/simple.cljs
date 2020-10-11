@@ -22,10 +22,10 @@
   (bind fade
     (cfx/class-transition "fade"))
 
-  (event ::delete-me! [env e]
+  (event ::delete-me! [env _ e]
     (cfx/trigger-out! fade
       (fn []
-        (sg/dispatch-up! env [::delete! todo-id]))))
+        (sg/dispatch-up! env {:e ::delete! :todo-id todo-id}))))
 
   (render
     (<< [:li {::cfx/ref fade
@@ -34,15 +34,15 @@
          [:div.view
           [:input.toggle {:type "checkbox"
                           :checked completed?
-                          :on-change [::toggle-completed! todo-id]}]
-          [:label {:on-dblclick [::edit-start! todo-id]}
+                          :on-change {:e ::toggle-completed! :todo-id todo-id}}]
+          [:label {:on-dblclick {:e ::edit-start! :todo-id todo-id}}
            todo-text]
-          [:button.destroy {:on-click [::delete-me!]}]]
+          [:button.destroy {:on-click {:e ::delete-me!}}]]
 
          (when editing?
            (<< [:input#edit.edit {:autofocus true
-                                  :on-keydown [::edit-update! todo-id]
-                                  :on-blur [::edit-complete! todo-id]
+                                  :on-keydown {:e ::edit-update! :todo-id todo-id}
+                                  :on-blur {:e ::edit-complete! :todo-id todo-id}
                                   :value todo-text}]))])))
 
 (def filter-options
@@ -83,7 +83,7 @@
   (render
     (<< [:header.header
          [:h1 "todos"]
-         [:input.new-todo {:on-keydown [::create-new!]
+         [:input.new-todo {:on-keydown {:e ::create-new!}
                            :placeholder "What needs to be done?"
                            :autofocus true}]]
 
@@ -91,7 +91,7 @@
           (<< [:section.main
                [:input#toggle-all.toggle-all
                 {:type "checkbox"
-                 :on-change [::toggle-all!]
+                 :on-change {:e ::toggle-all!}
                  :checked false}]
                [:label {:for "toggle-all"} "Mark all as complete"]
 
@@ -107,17 +107,17 @@
                      (<< [:li [:a
                                {:class {:selected (= current-filter value)}
                                 :href "#"
-                                :on-click [::set-filter! value]}
+                                :on-click {:e ::set-filter! :value value}}
                                label]])))]
 
 
                 (when (pos? num-completed)
-                  (<< [:button.clear-completed {:on-click [::clear-completed!]} "Clear completed"]))]]))))
+                  (<< [:button.clear-completed {:on-click {:e ::clear-completed!}} "Clear completed"]))]]))))
 
-  (event ::set-filter! [{:keys [data-ref] :as env} filter]
+  (event ::set-filter! [{:keys [data-ref] :as env} {:keys [filter]} e]
     (swap! data-ref assoc :current-filter filter))
 
-  (event ::clear-completed! [{:keys [data-ref] :as env} e]
+  (event ::clear-completed! [{:keys [data-ref] :as env} _ e]
     (swap! data-ref
       (fn [{:keys [todos] :as db}]
         (assoc db :todos
@@ -129,7 +129,7 @@
                     todos
                     todos)))))
 
-  (event ::toggle-all! [{:keys [data-ref] :as env} e]
+  (event ::toggle-all! [{:keys [data-ref] :as env} _ e]
     (let [completed? (-> e .-target .-checked)]
       (swap! data-ref
         (fn [{:keys [todos] :as db}]
@@ -140,7 +140,7 @@
                       todos
                       todos))))))
 
-  (event ::create-new! [{:keys [data-ref] :as env} ^js e]
+  (event ::create-new! [{:keys [data-ref] :as env} _ ^js e]
     (when (= 13 (.-keyCode e))
       (let [input (.-target e)
             text (.-value input)]
@@ -156,10 +156,10 @@
                                              :completed? false})
                   (update :id-seq inc))))))))
 
-  (event ::edit-start! [{:keys [data-ref] :as env} todo-id e]
+  (event ::edit-start! [{:keys [data-ref] :as env} {:keys [todo-id]} e]
     (swap! data-ref assoc :editing todo-id))
 
-  (event ::edit-update! [{:keys [data-ref] :as env} todo-id e]
+  (event ::edit-update! [{:keys [data-ref] :as env} {:keys [todo-id]} e]
     (case (.-which e)
       13 ;; enter
       (.. e -target (blur))
@@ -168,7 +168,7 @@
       ;; default do nothing
       nil))
 
-  (event ::edit-complete! [{:keys [data-ref] :as env} todo-id e]
+  (event ::edit-complete! [{:keys [data-ref] :as env} {:keys [todo-id]} e]
     (let [new-text (.. e -target -value)]
       (swap! data-ref
         (fn [db]
@@ -176,10 +176,10 @@
               (assoc :editing nil)
               (assoc-in [:todos todo-id :todo-text] new-text))))))
 
-  (event ::toggle-completed! [{:keys [data-ref] :as env} todo-id e]
+  (event ::toggle-completed! [{:keys [data-ref] :as env} {:keys [todo-id]} e]
     (swap! data-ref update-in [:todos todo-id :completed?] not))
 
-  (event ::delete! [{:keys [data-ref] :as env} todo-id]
+  (event ::delete! [{:keys [data-ref] :as env} {:keys [todo-id]}]
     (swap! data-ref update :todos dissoc todo-id)))
 
 (defn ^:dev/after-load start []

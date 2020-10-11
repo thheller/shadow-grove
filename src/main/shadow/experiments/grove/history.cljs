@@ -6,7 +6,7 @@
   (:import [goog.history Html5History]))
 
 (defn navigate-to-token! [app-env token]
-  (sg/run-now! app-env #(sg/run-tx app-env [:ui/route! token])))
+  (sg/run-now! app-env #(sg/run-tx app-env {:e :ui/route! :token token})))
 
 (defn setup-history [app-env ^goog history]
   (let [start-token "dashboard"

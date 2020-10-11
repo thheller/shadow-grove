@@ -99,7 +99,7 @@
                 (let [item (aget items focus-idx)
                       comp (comp/get-component env)]
 
-                  (gp/handle-event! comp (conj select-event focus-idx (.-data item)) nil)
+                  (gp/handle-event! comp (assoc select-event :idx focus-idx :item (.-data item)) nil)
                   ))
 
               nil

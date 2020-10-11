@@ -246,7 +246,7 @@
   ;; FIXME: figure out default event handler
   ;; don't want to declare all events all the time
   gp/IHandleEvents
-  (handle-event! [this [ev-id & ev-args :as ev-vec] e]
+  (handle-event! [this {ev-id :e :as ev-map} e]
     (let [handler
           (cond
             (qualified-keyword? ev-id)
@@ -254,15 +254,15 @@
                 (get (.-opts config) ev-id))
 
             :else
-            (throw (ex-info "unknown event" {:event ev-vec})))]
+            (throw (ex-info "unknown event" {:event ev-map})))]
 
       (if handler
-        (handler component-env ev-vec e)
+        (handler component-env ev-map e)
 
         ;; no handler, try parent
         (if-some [parent (::component parent-env)]
-          (gp/handle-event! parent ev-vec e)
-          (js/console.warn "event not handled" ev-id ev-args)))))
+          (gp/handle-event! parent ev-map e)
+          (js/console.warn "event not handled" ev-id ev-map)))))
 
 
   gp/IScheduleUpdates
@@ -498,17 +498,17 @@
 (defn component-init? [x]
   (instance? ComponentInit x))
 
-(defn call-event-fn [{::keys [^ManagedComponent component] :as env} ev-vec e]
+(defn call-event-fn [{::keys [^ManagedComponent component] :as env} ev-map e]
   (when-not component
-    (throw (ex-info "event handlers can only be used in components" {:env env :event ev-vec})))
+    (throw (ex-info "event handlers can only be used in components" {:env env :event ev-map})))
 
-  (gp/run-now! (.-scheduler component) #(gp/handle-event! component ev-vec e)))
+  (gp/run-now! (.-scheduler component) #(gp/handle-event! component ev-map e)))
 
-(defn event-attr [env node event oval [ev-id & ev-args :as ev-vec]]
+(defn event-attr [env node event oval ev-map]
 
   (when ^boolean js/goog.DEBUG
-    (when-not (vector? ev-vec)
-      (throw (ex-info "event handler expects a vector arg" {:event event :node node :nval ev-vec}))))
+    (when-not (map? ev-map)
+      (throw (ex-info "event handler expects a map arg" {:event event :node node :nval ev-map}))))
 
   (let [ev-key (str "__shadow$" (name event))]
     (when-let [ev-fn (gobj/get node ev-key)]
@@ -516,12 +516,12 @@
 
     ;(js/console.log "adding ev fn" val)
 
-    (let [ev-fn #(call-event-fn env ev-vec %)
+    (let [ev-fn #(call-event-fn env ev-map %)
           ev-opts #js {}]
 
       ;; FIXME: need to track if once already happened. otherwise may re-attach and actually fire more than once
       ;; but it should be unlikely to have a changing val with ^:once?
-      (when-let [m (meta ev-vec)]
+      (when-let [m (meta ev-map)]
         (when (:once m)
           (gobj/set ev-opts "once" true))
 
@@ -579,21 +579,6 @@
          (nat-int? affects)
          (fn? run)]}
   (HookConfig. depends-on affects run))
-
-;; apply helper for macro event fns
-;; (fn [env event-vector browser-event])
-;; safes some annoying event destructuring
-;; (event ::some-event! [env [event-kw data] e])
-;; (event ::some-event! [env [_ data] e])
-;; so instead can do
-;; (event ::some-event! [env data e])
-(defn make-event-fn [callback]
-  (fn [env ev e]
-    (apply callback env
-      (-> (subvec ev 1)
-          (cond->
-            (some? e)
-            (conj e))))))
 
 (defn make-component-config
   "used by defc macro, do not use directly"

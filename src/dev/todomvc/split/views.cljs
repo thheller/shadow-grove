@@ -4,17 +4,17 @@
     [todomvc.model :as m]))
 
 (defc todo-item [todo]
-  (event ::m/edit-update! [env todo e]
+  (event ::m/edit-update! [env {:keys [todo]} e]
     (case (.-which e)
       13 ;; enter
       (.. e -target (blur))
       27 ;; escape
-      (sg/run-tx env [::m/edit-cancel! todo])
+      (sg/run-tx env {:e ::m/edit-cancel! :todo todo})
       ;; default do nothing
       nil))
 
-  (event ::m/edit-complete! [env todo e]
-    (sg/run-tx env [::m/edit-save! {:todo todo :text (.. e -target -value)}]))
+  (event ::m/edit-complete! [env {:keys [todo]} e]
+    (sg/run-tx env {:e ::m/edit-save! :todo todo :text (.. e -target -value)}))
 
   (event ::m/toggle-completed! sg/tx)
   (event ::m/edit-start! sg/tx)
@@ -32,14 +32,14 @@
          [:div.view
           [:input.toggle {:type "checkbox"
                           :checked completed?
-                          :on-change [::m/toggle-completed! todo]}]
-          [:label {:on-dblclick [::m/edit-start! todo]} todo-text]
-          [:button.destroy {:on-click [::m/delete! todo]}]]
+                          :on-change {:e ::m/toggle-completed! :todo todo}}]
+          [:label {:on-dblclick {:e ::m/edit-start! :todo todo}} todo-text]
+          [:button.destroy {:on-click {:e ::m/delete! :todo todo}}]]
 
          (when editing?
            (<< [:input#edit.edit {:autofocus true
-                                  :on-keydown [::m/edit-update! todo]
-                                  :on-blur [::m/edit-complete! todo]
+                                  :on-keydown {:e ::m/edit-update! :todo todo}
+                                  :on-blur {:e ::m/edit-complete! :todo todo}
                                   :value todo-text}]))])))
 
 (defc ui-filter-select []
@@ -60,7 +60,7 @@
              (<< [:li [:a
                        {:class {:selected (= current-filter value)}
                         :href "#"
-                        :on-click [::m/set-filter! value]}
+                        :on-click {:e ::m/set-filter! :filter value}}
                        label]])))])))
 
 (defc ui-todo-list []
@@ -73,20 +73,20 @@
 
 (defc ui-root []
   (event ::m/set-filter! sg/tx)
-  (event ::m/create-new! [env ^js e]
+  (event ::m/create-new! [env _ ^js e]
     (when (= 13 (.-keyCode e))
       (let [input (.-target e)
             text (.-value input)]
 
         (when (seq text)
           (set! input -value "") ;; FIXME: this triggers a paint so should probably be delayed?
-          (sg/run-tx env [::m/create-new! {::m/todo-text text}])))))
+          (sg/run-tx env {:e ::m/create-new! ::m/todo-text text})))))
 
   (event ::m/clear-completed! sg/tx)
   (event ::m/shuffle! sg/tx)
 
-  (event ::m/toggle-all! [env e]
-    (sg/run-tx env [::m/toggle-all! {:completed? (-> e .-target .-checked)}]))
+  (event ::m/toggle-all! [env _ e]
+    (sg/run-tx env {:e ::m/toggle-all! :completed? (-> e .-target .-checked)}))
 
   (bind {::m/keys [num-total num-active num-completed] :as query}
     (sg/query-root
@@ -98,7 +98,7 @@
   (render
     (<< [:header.header
          [:h1 "todos"]
-         [:input.new-todo {:on-keydown [::m/create-new!]
+         [:input.new-todo {:on-keydown {:e ::m/create-new!}
                            :placeholder "What needs to be done?"
                            :autofocus true}]]
 
@@ -106,7 +106,7 @@
           (<< [:section.main
                [:input#toggle-all.toggle-all
                 {:type "checkbox"
-                 :on-change [::m/toggle-all!]
+                 :on-change {:e ::m/toggle-all!}
                  :checked false}]
                [:label {:for "toggle-all"} "Mark all as complete"]
 
@@ -119,4 +119,4 @@
                 (ui-filter-select)
 
                 (when (pos? num-completed)
-                  (<< [:button.clear-completed {:on-click [::m/clear-completed!]} "Clear completed"]))]])))))
+                  (<< [:button.clear-completed {:on-click {:e ::m/clear-completed!}} "Clear completed"]))]])))))

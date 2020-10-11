@@ -34,8 +34,8 @@
   (bind {:keys [page]}
     (sg/env-watch :data-ref))
 
-  (event ::switch-page! [{:keys [data-ref] :as env} which e]
-    (swap! data-ref assoc :page which))
+  (event ::switch-page! [{:keys [data-ref] :as env} {:keys [page]} e]
+    (swap! data-ref assoc :page page))
 
   (render
     (let [body
@@ -45,11 +45,11 @@
             :c (page-c))]
 
       (<< [:div.p-4
-           [:a.underline {:href "#" :on-click [::switch-page! :a]} "page a"]
+           [:a.underline {:href "#" :on-click {:e ::switch-page! :page :a}} "page a"]
            " "
-           [:a.underline {:href "#" :on-click [::switch-page! :b]} "page b"]
+           [:a.underline {:href "#" :on-click {:e ::switch-page! :page :b}} "page b"]
            " "
-           [:a.underline {:href "#" :on-click [::switch-page! :c]} "page c"]]
+           [:a.underline {:href "#" :on-click {:e ::switch-page! :page :c}} "page c"]]
 
           [:div.flex {:style "width: 500px;"}
            [:div.flex-1.p-4
