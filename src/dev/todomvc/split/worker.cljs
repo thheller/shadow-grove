@@ -65,8 +65,7 @@
 (defn r-> [init rfn coll]
   (reduce rfn init coll))
 
-(sw/reg-event-fx app-ref ::m/create-new!
-  []
+(sw/reg-event app-ref ::m/create-new!
   (fn [{:keys [db]} {::m/keys [todo-text]}]
     (let [{::m/keys [id-seq]} db]
       {:db
@@ -75,47 +74,40 @@
              (update ::m/id-seq inc)
              (db/add ::m/todo new-todo [::m/todos])))})))
 
-(sw/reg-event-fx app-ref ::m/delete!
-  []
+(sw/reg-event app-ref ::m/delete!
   (fn [{:keys [db] :as env} {:keys [todo]}]
     {:db (-> db
              (dissoc todo)
              (update ::m/todos without todo))}))
 
-(sw/reg-event-fx app-ref ::m/set-filter!
-  []
+(sw/reg-event app-ref ::m/set-filter!
   (fn [{:keys [db] :as env} {:keys [filter]}]
     {:db
      (assoc db ::m/current-filter filter)}))
 
-(sw/reg-event-fx app-ref ::m/toggle-completed!
-  []
+(sw/reg-event app-ref ::m/toggle-completed!
   (fn [{:keys [db] :as env} {:keys [todo]}]
     {:db
      (update-in db [todo ::m/completed?] not)}))
 
-(sw/reg-event-fx app-ref ::m/edit-start!
-  []
+(sw/reg-event app-ref ::m/edit-start!
   (fn [{:keys [db] :as env} {:keys [todo]}]
     {:db
      (assoc db ::m/editing todo)}))
 
-(sw/reg-event-fx app-ref ::m/edit-save!
-  []
+(sw/reg-event app-ref ::m/edit-save!
   (fn [{:keys [db] :as env} {:keys [todo text]}]
     {:db
      (-> db
          (assoc-in [todo ::m/todo-text] text)
          (assoc ::m/editing nil))}))
 
-(sw/reg-event-fx app-ref ::m/edit-cancel!
-  []
+(sw/reg-event app-ref ::m/edit-cancel!
   (fn [{:keys [db] :as env} {:keys [todo]}]
     {:db
      (assoc db ::m/editing nil)}))
 
-(sw/reg-event-fx app-ref ::m/clear-completed!
-  []
+(sw/reg-event app-ref ::m/clear-completed!
   (fn [{:keys [db] :as env} _]
     {:db (-> db
              (r->
@@ -128,8 +120,7 @@
                                  (into [] (remove #(get-in db [% ::m/completed?])) current))))
      }))
 
-(sw/reg-event-fx app-ref ::m/toggle-all!
-  []
+(sw/reg-event app-ref ::m/toggle-all!
   (fn [{:keys [db] :as env} {:keys [completed?]}]
     {:db
      (reduce
