@@ -55,23 +55,7 @@
        (symbol (-> component .-config .-component-name))
        (-> component .-component-env ::comp/component-id)]
       writer
-      opts))
-
-  ;; perf tracking should have no overhead in release builds
-  ;; default impl does nothing but preload provides impl that actually does stuff
-  ;; this way in :advanced builds all perf calls get removed entirely by closure
-  gp/IProfile
-  (perf-count! [component key]
-    (swap! perf-data-ref update-in (into [component] key) safe-inc))
-
-  (perf-start! [component]
-    ;; too noisy
-    ;; (?> component ::component-init!)
-    )
-
-  (perf-destroy! [component]
-    (let [data (get @perf-data-ref component)]
-      (swap! perf-data-ref dissoc component))))
+      opts)))
 
 (extend-type gp/ComponentConfig
   cp/Datafiable

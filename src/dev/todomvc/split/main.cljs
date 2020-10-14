@@ -1,8 +1,10 @@
 (ns todomvc.split.main
   (:require
     [shadow.experiments.grove :as sg]
-    [todomvc.split.views :as views]
-    [shadow.experiments.grove.worker-engine :as worker-eng]))
+    [shadow.experiments.grove.worker-engine :as worker]
+    [todomvc.split.views :as views]))
+
+;; this is running in the main thread
 
 (defonce root-el (js/document.getElementById "app"))
 
@@ -12,5 +14,8 @@
 (defn init []
   (sg/init ::ui
     {}
-    [(worker-eng/init js/SHADOW_WORKER)])
+    ;; SHADOW_WORKER is created in the .html file to be started as early as possible
+    ;; could be started here but this is saving a couple ms when doing it in the HTML
+    ;; see examples/todomvc-split/index.html
+    [(worker/init js/SHADOW_WORKER)])
   (start))

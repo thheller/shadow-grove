@@ -56,28 +56,24 @@
     (with-meta init-db m)))
 
 (defn make-ident [type id]
-  [type id]
-  #_(p/Ident. type id nil))
+  [type id])
 
 (defn ident? [thing]
   (and (vector? thing)
        (= (count thing) 2)
-       (keyword? (first thing)))
-  #_(instance? p/Ident thing))
+       (keyword? (first thing))))
 
-(defn ident-key [^p/Ident thing]
+(defn ident-key [thing]
   {:pre [(ident? thing)]}
-  (first thing)
-  #_(.-entity-type thing))
+  (nth thing 0))
 
 (defn coll-key [thing]
   {:pre [(ident? thing)]}
   [::all (ident-key thing)])
 
-(defn ident-val [^p/Ident thing]
+(defn ident-val [thing]
   {:pre [(ident? thing)]}
-  (nth thing 1)
-  #_(.-id thing))
+  (nth thing 1))
 
 (defn- normalize* [imports schema entity-type item]
   (let [{:keys [id-attr id-pred joins] :as ent-config}
@@ -280,9 +276,12 @@
     :else
     (throw (ex-info "don't know how to remove thing" {:thing thing}))))
 
+(defprotocol IObserved
+  (observed-keys [this]))
+
 (deftype ObservedData [^:mutable keys-used data]
-  IDeref
-  (-deref [_]
+  IObserved
+  (observed-keys [_]
     (persistent! keys-used))
 
   IMeta

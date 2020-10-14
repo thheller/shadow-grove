@@ -2,9 +2,9 @@
   "grove - a small wood or forested area (ie. trees)
    a mini re-frame/fulcro hybrid. re-frame event styles + somewhat normalized db"
   (:require
-    [clojure.set :as set]
     [cognitect.transit :as transit]
     [shadow.experiments.grove.db :as db]
+    [shadow.experiments.grove.runtime :as rt]
     [shadow.experiments.grove.events :as ev]
     [shadow.experiments.grove.eql-query :as eql])
   (:import [goog.structs CircularBuffer]))
@@ -32,30 +32,22 @@
    query
    ^:mutable read-keys
    ^:mutable read-result
-   ^:mutable pending?
    ^:mutable destroyed?]
 
   ev/IQuery
-  (query-pending? [this] pending?)
-  (query-keys [this] read-keys)
   (query-refresh! [this]
-    ;; this may be called multiple times during one invalidation cycle right now
-    ;; so we queue to ensure its only sent out once
-    ;; FIXME: fix invalidate-queries! so this isn't necessary
-    (when (and (not pending?) (not destroyed?))
-      (set! pending? true)
-      (.then query-queue #(.actually-refresh! this))))
+    (when-not destroyed?
+      (.do-read! this)))
 
   Object
   (do-read! [this]
-    (set! pending? false)
+    (let [observed-data (db/observed @(::rt/data-ref env))
+          result (eql/query env observed-data query)
+          new-keys (db/observed-keys observed-data)]
 
-    (let [{::keys [data-ref]} env
-          observed-data (db/observed @data-ref)
-          result (eql/query env observed-data query)]
-
-      ;; remember this even is query is still loading
-      (set! read-keys @observed-data)
+      ;; remember this even if query is still loading
+      (ev/index-query env this read-keys new-keys)
+      (set! read-keys new-keys)
 
       ;; if query is still loading don't send to main
       (when (and (not (keyword-identical? result :db/loading))
@@ -74,10 +66,9 @@
         ;; might speed things up with basic merge logic
         (send-to-main env [:query-result query-id result]))))
 
-  (actually-refresh! [this]
-    ;; query might have been destroyed while being queued
-    (when (and pending? (not destroyed?))
-      (.do-read! this))))
+  (destroy! [this]
+    (set! destroyed? true)
+    (ev/unindex-query env this read-keys)))
 
 (defmulti worker-message (fn [env msg] (first msg)) :default ::default)
 
@@ -85,16 +76,16 @@
   (js/console.warn "unhandled worker msg" msg))
 
 (defmethod worker-message :query-init
-  [{::ev/keys [active-queries-ref] :as env} [_ query-id query opts]]
-  (let [q (ActiveQuery. env query-id query nil nil true false)]
+  [{::rt/keys [active-queries-ref] :as env} [_ query-id query opts]]
+  (let [q (ActiveQuery. env query-id query nil nil false)]
     (swap! active-queries-ref assoc query-id q)
     (.do-read! q)))
 
 (defmethod worker-message :query-destroy
-  [{::ev/keys [active-queries-ref] :as env} [_ query-id]]
+  [{::rt/keys [active-queries-ref] :as env} [_ query-id]]
   (when-some [query (get @active-queries-ref query-id)]
-    (set! (.-destroyed? query) true)
-    (swap! active-queries-ref dissoc query-id)))
+    (swap! active-queries-ref dissoc query-id)
+    (.destroy! query)))
 
 (defmethod worker-message :tx [env [_ tx]]
   (ev/tx* env tx))
@@ -134,19 +125,7 @@
     (swap! active-streams-ref assoc-in [stream-key :buffer] (CircularBuffer. (:capacity opts 1000)))
     ))
 
-;; FIXME: this shouldn't be worker dependent
-(defonce known-envs-ref (atom {}))
 
-(defn prepare [init-env data-ref app-id]
-  (let [env-ref
-        (-> init-env
-            (assoc ::app-id app-id
-                   ::data-ref data-ref)
-            (ev/prepare data-ref)
-            (atom))]
-
-    (swap! known-envs-ref assoc app-id env-ref)
-    env-ref))
 
 ;; FIXME: only this should be worker specific
 (defn init! [app-ref]
@@ -165,10 +144,9 @@
         (atom {})
 
         env
-        (-> {::active-streams-ref active-streams-ref
-             ::transit-read transit-read
-             ::transit-str transit-str}
-            (ev/init))]
+        {::active-streams-ref active-streams-ref
+         ::transit-read transit-read
+         ::transit-str transit-str}]
 
     (swap! app-ref merge env)
 
@@ -239,7 +217,7 @@
     (swap! active-streams-ref assoc stream-key stream)))
 
 (defn refresh-all-queries! [app-ref]
-  (let [{::ev/keys [active-queries-ref]} @app-ref]
+  (let [{::rt/keys [active-queries-ref]} @app-ref]
     (doseq [^ActiveQuery query (vals @active-queries-ref)]
       ;; recomputes and updates main if data changed
-      (.actually-refresh! query))))
+      (.do-read! query))))

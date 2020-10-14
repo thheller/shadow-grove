@@ -3,8 +3,9 @@
     [shadow.remote.runtime.api :as p]
     [shadow.remote.runtime.shared :as shared]
     [shadow.cljs.devtools.client.shared :as cljs-shared]
-    [shadow.experiments.grove.worker :as sw]
+    [shadow.experiments.grove.runtime.worker :as sw]
     [shadow.experiments.grove.db :as db]
+    [shadow.experiments.grove.runtime :as rt]
     [clojure.core.protocols :as cp]))
 
 (defn get-databases [{:keys [runtime]} msg]
@@ -12,12 +13,12 @@
     {:op :db/list-databases
      ;; just keywords or more details? don't actually have any?
      :databases
-     (-> (keys @sw/known-envs-ref)
+     (-> (keys @rt/known-runtimes-ref)
          (set))}))
 
 (defn get-tables [{:keys [runtime]} {:keys [db] :as msg}]
-  (let [env-ref (get @sw/known-envs-ref db)
-        data-ref (get @env-ref ::sw/data-ref)
+  (let [env-ref (get @rt/known-runtimes-ref db)
+        data-ref (get @env-ref ::rt/data-ref)
         data @data-ref
         {::db/keys [ident-types]} (meta data)]
 
@@ -27,8 +28,8 @@
        :tables (conj ident-types :db/globals)})))
 
 (defn get-table-columns [{:keys [runtime]} {:keys [db table] :as msg}]
-  (let [env-ref (get @sw/known-envs-ref db)
-        data-ref (get @env-ref ::sw/data-ref)
+  (let [env-ref (get @rt/known-runtimes-ref db)
+        data-ref (get @env-ref ::rt/data-ref)
         db @data-ref
 
         ;; FIXME: likely doesn't need all rows, should just take a random sample
@@ -42,8 +43,8 @@
        :columns known-keys-of-table})))
 
 (defn get-rows [{:keys [runtime]} {:keys [db table offset count] :as msg}]
-  (let [env-ref (get @sw/known-envs-ref db)
-        data-ref (get @env-ref ::sw/data-ref)
+  (let [env-ref (get @rt/known-runtimes-ref db)
+        data-ref (get @env-ref ::rt/data-ref)
         data @data-ref
         rows
         (->> (db/all-of data table)
@@ -59,8 +60,8 @@
 (defn get-entry
   [{:keys [runtime]}
    {:keys [db table row] :as msg}]
-  (let [env-ref (get @sw/known-envs-ref db)
-        data-ref (get @env-ref ::sw/data-ref)
+  (let [env-ref (get @rt/known-runtimes-ref db)
+        data-ref (get @env-ref ::rt/data-ref)
         db @data-ref
         ident (if (= table :db/globals) row (db/make-ident table row))
         val (get db ident)]

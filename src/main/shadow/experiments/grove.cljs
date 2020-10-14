@@ -54,8 +54,12 @@
 
   gp/IHook
   (hook-init! [this]
-    (.set-loading! this)
-    (.register-query! this))
+    (.register-query! this)
+
+    ;; async query will suspend
+    ;; regular query should just proceed immediately
+    (when-not (some? read-result)
+      (.set-loading! this)))
 
   (hook-ready? [this]
     (or (false? (:suspend config)) ready?))
@@ -99,13 +103,19 @@
     (set! read-result (assoc (:default config {}) ::loading-state :loading)))
 
   (set-data! [this data]
-    (let [data (if ident (get data ident) data)]
+    (let [data (if ident (get data ident) data)
+          first-run? (nil? read-result)]
       (set! read-result (assoc data ::loading-state :ready))
-      ;; on query update just invalidate. might be useful to bypass certain suspend logic?
-      (if ready?
-        (comp/hook-invalidate! component idx)
-        (do (comp/hook-ready! component idx)
-            (set! ready? true))))))
+
+      ;; first run may provide result immedialy in which case which don't need to tell the
+      ;; component that we are ready separately, it'll just check ready? on its own
+      ;; async queries never have their data immediately ready and will suspend unless configured not to
+      (if first-run?
+        (set! ready? true)
+        (if ready?
+          (comp/hook-invalidate! component idx)
+          (do (comp/hook-ready! component idx)
+              (set! ready? true)))))))
 
 (defn query-ident
   ([ident query]

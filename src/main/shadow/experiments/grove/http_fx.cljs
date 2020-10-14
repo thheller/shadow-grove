@@ -1,7 +1,7 @@
 (ns shadow.experiments.grove.http-fx
   (:require
     [clojure.string :as str]
-    [shadow.experiments.grove.worker :as sw]))
+    [shadow.experiments.grove.runtime.worker :as sw]))
 
 ;; this is using XMLHttpRequest. no intent on making this usable with anything else.
 ;; might split this up into different namespace so there could be one variant using js/fetch
@@ -204,13 +204,13 @@
 ;; taking the read-fns from env so this ns doesn't depend on either cljs.reader nor transit
 ;; there are also several other places that will require these fns anyways
 (defn parse-edn [env ^js xhr-req]
-  (let [read-fn (:shadow.experiments.grove.worker/edn-read env)]
+  (let [read-fn (:shadow.experiments.grove.runtime.worker/edn-read env)]
     (when-not read-fn
       (throw (ex-info "received a EDN response but didn't have edn-read fn" {})))
     (read-fn (.-responseText xhr-req))))
 
 (defn parse-transit [env ^js xhr-req]
-  (let [read-fn (:shadow.experiments.grove.worker/transit-read env)]
+  (let [read-fn (:shadow.experiments.grove.runtime.worker/transit-read env)]
     (when-not read-fn
       (throw (ex-info "received a transit response but didn't have transit-read fn" {})))
     (read-fn (.-responseText xhr-req))))

@@ -41,11 +41,6 @@
   (run-asap! [this action])
   (run-whenever! [this action]))
 
-(defprotocol IProfile
-  (perf-count! [this counter-id])
-  (perf-start! [this])
-  (perf-destroy! [this]))
-
 (defprotocol IHook
   (hook-init! [this])
   (hook-ready? [this])
