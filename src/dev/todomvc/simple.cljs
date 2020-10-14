@@ -58,7 +58,7 @@
     (count todos))
 
   (bind num-active
-    (->> todos
+    (->> (vals todos)
          (remove :completed?)
          (count)))
 
@@ -114,8 +114,8 @@
                 (when (pos? num-completed)
                   (<< [:button.clear-completed {:on-click {:e ::clear-completed!}} "Clear completed"]))]]))))
 
-  (event ::set-filter! [{:keys [data-ref] :as env} {:keys [filter]} e]
-    (swap! data-ref assoc :current-filter filter))
+  (event ::set-filter! [{:keys [data-ref] :as env} {:keys [value]} e]
+    (swap! data-ref assoc :current-filter value))
 
   (event ::clear-completed! [{:keys [data-ref] :as env} _ e]
     (swap! data-ref
