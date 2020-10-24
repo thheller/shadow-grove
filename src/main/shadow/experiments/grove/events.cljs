@@ -135,7 +135,7 @@
 
         (when tx-after
           (let [{:keys [data keys-new keys-removed keys-updated] :as result}
-                (.commit! tx-after)]
+                (db/commit! tx-after)]
 
             (when-not (identical? @data-ref before)
               (throw (ex-info "someone messed with app-state while in tx" {})))
