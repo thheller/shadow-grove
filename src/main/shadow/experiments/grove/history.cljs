@@ -1,7 +1,7 @@
 (ns shadow.experiments.grove.history
   (:require
     [shadow.experiments.grove :as sg]
-    [shadow.experiments.grove.runtime.worker-engine :as eng]
+    [shadow.experiments.grove.worker-engine :as eng]
     [clojure.string :as str])
   (:import [goog.history Html5History]))
 

@@ -3,7 +3,7 @@
     [shadow.remote.runtime.api :as p]
     [shadow.remote.runtime.shared :as shared]
     [shadow.cljs.devtools.client.shared :as cljs-shared]
-    [shadow.experiments.grove.runtime.worker :as sw]
+    [shadow.experiments.grove.worker :as sw]
     [shadow.experiments.grove.db :as db]
     [shadow.experiments.grove.runtime :as rt]
     [clojure.core.protocols :as cp]))

@@ -221,7 +221,10 @@
   (supports? [this next]
     (and (component-init? next)
          (let [other (.-component ^ComponentInit next)]
-           (identical? config other))))
+           (identical? config other))
+         (let [custom-check (-> config .-opts (get :supports?))]
+           (or (nil? custom-check)
+               (custom-check args (.-args next))))))
 
   (dom-sync! [this ^ComponentInit next]
     (. config (check-args-fn this args (.-args next)))

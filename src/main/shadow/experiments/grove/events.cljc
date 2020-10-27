@@ -83,7 +83,7 @@
     ;; each query will figure out on its own if if actually triggers an update
     ;; FIXME: figure out if this can be smarter
     (reduce
-      (fn [_ ^IQuery query]
+      (fn [_ #?(:clj query :cljs ^IQuery query)]
         (query-refresh! query))
       nil
       queries)))
@@ -103,7 +103,7 @@
   (let [^function handler-fn (get event-config ev-id)]
 
     (if-not handler-fn
-      (js/console.warn "no event handler for" ev-id tx env)
+      (throw (ex-info "unhandled event" {:ev-id ev-id :tx tx}))
 
       (let [before @data-ref
 
@@ -120,7 +120,7 @@
           (fn [_ fx-key value]
             (let [fx-fn (get fx-config fx-key)]
               (if-not fx-fn
-                (js/console.warn "invalid fx" fx-key value)
+                (throw (ex-info "invalid fx" {:fx-key fx-key :fx-value value}))
                 (let [transact-fn
                       (fn [fx-tx]
                         ;; FIXME: should probably track the fx causing this transaction and the original tx
