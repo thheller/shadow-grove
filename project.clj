@@ -1,4 +1,4 @@
-(defproject thheller/shadow-experiments "0.0.2"
+(defproject thheller/shadow-experiments "0.0.3"
   :description "WARNING: Experimental Code! Changing completely without notice! Do not use for anything but other experiments!"
   :url "http://github.com/thheller/shadow-experiments"
   :license {:name "Eclipse Public License"
@@ -26,5 +26,5 @@
    {:source-paths ["src/dev"]}
    :cljs-dev ;; using this in shadow-cljs so can't use dev profile (Cursive complains about circular dep)
    {:dependencies
-    [[thheller/shadow-cljs "2.11.4"]]}})
+    [[thheller/shadow-cljs "2.11.7"]]}})
 
