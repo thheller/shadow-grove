@@ -38,18 +38,19 @@
           (update :visited conj service-key)
           (update :deps conj service-key)
           (as-> state
-            (reduce topo-sort-services* state dep-keys))
+            (reduce topo-sort-services state dep-keys))
           (update :deps disj service-key)
           (update :order conj service-key)))))
 
 (defn setup [services]
-  (reduce
-    topo-sort-services
-    {:deps #{}
-     :visited #{}
-     :order []
-     :services services}
-    (keys services)))
+  (-> (reduce
+        topo-sort-services
+        {:deps #{}
+         :visited #{}
+         :order []
+         :services services}
+        (keys services))
+      (dissoc :visited :deps)))
 
 (defn init [state services]
   {:pre [(map? state)

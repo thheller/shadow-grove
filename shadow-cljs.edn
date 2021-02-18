@@ -7,10 +7,12 @@
  :jvm-opts
  ["-XX:-OmitStackTraceInFastThrow"]
 
- :nrepl {:write-port-file true}
+ :version
+ "2.11.18"
 
  :dependencies
- [[com.wsscode/pathom "2.2.28"]
+ [[metosin/reitit-core "0.5.12"]
+  [com.wsscode/pathom "2.2.28"]
   ;; for benchmark purposes, not actually a dependency
   [reagent "0.9.0-rc3"]]
 

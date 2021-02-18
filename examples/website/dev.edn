@@ -1,0 +1,4 @@
+{:app/ns dummy.website
+ :app/root "examples/website"
+ :http/roots ["public"]
+ :http/port 8090}

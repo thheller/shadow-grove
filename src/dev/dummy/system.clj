@@ -22,6 +22,7 @@
 
 (comment
   (require '[shadow.experiments.system.runtime :as rt])
+  (set! *print-namespace-maps* false)
   (let [started
         (-> {}
             (rt/init services)
@@ -30,6 +31,6 @@
         stopped
         (rt/stop-all started)]
 
-    started
-    stopped
+    (tap> {:started started
+           :stopped stopped})
     ))

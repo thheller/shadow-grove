@@ -10,7 +10,10 @@
 
   :dependencies
   [[org.clojure/clojure "1.10.1" :scope "provided"]
-   [org.clojure/clojurescript "1.10.773" :scope "provided"]]
+   [org.clojure/clojurescript "1.10.773" :scope "provided"]
+   [metosin/reitit-core "0.5.12"]
+   [thheller/shadow-undertow "0.1.0"]
+   [hiccup "1.0.5"]]
 
   :resource-paths
   ["src/resources"]
