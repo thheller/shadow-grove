@@ -14,6 +14,9 @@ The performance budget is already extremely tight and if you are wasting too muc
 
 I do hope that there is a better way to do things but finding a good balance between usability and performance is quite challenging.
 
+
+**BEWARE: Below you'll find some terrible micro benchmarks that will probably not relate to real world applications.** It'll be rather difficult to compare real world applications though.
+
 ## Performance Study
 
 I really don't want to pick on any particular framework or library but I do have to use examples to clarify what I'm talking about here. Everything I'm using as an example here does provide value and the performance problem I'm referring to might not be relevant in things you are building. Just about every "reusable component library" I looked at has these problems. I do not want to "judge" these in any way but too much is being sacrified in the name of convenience with little regard to performance. **This might be the correct trade-off for you**, just be aware that you are making that trade-off.
@@ -77,7 +80,7 @@ If I now just take the above HTML string and create 10 new nodes and set this st
 "Elapsed time: 0.045000 msecs"
 ```
 
-This gives us a baseline. Adding re-com, reagent, react makes this about ~30 times slower. Of course you really can't write an app by setting `innerHTML` but given that this is about the most basic example I can come up with this seems too slow to me. The point I'm trying to make here is that all these abstractions have a cost and at a certain point you cannot keep trading "developer convenience" for performance anymore. At least in my view you should not.
+This gives us a baseline. Adding re-com, reagent, react makes this up to ~30 times slower. Of course you really can't write an app by setting `innerHTML` but given that this is about the most basic example I can come up with this seems too slow to me. The point I'm trying to make here is that all these abstractions have a cost and at a certain point you cannot keep trading "developer convenience" for performance anymore. At least in my view you should not.
 
 ## Picking The Correct Abstraction
 
@@ -328,3 +331,11 @@ Since all of this is built on top of protocols you can actually just implement r
 The implementation for those protocols will be a little more involved but they gain a lot of power that way and can do things that `react` can't really do as is basically directly changes the "reconciler" implementation.
 
 I think this overall strikes a good balance and achieves promising performance while staying developer friendly.
+
+In fact since this is based on protocols we can actually just implement `reagent` style hiccup support and take the previous `re-com` output and render that with any modifications. This obviously won't work as soon as it wants to do something react specific but for the simple example from above it works just fine.
+
+Performance is decent and can probably achieve pure `react` levels. I didn't do any performance tuning for this yet, but it already beats the `reagent+react` combo easily. It also interfaces seamlessly with the rest so in performance critical code you can take the faster fragment macro and things that don't need the performance can stay interpreted.
+
+```
+"Elapsed time: 0.590000 msecs"
+```
