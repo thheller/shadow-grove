@@ -8,7 +8,7 @@ Currently, pretty much all other implementations like `react` suffer greatly in 
 
 `react` (and others) are not the only thing responsible for this, but they do contribute. Things get especially wasteful when you add a CLJS translation layer such as `reagent` on top.
 
-This is a difficult topic to talk about since it is also kind of difficult to measure. A naive benchmark might give you numbers that look "goog enough" and they are indeed mostly "good enough". Just if you add them all together they are no longer "goog enough".
+This is a difficult topic to talk about since it is also kind of difficult to measure. A naive benchmark might give you numbers that look "good enough" and they are indeed mostly "good enough". Just if you add them all together they are no longer "goog enough".
 
 The performance budget is already extremely tight and if you are wasting too much of it on needless work you don't have enough left to do actual work. A rough guideline is that you want to achieve 60fps which means you have about 16.66msec to get stuff done. Modern displays have even faster refresh rates (even on mobile) so if you move that to 120hz/fps you get only half that. This is already basically impossible to achieve with most modern frameworks. Modern hardware like the Apple M1 might run things faster for a bit so you don't notice bad performance but older hardware even from a couple years ago already struggles a lot. I'm almost certain we will manage to eat up that added performance very quickly again.
 
