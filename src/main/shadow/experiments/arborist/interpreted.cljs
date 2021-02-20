@@ -168,10 +168,10 @@
   (dom-insert [this parent anchor]
     (.insertBefore parent marker-end anchor)
     (.insertBefore parent marker-start marker-end)
-    (run! #(p/dom-insert % parent marker-end) children))
+    (run! (fn [^not-native child] (p/dom-insert child parent marker-end)) children))
 
   (dom-entered! [this]
-    (run! #(p/dom-entered! %) children)
+    (run! (fn [^not-native child] (p/dom-entered! child)) children)
     (set! entered? true))
 
   (supports? [this next]
@@ -225,7 +225,7 @@
 
   (destroy! [this]
     (.remove marker-start)
-    (run! #(p/destroy! %) children)
+    (run! (fn [^not-native child] (p/destroy! child)) children)
     (.remove marker-end)))
 
 (defn as-managed-fragment [vec env]

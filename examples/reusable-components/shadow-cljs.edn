@@ -1,0 +1,19 @@
+;; shadow-cljs configuration
+{:source-paths
+ ["src/dev"
+  "src/main"
+  "src/test"
+  "../../src/main"]
+
+ :dependencies
+ [[reagent "1.0.0"]
+  [re-com "2.12.0"]
+  [thheller/shadow-experiments "0.0.3"]]
+
+ :dev-http {4008 "public"}
+
+ :builds
+ {:demo
+  {:target :browser
+   :output-dir "public/js"
+   :modules {:main {:init-fn test.samples/init}}}}}
