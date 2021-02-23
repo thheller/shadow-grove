@@ -64,8 +64,33 @@
   (swap! (::rt/query-index-ref env) unindex-query* query keys))
 
 (defn invalidate-keys!
-  [env keys-to-invalidate]
-  (let [idx @(::rt/query-index-ref env)
+  [env keys-new keys-removed keys-updated]
+
+  ;; ignoring keys-removed since that would notify components that queried the removed data
+  ;; leading to an empty query result which they can't do anything with
+  ;; most likely there is another collection that referenced the deleted item
+  ;; and will no longer contain it and leading to render-seq unmounting the component
+  ;; we didn't notify
+
+  ;; FIXME: this is a theory, need to verify that is good enough
+
+  ;; it won't work for cases where a component queries an ident directly
+  ;; without that ident being part of some collection that caused the mount
+  ;; in the first place.
+
+  ;; to fix this properly the queries would need to be refreshed in tree order
+  ;; but that would need to interleave the actual re-render since we only know
+  ;; things unmounted after render.
+
+  ;; there should be better ways to handle removal of data
+
+  ;; maybe instead of just (dissoc db key) it could (assoc db key :db/removed)
+  ;; so on query we could detect deleted data and have the query choose how to handle it?
+
+  (let [keys-to-invalidate
+        (set/union keys-new keys-updated)
+
+        idx @(::rt/query-index-ref env)
 
         queries
         (persistent!
@@ -144,8 +169,7 @@
 
             ;; FIXME: figure out if invalidation/refresh should be immediate or microtask'd/delayed?
             (when-not (identical? before data)
-              (let [keys-to-invalidate (set/union keys-new keys-removed keys-updated)]
-                (invalidate-keys! env keys-to-invalidate)))))
+              (invalidate-keys! env keys-new keys-removed keys-updated))))
 
         return-value))))
 
