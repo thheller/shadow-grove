@@ -276,14 +276,14 @@
     (gp/did-finish! scheduler work-task))
 
   (schedule-update! [this work-task]
-    (when (empty? work-set)
+    (when (zero? (count work-set))
       (gp/schedule-update! scheduler this))
 
     (set! work-set (conj work-set work-task)))
 
   (unschedule! [this work-task]
     (set! work-set (disj work-set work-task))
-    (when (empty? work-set)
+    (when (zero? (count work-set))
       (gp/unschedule! scheduler this)))
 
   (run-now! [this callback]
