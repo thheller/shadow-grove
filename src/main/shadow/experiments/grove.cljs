@@ -151,17 +151,17 @@
 (defn run-tx-with-return [env tx]
   (tx* env tx true))
 
-(deftype RootScheduler [^:mutable update-pending? ^:mutable work-set]
+(deftype RootScheduler [^:mutable update-pending? work-set]
   gp/IScheduleUpdates
   (schedule-update! [this work-task]
-    (set! work-set (conj work-set work-task))
+    (.add work-set work-task)
 
     (when-not update-pending?
       (set! update-pending? true)
       (util/next-tick #(.process-work! this))))
 
   (unschedule! [this work-task]
-    (set! work-set (disj work-set work-task)))
+    (.delete work-set work-task))
 
   (did-suspend! [this target])
   (did-finish! [this target])
@@ -173,13 +173,15 @@
 
   Object
   (process-work! [this]
-    (loop []
-      (when-some [x (first work-set)]
-        (gp/work! x)
+    (let [iter (.values work-set)]
+      (loop []
+        (let [current (.next iter)]
+          (when (not ^boolean (.-done current))
+            (gp/work! ^not-native (.-value current))
 
-        ;; should time slice later and only continue work
-        ;; until a given time budget is consumed
-        (recur)))
+            ;; should time slice later and only continue work
+            ;; until a given time budget is consumed
+            (recur)))))
 
     (set! update-pending? false)))
 
@@ -189,7 +191,7 @@
          (sequential? init-features)
          (every? fn? init-features)]}
 
-  (let [scheduler (RootScheduler. false #{})
+  (let [scheduler (RootScheduler. false (js/Set.))
 
         env
         (assoc init-env

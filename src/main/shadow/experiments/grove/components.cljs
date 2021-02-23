@@ -167,7 +167,7 @@
   (field ^boolean suspended? false)
   (field ^boolean destroyed? false)
   (field ^boolean dom-entered? false)
-  (field ^not-native work-set #{}) ;; sub-tree pending work
+  (field work-set (js/Set.)) ;; sub-tree pending work
 
   (constructor [this e c a]
     (set! parent-env e)
@@ -276,14 +276,15 @@
     (gp/did-finish! scheduler work-task))
 
   (schedule-update! [this work-task]
-    (when (zero? (count work-set))
+    (when (zero? (.-size work-set))
       (gp/schedule-update! scheduler this))
 
-    (set! work-set (conj work-set work-task)))
+    (.add work-set work-task))
 
   (unschedule! [this work-task]
-    (set! work-set (disj work-set work-task))
-    (when (zero? (count work-set))
+    (.delete work-set work-task)
+
+    (when (zero? (.-size work-set))
       (gp/unschedule! scheduler this)))
 
   (run-now! [this callback]
@@ -295,17 +296,19 @@
     ;; always complete our own work first
     ;; a re-render may cause the child tree to change
     ;; and maybe some work to disappear
-    (while (.work-pending? this)
+    (while ^boolean (.work-pending? this)
       (.run-next! this))
 
     ;; FIXME: only process children when this is done and not suspended?
-    (loop []
-      (when-some [x (first work-set)]
-        (gp/work! x)
+    (let [iter (.values work-set)]
+      (loop []
+        (let [current (.next iter)]
+          (when (not ^boolean (.-done current))
+            (gp/work! ^not-native (.-value current))
 
-        ;; should time slice later and only continue work
-        ;; until a given time budget is consumed
-        (recur))))
+            ;; should time slice later and only continue work
+            ;; until a given time budget is consumed
+            (recur))))))
 
   ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
