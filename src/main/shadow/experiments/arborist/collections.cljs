@@ -90,38 +90,28 @@
                       (recur (p/dom-first item) (dec idx) updated))
 
                     ;; item did exist
-                    ;; skip dom-sync if render result is equal
-                    (if (= rendered (get item-vals key))
-                      (let [next-anchor (p/dom-first item)]
+                    (do (set! item-vals (assoc item-vals key rendered))
+                        (if (p/supports? item rendered)
+                          ;; update in place if supported
+                          (do (p/dom-sync! item rendered)
+                              (let [next-anchor (p/dom-first item)]
 
-                        ;; still may need to move though
-                        (when (not= idx (get old-indexes key))
-                          (p/dom-insert item dom-parent anchor))
+                                ;; FIXME: this is probably not ideal
+                                (when (not= idx (get old-indexes key))
+                                  (p/dom-insert item dom-parent anchor))
 
-                        (recur next-anchor (dec idx) updated))
+                                (recur next-anchor (dec idx) updated)))
 
-                      (do (set! item-vals (assoc item-vals key rendered))
-                          (if (p/supports? item rendered)
-                            ;; update in place if supported
-                            (do (p/dom-sync! item rendered)
-                                (let [next-anchor (p/dom-first item)]
+                          ;; not updateable, swap
+                          (let [new-item (p/as-managed rendered env)]
+                            (set! items (assoc items key new-item))
+                            (p/dom-insert new-item dom-parent anchor)
+                            (when dom-entered?
+                              (p/dom-entered! new-item))
+                            (p/destroy! item)
 
-                                  ;; FIXME: this is probably not ideal
-                                  (when (not= idx (get old-indexes key))
-                                    (p/dom-insert item dom-parent anchor))
-
-                                  (recur next-anchor (dec idx) updated)))
-
-                            ;; not updateable, swap
-                            (let [new-item (p/as-managed rendered env)]
-                              (set! items (assoc items key new-item))
-                              (p/dom-insert new-item dom-parent anchor)
-                              (when dom-entered?
-                                (p/dom-entered! new-item))
-                              (p/destroy! item)
-
-                              (recur (p/dom-first new-item) (dec idx) updated)
-                              ))))))))]
+                            (recur (p/dom-first new-item) (dec idx) updated)
+                            )))))))]
 
         (set! item-keys new-keys)
 
