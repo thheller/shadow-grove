@@ -16,7 +16,6 @@
    ^:mutable render-fn
    ^:mutable ^not-native items ;; map of {key managed}
    ^:mutable item-keys ;; vector of (key-fn item)
-   ^:mutable item-vals ;; map of {key rendered}
    marker-before
    marker-after
    ^boolean ^:mutable dom-entered?
@@ -44,7 +43,7 @@
 
   (dom-sync! [this ^KeyedCollectionInit next]
     (let [old-coll coll
-          new-coll (vec (.-coll next)) ;; FIXME: could use into-array
+          new-coll (.-coll next) ;; FIXME: could use into-array
           dom-parent (.-parentNode marker-after)]
 
       (when-not dom-parent
@@ -85,33 +84,31 @@
                       (p/dom-insert item (.-parentNode anchor) anchor)
                       (when dom-entered?
                         (p/dom-entered! item))
-                      (set! item-vals (assoc item-vals key rendered))
                       (set! items (assoc items key item))
                       (recur (p/dom-first item) (dec idx) updated))
 
                     ;; item did exist
-                    (do (set! item-vals (assoc item-vals key rendered))
-                        (if (p/supports? item rendered)
-                          ;; update in place if supported
-                          (do (p/dom-sync! item rendered)
-                              (let [next-anchor (p/dom-first item)]
+                    (if (p/supports? item rendered)
+                      ;; update in place if supported
+                      (do (p/dom-sync! item rendered)
+                          (let [next-anchor (p/dom-first item)]
 
-                                ;; FIXME: this is probably not ideal
-                                (when (not= idx (get old-indexes key))
-                                  (p/dom-insert item dom-parent anchor))
+                            ;; FIXME: this is probably not ideal
+                            (when (not= idx (get old-indexes key))
+                              (p/dom-insert item dom-parent anchor))
 
-                                (recur next-anchor (dec idx) updated)))
+                            (recur next-anchor (dec idx) updated)))
 
-                          ;; not updateable, swap
-                          (let [new-item (p/as-managed rendered env)]
-                            (set! items (assoc items key new-item))
-                            (p/dom-insert new-item dom-parent anchor)
-                            (when dom-entered?
-                              (p/dom-entered! new-item))
-                            (p/destroy! item)
+                      ;; not updateable, swap
+                      (let [new-item (p/as-managed rendered env)]
+                        (set! items (assoc items key new-item))
+                        (p/dom-insert new-item dom-parent anchor)
+                        (when dom-entered?
+                          (p/dom-entered! new-item))
+                        (p/destroy! item)
 
-                            (recur (p/dom-first new-item) (dec idx) updated)
-                            )))))))]
+                        (recur (p/dom-first new-item) (dec idx) updated)
+                        ))))))]
 
         (set! item-keys new-keys)
 
@@ -120,8 +117,7 @@
           (fn [_ key item]
             (when-not (contains? updated key)
               (p/destroy! item)
-              (set! items (dissoc items key))
-              (set! item-vals (dissoc item-vals key))))
+              (set! items (dissoc items key))))
           nil
           items)))
     :synced)
@@ -142,8 +138,7 @@
 (deftype KeyedCollectionInit [coll key-fn render-fn]
   p/IConstruct
   (as-managed [this env]
-    (let [coll (vec coll) ;; FIXME: could use into-array, colls are never modified again, only used to look stuff up by index
-          len (count coll)
+    (let [len (count coll)
           marker-before (js/document.createComment "coll-start")
           marker-after (js/document.createComment "coll-end")]
 
@@ -152,8 +147,7 @@
       ;; could maybe use an array and do the key->idx mapping sometime later
       (loop [idx 0
              items (transient {})
-             keys (transient [])
-             vals (transient {})]
+             keys (transient [])]
 
         (if (>= idx len)
           (KeyedCollection.
@@ -163,7 +157,6 @@
             render-fn
             (persistent! items)
             (persistent! keys)
-            (persistent! vals)
             marker-before
             marker-after
             false)
@@ -177,7 +170,7 @@
               (inc idx)
               (assoc! items key managed)
               (conj! keys key)
-              (assoc! vals key rendered)))))))
+              ))))))
 
   IEquiv
   (-equiv [this ^KeyedCollectionInit other]
@@ -220,7 +213,7 @@
 
   (dom-sync! [this ^SimpleCollectionInit next]
     (let [old-coll coll
-          new-coll (vec (.-coll next))
+          new-coll (.-coll next)
           dom-parent (.-parentNode marker-after)
 
           oc (count old-coll)
@@ -281,8 +274,7 @@
 (deftype SimpleCollectionInit [coll render-fn]
   p/IConstruct
   (as-managed [this env]
-    (let [coll (vec coll)
-          marker-before (js/document.createComment "coll-start")
+    (let [marker-before (js/document.createComment "coll-start")
           marker-after (js/document.createComment "coll-end")
           arr (js/Array.)]
 
@@ -308,5 +300,5 @@
   {:pre [(sequential? coll)
          (ifn? render-fn)]}
   (if-not (nil? key-fn)
-    (KeyedCollectionInit. coll key-fn render-fn)
-    (SimpleCollectionInit. coll render-fn)))
+    (KeyedCollectionInit. (vec coll) key-fn render-fn)
+    (SimpleCollectionInit. (vec coll) render-fn)))
