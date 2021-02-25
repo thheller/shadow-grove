@@ -80,16 +80,16 @@
         (loop [idx (dec old-len)]
           (when-not (neg? idx)
             (let [^KeyedItem item (aget items idx)]
-              (if (contains? new-keys (.-key item))
-                (recur (dec idx))
-                (do (p/destroy! (.-value item))
-                    ;; FIXME: what is most costly?
-                    ;; splicing the existing array
-                    ;; or pushing stuff into a new array (without the new items)
-                    ;; probably dependent on size and how many we remove?
-                    ;; likely won't matter much but might be worth testing, code is more or less the same
-                    (.splice items idx 1)
-                    (recur (dec idx)))))))
+              (when-not (contains? new-keys (.-key item))
+                (p/destroy! (.-value item))
+                ;; FIXME: what is most costly?
+                ;; splicing the existing array
+                ;; or pushing stuff into a new array (without the new items)
+                ;; probably dependent on size and how many we remove?
+                ;; likely won't matter much but might be worth testing, code is more or less the same
+                (.splice items idx 1)))
+
+            (recur (dec idx))))
 
         ;; items array now contains all the old items without the deleted ones
         ;; if this contains less items than new-coll then something new was added as well
