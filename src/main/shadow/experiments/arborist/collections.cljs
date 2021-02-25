@@ -43,7 +43,7 @@
 
   (dom-sync! [this ^KeyedCollectionInit next]
     (let [old-coll coll
-          new-coll (.-coll next) ;; FIXME: could use into-array
+          new-coll (.-coll next)
           dom-parent (.-parentNode marker-after)]
 
       (when-not dom-parent
@@ -64,7 +64,7 @@
 
       (let [old-keys item-keys
             old-indexes (index-map old-keys)
-            new-keys (into [] (map key-fn) coll)
+            new-keys (into [] (map key-fn) new-coll)
 
             updated
             (loop [anchor marker-after
@@ -124,12 +124,11 @@
 
   (destroy! [this]
     (.remove marker-before)
-    (when items
-      (reduce-kv
-        (fn [_ _ item]
-          (p/destroy! item))
-        nil
-        items))
+    (reduce-kv
+      (fn [_ _ item]
+        (p/destroy! item))
+      nil
+      items)
     (.remove marker-after)))
 
 ;; FIXME: this shouldn't initialize everything in sync. might take too long
@@ -276,13 +275,12 @@
   (as-managed [this env]
     (let [marker-before (js/document.createComment "coll-start")
           marker-after (js/document.createComment "coll-end")
-          arr (js/Array.)]
+          arr (js/Array. (count coll))]
 
-      (reduce
-        (fn [idx val]
-          (.push arr (p/as-managed (render-fn val idx) env))
-          (inc idx))
-        0
+      (reduce-kv
+        (fn [_ idx val]
+          (aset arr idx (p/as-managed (render-fn val idx) env)))
+        nil
         coll)
 
       (SimpleCollection. env coll render-fn arr marker-before marker-after false)))
@@ -297,8 +295,17 @@
          (= coll (.-coll other)))))
 
 (defn node [coll key-fn render-fn]
-  {:pre [(sequential? coll)
+  {:pre [(indexed? coll)
+         (counted? coll)
          (ifn? render-fn)]}
-  (if-not (nil? key-fn)
-    (KeyedCollectionInit. (vec coll) key-fn render-fn)
-    (SimpleCollectionInit. (vec coll) render-fn)))
+  (cond
+    (zero? (count coll))
+    nil ;; can skip much unneeded work for empty colls
+
+    ;; FIXME: should likely use simple path for really small colls
+    ;; or maybe some other metrics we can infer here?
+    (some? key-fn)
+    (KeyedCollectionInit. coll key-fn render-fn)
+
+    :else
+    (SimpleCollectionInit. coll render-fn)))
