@@ -21,7 +21,8 @@
   3006 "examples/todomvc"
   3007 "examples/todomvc-split"
   3008 "examples/suspense"
-  3009 "examples/bench-fragment"}
+  3009 "examples/bench-fragment"
+  3010 "out/browser-test"}
 
  :build-defaults
  {:compiler-options
@@ -34,6 +35,10 @@
  {:test-dom
   {:target :browser
    :modules {:main {:init-fn shadow.experiments.grove.test-app.dom/init}}}
+
+  :test
+  {:target :browser-test
+   :test-dir "out/browser-test"}
 
   :todomvc-simple
   {:target :browser
