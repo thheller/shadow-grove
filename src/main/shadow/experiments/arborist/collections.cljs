@@ -42,8 +42,8 @@
     (instance? KeyedCollectionInit next))
 
   (dom-sync! [this ^KeyedCollectionInit next]
-    (let [old-coll coll
-          new-coll (.-coll next)
+    (let [^not-native old-coll coll
+          ^not-native new-coll (.-coll next)
           dom-parent (.-parentNode marker-after)]
 
       (when-not dom-parent
@@ -53,14 +53,14 @@
       (set! key-fn (.-key-fn next))
       (set! render-fn (.-render-fn next))
 
-      (let [old-len (count old-coll)
-            new-len (count new-coll)
+      (let [old-len (-count old-coll)
+            new-len (-count new-coll)
 
             ;; array of KeyedItem but value is just the render result for now
             new-items (js/Array. new-len)
 
             ;; traverse new coll once to build key map and render items
-            new-keys
+            ^not-native new-keys
             (persistent!
               (reduce-kv
                 (fn [keys idx val]
@@ -71,32 +71,33 @@
                     (aset new-items idx item)
                     (assoc! keys key item)))
                 (transient {})
-                coll))
+                coll))]
 
-            _
-            (when (not= (count new-keys) new-len)
-              (throw (ex-info "collection contains duplicated keys" {})))
+        (when (not= (-count new-keys) new-len)
+          (throw (ex-info "collection contains duplicated keys" {})))
 
-            _ ;; now remove item when key no longer exists
-            (loop [idx (dec old-len)]
-              (when (nat-int? idx)
-                (let [^KeyedItem item (aget items idx)]
-                  (if (contains? new-keys (.-key item))
-                    (recur (dec idx))
-                    (do (p/destroy! (.-value item))
-                        ;; FIXME: what is most costly?
-                        ;; splicing the existing array
-                        ;; or pushing stuff into a new array (without the new items)
-                        ;; probably dependent on size and how many we remove?
-                        ;; likely won't matter much but might be worth testing, code is more or less the same
-                        (.splice items idx 1)
-                        (recur (dec idx)))))))
+        ;; now remove item when key no longer exists
+        (loop [idx (dec old-len)]
+          (when-not (neg? idx)
+            (let [^KeyedItem item (aget items idx)]
+              (if (contains? new-keys (.-key item))
+                (recur (dec idx))
+                (do (p/destroy! (.-value item))
+                    ;; FIXME: what is most costly?
+                    ;; splicing the existing array
+                    ;; or pushing stuff into a new array (without the new items)
+                    ;; probably dependent on size and how many we remove?
+                    ;; likely won't matter much but might be worth testing, code is more or less the same
+                    (.splice items idx 1)
+                    (recur (dec idx)))))))
 
-            ;; items array now contains all the old items without the deleted ones
-            ;; if this contains less items than new-coll then something new was added as well
-            ;; if the length is the same then only one or more items were removed
-            new-items?
-            (not= new-len (alength items))]
+        ;; items array now contains all the old items without the deleted ones
+        ;; if this contains less items than new-coll then something new was added as well
+        ;; if the length is the same then only one or more items were removed
+
+        ;; don't really need this anywhere though?
+        ;; new-items?
+        ;; (not= new-len (alength items))
 
         ;; now go backwards over the new collection and apply render results to items
         ;; reverse order because of only being able to insert before anchor
@@ -115,7 +116,7 @@
                 ;; item does not exist in old coll, just create and insert
                 (not old-item)
                 (let [managed (p/as-managed (.-value new-item) env)]
-                  (p/dom-insert managed (.-parentNode anchor) anchor)
+                  (p/dom-insert managed dom-parent anchor)
                   (when dom-entered?
                     (p/dom-entered! managed))
 
