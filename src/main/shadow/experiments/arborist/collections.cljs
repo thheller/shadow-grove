@@ -9,34 +9,34 @@
 (defn index-map ^not-native [key-vec]
   (persistent! (reduce-kv #(assoc! %1 %3 %2) (transient {}) key-vec)))
 
+(deftype KeyedItem [key value moved?])
+
 (deftype KeyedCollection
   [env
    ^:mutable coll
    ^:mutable key-fn
    ^:mutable render-fn
-   ^:mutable ^not-native items ;; map of {key managed}
-   ^:mutable item-keys ;; vector of (key-fn item)
+   ^:mutable items ;; array of KeyedItem instances
+   ^:mutable item-keys ;; map of key -> items index
    marker-before
    marker-after
-   ^boolean ^:mutable dom-entered?
-   ]
+   ^boolean ^:mutable dom-entered?]
 
   p/IManaged
   (dom-first [this] marker-before)
 
   (dom-insert [this parent anchor]
     (.insertBefore parent marker-before anchor)
-    (run! #(p/dom-insert (get items %) parent anchor) item-keys)
+    (.forEach items
+      (fn [item]
+        (p/dom-insert ^not-native (.-value item) parent anchor)))
     (.insertBefore parent marker-after anchor))
 
   (dom-entered! [this]
     (set! dom-entered? true)
-    (reduce
-      (fn [_ key]
-        (let [val (get items key)]
-          (p/dom-entered! val)))
-      nil
-      item-keys))
+    (.forEach items
+      (fn [item]
+        (p/dom-entered! ^not-native (.-value item)))))
 
   (supports? [this next]
     (instance? KeyedCollectionInit next))
@@ -53,123 +53,182 @@
       (set! key-fn (.-key-fn next))
       (set! render-fn (.-render-fn next))
 
-      ;; FIXME: figure out how to pass args to render-fn properly, what to do about idx/key
-      ;; maybe just allow one extra arg?
+      (let [old-len (count old-coll)
+            new-len (count new-coll)
 
-      ;; FIXME: this should probably be use separate phases
-      ;; one that finds all the nodes that need to be removed (but doesn't yet)
-      ;; one that finds all new nodes (and constructs them)
-      ;; and then in a final pass touches the actual dom and realizes the changes
-      ;; would make it easier to synchronize transition changes later on
+            ;; array of KeyedItem but value is just the render result for now
+            new-items (js/Array. new-len)
 
-      (let [old-keys item-keys
-            old-indexes (index-map old-keys)
-            new-keys (into [] (map key-fn) new-coll)
+            ;; traverse new coll once to build key map and render items
+            new-keys
+            (persistent!
+              (reduce-kv
+                (fn [keys idx val]
+                  (let [key (key-fn val)
+                        rendered (render-fn val idx key)
+                        item (KeyedItem. key rendered false)]
 
-            updated
-            (loop [anchor marker-after
-                   idx (-> new-keys count dec)
-                   updated (transient #{})]
-              (if (neg? idx)
-                (persistent! updated)
-                (let [key (nth new-keys idx)
-                      ^not-native item (get items key)
-                      data (nth new-coll idx)
-                      updated (conj! updated key)
-                      rendered (render-fn data idx key)]
+                    (aset new-items idx item)
+                    (assoc! keys key item)))
+                (transient {})
+                coll))
 
-                  (if-not item
-                    ;; new item added to list, nothing to compare to just insert
-                    (let [item (p/as-managed rendered env)]
-                      (p/dom-insert item (.-parentNode anchor) anchor)
+            _ ;; now remove item when key no longer exists
+            (loop [idx (dec old-len)]
+              (when (nat-int? idx)
+                (let [^KeyedItem item (aget items idx)]
+                  (if (contains? new-keys (.-key item))
+                    (recur (dec idx))
+                    (do (p/destroy! (.-value item))
+                        ;; FIXME: what is most costly?
+                        ;; splicing the existing array
+                        ;; or pushing stuff into a new array (without the new items)
+                        ;; probably dependent on size and how many we remove?
+                        ;; likely won't matter much but might be worth testing, code is more or less the same
+                        (.splice items idx 1)
+                        (recur (dec idx)))))))
+
+            ;; items array now contains all the old items without the deleted ones
+            ;; if this contains less items than new-coll then something new was added as well
+            ;; if the length is the same then only one or more items were removed
+            new-items?
+            (not= new-len (alength items))]
+
+        ;; now go backwards over the new collection and apply render results to items
+        ;; reverse order because of only being able to insert before anchor
+
+        ;; will create new items while traversing
+        ;; will move items when required
+
+        (loop [anchor marker-after
+               idx (dec new-len)]
+
+          (when-not (neg? idx)
+            (let [new-item (aget new-items idx)
+                  old-item (get item-keys (.-key new-item))]
+
+              (cond
+                ;; item does not exist in old coll, just create and insert
+                (not old-item)
+                (let [managed (p/as-managed (.-value new-item) env)]
+                  (p/dom-insert managed (.-parentNode anchor) anchor)
+                  (when dom-entered?
+                    (p/dom-entered! managed))
+
+                  (set! new-item -value managed)
+
+                  ;; FIXME: can there be a case where there is an actual item in items at this idx?
+
+                  (recur (p/dom-first managed) (dec idx)))
+
+                ;; item in same position, render update, move only when item was previously moved
+                (identical? old-item (aget items idx))
+                (let [^not-native managed (.-value old-item)
+                      rendered (.-value new-item)]
+                  (if (p/supports? managed rendered)
+                    ;; update in place if supported
+                    (do (p/dom-sync! managed rendered)
+                        (set! new-item -value managed)
+
+                        ;; item was previously moved, move in DOM now
+                        (when (.-moved? old-item)
+                          ;; don't need to do this I think, never using old-item again
+                          ;; (set! old-item -moved? false)
+                          (p/dom-insert managed dom-parent anchor))
+
+                        (let [next-anchor (p/dom-first managed)]
+                          (recur next-anchor (dec idx))))
+
+                    ;; not updatable, swap.
+                    ;; unlikely given that key was the same, result should be the same.
+                    ;; still possible though
+                    (let [new-managed (p/as-managed rendered env)]
+                      (p/dom-insert new-managed dom-parent anchor)
                       (when dom-entered?
-                        (p/dom-entered! item))
-                      (set! items (assoc items key item))
-                      (recur (p/dom-first item) (dec idx) updated))
+                        (p/dom-entered! new-managed))
+                      (p/destroy! managed)
+                      (set! new-item -value new-managed)
+                      (recur (p/dom-first new-managed) (dec idx))
+                      )))
 
-                    ;; item did exist
-                    (if (p/supports? item rendered)
-                      ;; update in place if supported
-                      (do (p/dom-sync! item rendered)
-                          (let [next-anchor (p/dom-first item)]
+                ;; item not in proper position, find it and move it here
+                ;; FIXME: this starts looking at the front of the collection
+                ;; this might be a performance drain when collection is shuffled too much
+                :else
+                (let [old-idx (.indexOf items old-item)
+                      old-item (aget items old-idx)
+                      ^not-native managed (.-value old-item)
+                      rendered (.-value new-item)]
 
-                            ;; FIXME: this is probably not ideal
-                            (when (not= idx (get old-indexes key))
-                              (p/dom-insert item dom-parent anchor))
+                  (set! new-item -value managed)
 
-                            (recur next-anchor (dec idx) updated)))
+                  ;; just swap positions for now
+                  (let [^KeyedItem item-at-idx (aget items idx)]
+                    (set! item-at-idx -moved? true)
+                    (aset items old-idx item-at-idx)
+                    (aset items idx old-item))
 
-                      ;; not updateable, swap
-                      (let [new-item (p/as-managed rendered env)]
-                        (set! items (assoc items key new-item))
-                        (p/dom-insert new-item dom-parent anchor)
-                        (when dom-entered?
-                          (p/dom-entered! new-item))
-                        (p/destroy! item)
+                  (if (p/supports? managed rendered)
+                    ;; update in place if supported
+                    (do (p/dom-sync! managed rendered)
+                        (p/dom-insert managed dom-parent anchor)
+                        (recur (p/dom-first managed) (dec idx)))
 
-                        (recur (p/dom-first new-item) (dec idx) updated)
-                        ))))))]
+                    ;; not updatable, swap.
+                    ;; unlikely given that key was the same, result should be the same.
+                    ;; still possible though
+                    (let [new-managed (p/as-managed rendered env)]
+                      (p/dom-insert new-managed dom-parent anchor)
+                      (when dom-entered?
+                        (p/dom-entered! new-managed))
+                      (p/destroy! managed)
+                      (recur (p/dom-first new-managed) (dec idx))
+                      )))))))
 
         (set! item-keys new-keys)
-
-        ;; remove old items/render results
-        (reduce-kv
-          (fn [_ key item]
-            (when-not (contains? updated key)
-              (p/destroy! item)
-              (set! items (dissoc items key))))
-          nil
-          items)))
+        (set! items new-items)))
     :synced)
 
   (destroy! [this]
     (.remove marker-before)
-    (reduce-kv
-      (fn [_ _ item]
-        (p/destroy! item))
-      nil
-      items)
+    (.forEach items
+      (fn [item]
+        (p/destroy! ^not-native (.-value item))))
     (.remove marker-after)))
 
-;; FIXME: this shouldn't initialize everything in sync. might take too long
-;; could do work in chunks, maybe even check if items are visible at all?
-;; FIXME: with 6x throttle this already takes 150ms for 100 items
 (deftype KeyedCollectionInit [coll key-fn render-fn]
   p/IConstruct
   (as-managed [this env]
     (let [len (count coll)
           marker-before (js/document.createComment "coll-start")
-          marker-after (js/document.createComment "coll-end")]
+          marker-after (js/document.createComment "coll-end")
 
-      ;; FIXME: should find a way to remove the transient/persistent collections
-      ;; they account for at least 50% of the time spent here
-      ;; could maybe use an array and do the key->idx mapping sometime later
-      (loop [idx 0
-             items (transient {})
-             keys (transient [])]
+          items (js/Array. len)
 
-        (if (>= idx len)
-          (KeyedCollection.
-            env
-            coll
-            key-fn
-            render-fn
-            (persistent! items)
-            (persistent! keys)
-            marker-before
-            marker-after
-            false)
+          ;; {<key> <item>}, same instance as in array
+          keys
+          (reduce-kv
+            (fn [keys idx val]
+              (let [key (key-fn val)
+                    rendered (render-fn val idx key)
+                    managed (p/as-managed rendered env)
+                    item (KeyedItem. key managed false)]
 
-          (let [val (nth coll idx)
-                key (key-fn val)
-                rendered (render-fn val idx key)
-                managed (p/as-managed rendered env)]
+                (aset items idx item)
+                (assoc! keys key item)))
+            (transient {})
+            coll)]
 
-            (recur
-              (inc idx)
-              (assoc! items key managed)
-              (conj! keys key)
-              ))))))
+      (KeyedCollection.
+        env
+        coll
+        key-fn
+        render-fn
+        items
+        (persistent! keys)
+        marker-before
+        marker-after
+        false)))
 
   IEquiv
   (-equiv [this ^KeyedCollectionInit other]
@@ -295,17 +354,19 @@
          (= coll (.-coll other)))))
 
 (defn node [coll key-fn render-fn]
-  {:pre [(indexed? coll)
-         (counted? coll)
+  {:pre [(sequential? coll)
          (ifn? render-fn)]}
-  (cond
-    (zero? (count coll))
-    nil ;; can skip much unneeded work for empty colls
+  ;; we always need compatible collections
+  ;; but code looks inconvenient it it doesn't take lazy seqs
+  (let [coll (vec coll)]
+    (cond
+      (zero? (count coll))
+      nil ;; can skip much unneeded work for empty colls
 
-    ;; FIXME: should likely use simple path for really small colls
-    ;; or maybe some other metrics we can infer here?
-    (some? key-fn)
-    (KeyedCollectionInit. coll key-fn render-fn)
+      ;; FIXME: should likely use simple path for really small colls
+      ;; or maybe some other metrics we can infer here?
+      (some? key-fn)
+      (KeyedCollectionInit. coll key-fn render-fn)
 
-    :else
-    (SimpleCollectionInit. coll render-fn)))
+      :else
+      (SimpleCollectionInit. coll render-fn))))
