@@ -56,6 +56,8 @@
       (let [old-len (-count old-coll)
             new-len (-count new-coll)
 
+            ;; array of KeyedItem with value being managed instance
+            old-items items
             ;; array of KeyedItem but value is just the render result for now
             new-items (js/Array. new-len)
 
@@ -71,7 +73,7 @@
                     (aset new-items idx item)
                     (-assoc! keys key item)))
                 (-as-transient {})
-                coll))]
+                new-coll))]
 
         (when (not= (-count new-keys) new-len)
           (throw (ex-info "collection contains duplicated keys" {})))
@@ -79,7 +81,7 @@
         ;; now remove item when key no longer exists
         (loop [idx (dec old-len)]
           (when-not (neg? idx)
-            (let [^KeyedItem item (aget items idx)]
+            (let [^KeyedItem item (aget old-items idx)]
               (when-not (contains? new-keys (.-key item))
                 (p/destroy! (.-value item))
                 ;; FIXME: what is most costly?
@@ -87,7 +89,7 @@
                 ;; or pushing stuff into a new array (without the new items)
                 ;; probably dependent on size and how many we remove?
                 ;; likely won't matter much but might be worth testing, code is more or less the same
-                (.splice items idx 1)))
+                (.splice old-items idx 1)))
 
             (recur (dec idx))))
 
@@ -127,7 +129,7 @@
                   (recur (p/dom-first managed) (dec idx)))
 
                 ;; item in same position, render update, move only when item was previously moved
-                (identical? old-item (aget items idx))
+                (identical? old-item (aget old-items idx))
                 (let [^not-native managed (.-value old-item)
                       rendered (.-value new-item)]
                   (if (p/supports? managed rendered)
@@ -160,18 +162,18 @@
                 ;; FIXME: this starts looking at the front of the collection
                 ;; this might be a performance drain when collection is shuffled too much
                 :else
-                (let [old-idx (.indexOf items old-item)
-                      old-item (aget items old-idx)
+                (let [old-idx (.indexOf old-items old-item)
+                      old-item (aget old-items old-idx)
                       ^not-native managed (.-value old-item)
                       rendered (.-value new-item)]
 
                   (set! new-item -value managed)
 
                   ;; just swap positions for now
-                  (let [^KeyedItem item-at-idx (aget items idx)]
+                  (let [^KeyedItem item-at-idx (aget old-items idx)]
                     (set! item-at-idx -moved? true)
-                    (aset items old-idx item-at-idx)
-                    (aset items idx old-item))
+                    (aset old-items old-idx item-at-idx)
+                    (aset old-items idx old-item))
 
                   (if (p/supports? managed rendered)
                     ;; update in place if supported
