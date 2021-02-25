@@ -50,8 +50,8 @@
         (throw (ex-info "sync while not in dom?" {})))
 
       (set! coll new-coll)
-      (set! key-fn (.-key-fn next))
-      (set! render-fn (.-render-fn next))
+      (set! key-fn (common/ifn1-wrap (.-key-fn next)))
+      (set! render-fn (common/ifn3-wrap (.-render-fn next)))
 
       (let [old-len (-count old-coll)
             new-len (-count new-coll)
@@ -208,6 +208,9 @@
           marker-before (js/document.createComment "coll-start")
           marker-after (js/document.createComment "coll-end")
 
+          kfn (common/ifn1-wrap key-fn)
+          rfn (common/ifn3-wrap render-fn)
+
           items (js/Array. len)
 
           ;; {<key> <item>}, same instance as in array
@@ -215,8 +218,8 @@
           (persistent!
             (reduce-kv
               (fn [keys idx val]
-                (let [key (key-fn val)
-                      rendered (render-fn val idx key)
+                (let [key (kfn val)
+                      rendered (rfn val idx key)
                       managed (p/as-managed rendered env)
                       item (KeyedItem. key managed false)]
 
@@ -231,8 +234,8 @@
       (KeyedCollection.
         env
         coll
-        key-fn
-        render-fn
+        kfn
+        rfn
         items
         keys
         marker-before
@@ -268,12 +271,16 @@
 
   (dom-insert [this parent anchor]
     (.insertBefore parent marker-before anchor)
-    (run! #(p/dom-insert % parent anchor) items)
+    (.forEach items
+      (fn [^not-native item]
+        (p/dom-insert item parent anchor)))
     (.insertBefore parent marker-after anchor))
 
   (dom-entered! [this]
     (set! dom-entered? true)
-    (run! #(p/dom-entered! ^not-native %) items))
+    (.forEach items
+      (fn [^not-native item]
+        (p/dom-entered! item))))
 
   (supports? [this next]
     (instance? SimpleCollectionInit next))
@@ -292,7 +299,7 @@
         (throw (ex-info "sync while not in dom?" {})))
 
       (set! coll new-coll)
-      (set! render-fn (.-render-fn next))
+      (set! render-fn (common/ifn2-wrap (.-render-fn next)))
 
       (dotimes [idx max-idx]
         (let [item (aget items idx)
@@ -335,7 +342,9 @@
 
   (destroy! [this]
     (.remove marker-before)
-    (run! #(p/destroy! ^not-native %) items)
+    (.forEach items
+      (fn [^not-native item]
+        (p/destroy! item)))
     (.remove marker-after)))
 
 (deftype SimpleCollectionInit [coll render-fn]
@@ -343,15 +352,16 @@
   (as-managed [this env]
     (let [marker-before (js/document.createComment "coll-start")
           marker-after (js/document.createComment "coll-end")
-          arr (js/Array. (count coll))]
+          arr (js/Array. (count coll))
+          rfn (common/ifn2-wrap render-fn)]
 
       (reduce-kv
         (fn [_ idx val]
-          (aset arr idx (p/as-managed (render-fn val idx) env)))
+          (aset arr idx (p/as-managed (rfn val idx) env)))
         nil
         coll)
 
-      (SimpleCollection. env coll render-fn arr marker-before marker-after false)))
+      (SimpleCollection. env coll rfn arr marker-before marker-after false)))
 
   IEquiv
   (-equiv [this ^SimpleCollectionInit other]
@@ -375,7 +385,7 @@
       ;; FIXME: should likely use simple path for really small colls
       ;; or maybe some other metrics we can infer here?
       (some? key-fn)
-      (KeyedCollectionInit. coll (common/ifn1-wrap key-fn) (common/ifn3-wrap render-fn))
+      (KeyedCollectionInit. coll key-fn render-fn)
 
       :else
-      (SimpleCollectionInit. coll (common/ifn2-wrap render-fn)))))
+      (SimpleCollectionInit. coll render-fn))))
