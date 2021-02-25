@@ -6,9 +6,6 @@
 
 (declare KeyedCollectionInit)
 
-(defn index-map ^not-native [key-vec]
-  (persistent! (reduce-kv #(assoc! %1 %3 %2) (transient {}) key-vec)))
-
 (deftype KeyedItem [key value moved?])
 
 (deftype KeyedCollection
@@ -78,119 +75,111 @@
         (when (not= (-count new-keys) new-len)
           (throw (ex-info "collection contains duplicated keys" {})))
 
-        ;; now remove item when key no longer exists
-        (loop [idx (dec old-len)]
-          (when-not (neg? idx)
-            (let [^KeyedItem item (aget old-items idx)]
-              (when-not (contains? new-keys (.-key item))
-                (p/destroy! (.-value item))
-                ;; FIXME: what is most costly?
-                ;; splicing the existing array
-                ;; or pushing stuff into a new array (without the new items)
-                ;; probably dependent on size and how many we remove?
-                ;; likely won't matter much but might be worth testing, code is more or less the same
-                (.splice old-items idx 1)))
+        (let [old-items
+              (.filter old-items
+                (fn [^KeyedItem item]
+                  (if (contains? new-keys (.-key item))
+                    true
+                    (do (p/destroy! (.-value item))
+                        false))))]
 
-            (recur (dec idx))))
+          ;; old-items now matches what is in the DOM and only contains items still present in new coll
 
-        ;; items array now contains all the old items without the deleted ones
-        ;; if this contains less items than new-coll then something new was added as well
-        ;; if the length is the same then only one or more items were removed
+          ;; this can never be more items than the new coll
+          ;; but it might be less in cases where items were removed
 
-        ;; don't really need this anywhere though?
-        ;; new-items?
-        ;; (not= new-len (alength items))
+          ;; now going backwards over the new collection and apply render results to items
+          ;; reverse order because of only being able to insert before anchor
 
-        ;; now go backwards over the new collection and apply render results to items
-        ;; reverse order because of only being able to insert before anchor
+          ;; will create new items while traversing
+          ;; will move items when required
 
-        ;; will create new items while traversing
-        ;; will move items when required
+          (loop [anchor marker-after
+                 idx (dec new-len)
+                 old-idx (dec (alength old-items))]
 
-        (loop [anchor marker-after
-               idx (dec new-len)]
+            (when-not (neg? idx)
+              (let [new-item (aget new-items idx)
+                    old-item (get item-keys (.-key new-item))]
 
-          (when-not (neg? idx)
-            (let [new-item (aget new-items idx)
-                  old-item (get item-keys (.-key new-item))]
+                (cond
+                  ;; item does not exist in old coll, just create and insert
+                  (not old-item)
+                  (let [managed (p/as-managed (.-value new-item) env)]
+                    (p/dom-insert managed dom-parent anchor)
+                    (when dom-entered?
+                      (p/dom-entered! managed))
 
-              (cond
-                ;; item does not exist in old coll, just create and insert
-                (not old-item)
-                (let [managed (p/as-managed (.-value new-item) env)]
-                  (p/dom-insert managed dom-parent anchor)
-                  (when dom-entered?
-                    (p/dom-entered! managed))
+                    (set! new-item -value managed)
 
-                  (set! new-item -value managed)
+                    ;; FIXME: can there be a case where there is an actual item in items at this idx?
 
-                  ;; FIXME: can there be a case where there is an actual item in items at this idx?
+                    (recur (p/dom-first managed) (dec idx) old-idx))
 
-                  (recur (p/dom-first managed) (dec idx)))
+                  ;; item in same position, render update, move only when item was previously moved
+                  (identical? old-item (aget old-items old-idx))
+                  (let [^not-native managed (.-value old-item)
+                        rendered (.-value new-item)]
+                    (if (p/supports? managed rendered)
+                      ;; update in place if supported
+                      (do (p/dom-sync! managed rendered)
+                          (set! new-item -value managed)
 
-                ;; item in same position, render update, move only when item was previously moved
-                (identical? old-item (aget old-items idx))
-                (let [^not-native managed (.-value old-item)
-                      rendered (.-value new-item)]
-                  (if (p/supports? managed rendered)
-                    ;; update in place if supported
-                    (do (p/dom-sync! managed rendered)
-                        (set! new-item -value managed)
+                          ;; item was previously moved, move in DOM now
+                          (when (.-moved? old-item)
+                            ;; don't need to do this I think, never using old-item again
+                            ;; (set! old-item -moved? false)
+                            (p/dom-insert managed dom-parent anchor))
 
-                        ;; item was previously moved, move in DOM now
-                        (when (.-moved? old-item)
-                          ;; don't need to do this I think, never using old-item again
-                          ;; (set! old-item -moved? false)
-                          (p/dom-insert managed dom-parent anchor))
+                          (let [next-anchor (p/dom-first managed)]
+                            (recur next-anchor (dec idx) (dec old-idx))))
 
-                        (let [next-anchor (p/dom-first managed)]
-                          (recur next-anchor (dec idx))))
+                      ;; not updatable, swap.
+                      ;; unlikely given that key was the same, result should be the same.
+                      ;; still possible though
+                      (let [new-managed (p/as-managed rendered env)]
+                        (p/dom-insert new-managed dom-parent anchor)
+                        (when dom-entered?
+                          (p/dom-entered! new-managed))
+                        (p/destroy! managed)
+                        (set! new-item -value new-managed)
+                        (recur (p/dom-first new-managed) (dec idx) (dec old-idx))
+                        )))
 
-                    ;; not updatable, swap.
-                    ;; unlikely given that key was the same, result should be the same.
-                    ;; still possible though
-                    (let [new-managed (p/as-managed rendered env)]
-                      (p/dom-insert new-managed dom-parent anchor)
-                      (when dom-entered?
-                        (p/dom-entered! new-managed))
-                      (p/destroy! managed)
-                      (set! new-item -value new-managed)
-                      (recur (p/dom-first new-managed) (dec idx))
-                      )))
+                  ;; item not in proper position, find it and move it here
+                  ;; FIXME: this starts looking at the front of the collection
+                  ;; this might be a performance drain when collection is shuffled too much
+                  :else
+                  (let [seek-idx (.indexOf old-items old-item)
+                        old-item (aget old-items seek-idx)
+                        ^not-native managed (.-value old-item)
+                        rendered (.-value new-item)
 
-                ;; item not in proper position, find it and move it here
-                ;; FIXME: this starts looking at the front of the collection
-                ;; this might be a performance drain when collection is shuffled too much
-                :else
-                (let [old-idx (.indexOf old-items old-item)
-                      old-item (aget old-items old-idx)
-                      ^not-native managed (.-value old-item)
-                      rendered (.-value new-item)]
+                        ;; current tail item
+                        ^KeyedItem item-at-idx (aget old-items old-idx)]
 
-                  (set! new-item -value managed)
+                    (set! new-item -value managed)
 
-                  ;; just swap positions for now
-                  (let [^KeyedItem item-at-idx (aget old-items idx)]
                     (set! item-at-idx -moved? true)
-                    (aset old-items old-idx item-at-idx)
-                    (aset old-items idx old-item))
+                    (aset old-items seek-idx item-at-idx)
+                    (aset old-items old-idx old-item)
 
-                  (if (p/supports? managed rendered)
-                    ;; update in place if supported
-                    (do (p/dom-sync! managed rendered)
-                        (p/dom-insert managed dom-parent anchor)
-                        (recur (p/dom-first managed) (dec idx)))
+                    (if (p/supports? managed rendered)
+                      ;; update in place if supported
+                      (do (p/dom-sync! managed rendered)
+                          (p/dom-insert managed dom-parent anchor)
+                          (recur (p/dom-first managed) (dec idx) (dec old-idx)))
 
-                    ;; not updatable, swap.
-                    ;; unlikely given that key was the same, result should be the same.
-                    ;; still possible though
-                    (let [new-managed (p/as-managed rendered env)]
-                      (p/dom-insert new-managed dom-parent anchor)
-                      (when dom-entered?
-                        (p/dom-entered! new-managed))
-                      (p/destroy! managed)
-                      (recur (p/dom-first new-managed) (dec idx))
-                      )))))))
+                      ;; not updatable, swap.
+                      ;; unlikely given that key was the same, result should be the same.
+                      ;; still possible though
+                      (let [new-managed (p/as-managed rendered env)]
+                        (p/dom-insert new-managed dom-parent anchor)
+                        (when dom-entered?
+                          (p/dom-entered! new-managed))
+                        (p/destroy! managed)
+                        (recur (p/dom-first new-managed) (dec idx) (dec old-idx))
+                        ))))))))
 
         (set! item-keys new-keys)
         (set! items new-items)))
@@ -207,8 +196,8 @@
   p/IConstruct
   (as-managed [this env]
     (let [len (count coll)
-          marker-before (js/document.createComment "coll-start")
-          marker-after (js/document.createComment "coll-end")
+          marker-before (common/dom-marker env "coll-start")
+          marker-after (common/dom-marker env "coll-end")
 
           kfn (common/ifn1-wrap key-fn)
           rfn (common/ifn3-wrap render-fn)
@@ -352,8 +341,8 @@
 (deftype SimpleCollectionInit [coll render-fn]
   p/IConstruct
   (as-managed [this env]
-    (let [marker-before (js/document.createComment "coll-start")
-          marker-after (js/document.createComment "coll-end")
+    (let [marker-before (common/dom-marker env "coll-start")
+          marker-after (common/dom-marker env "coll-end")
           arr (js/Array. (count coll))
           rfn (common/ifn2-wrap render-fn)]
 
