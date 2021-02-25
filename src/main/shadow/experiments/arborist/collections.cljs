@@ -14,8 +14,8 @@
 (deftype KeyedCollection
   [env
    ^:mutable coll
-   ^:mutable key-fn
-   ^:mutable render-fn
+   ^:mutable ^function key-fn
+   ^:mutable ^function render-fn
    ^:mutable items ;; array of KeyedItem instances
    ^:mutable item-keys ;; map of key -> items index
    marker-before
@@ -61,16 +61,16 @@
 
             ;; traverse new coll once to build key map and render items
             ^not-native new-keys
-            (persistent!
+            (-persistent!
               (reduce-kv
-                (fn [keys idx val]
+                (fn [^not-native keys idx val]
                   (let [key (key-fn val)
                         rendered (render-fn val idx key)
                         item (KeyedItem. key rendered false)]
 
                     (aset new-items idx item)
-                    (assoc! keys key item)))
-                (transient {})
+                    (-assoc! keys key item)))
+                (-as-transient {})
                 coll))]
 
         (when (not= (-count new-keys) new-len)
@@ -256,7 +256,7 @@
 (deftype SimpleCollection
   [env
    ^:mutable coll
-   ^:mutable render-fn
+   ^:mutable ^function render-fn
    ^:mutable ^array items
    marker-before
    marker-after
@@ -375,7 +375,7 @@
       ;; FIXME: should likely use simple path for really small colls
       ;; or maybe some other metrics we can infer here?
       (some? key-fn)
-      (KeyedCollectionInit. coll key-fn render-fn)
+      (KeyedCollectionInit. coll (common/ifn1-wrap key-fn) (common/ifn3-wrap render-fn))
 
       :else
-      (SimpleCollectionInit. coll render-fn))))
+      (SimpleCollectionInit. coll (common/ifn2-wrap render-fn)))))

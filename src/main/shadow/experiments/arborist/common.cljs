@@ -3,6 +3,39 @@
     [goog.dom :as gdom]
     [shadow.experiments.arborist.protocols :as p]))
 
+;; helper functions that lets us bypass the common CLJS ifn dispatch check
+;; helpful in hot loops or places where the same function (or ifn) is called multiple times
+;; and we just want to avoid the extra generated code
+
+;; in certain places we care about calling instead a function directly
+;;   x(y)
+
+;; instead of the inline check
+;;   x.cljs$core$IFn$_invoke$arity$1 ? x.cljs$core$IFn$_invoke$arity$1(y) : x.call(y)
+
+;; I'm sure JS engines are smart enough to skip the check after a while but best not to rely on it
+;; also generates less code which is always good
+
+;; never call these in a hot loop, better to leave the check for those cases
+
+(defn ifn1-wrap ^function [x]
+  (if ^boolean (.-cljs$core$IFn$_invoke$arity$1 x)
+    (fn [a]
+      (.cljs$core$IFn$_invoke$arity$1 x a))
+    x))
+
+(defn ifn2-wrap ^function [x]
+  (if ^boolean (.-cljs$core$IFn$_invoke$arity$2 x)
+    (fn [a b c]
+      (.cljs$core$IFn$_invoke$arity$2 x a b))
+    x))
+
+(defn ifn3-wrap ^function [x]
+  (if ^boolean (.-cljs$core$IFn$_invoke$arity$3 x)
+    (fn [a b c]
+      (.cljs$core$IFn$_invoke$arity$3 x a b c))
+    x))
+
 (defn dom-marker [env]
   (js/document.createTextNode ""))
 
