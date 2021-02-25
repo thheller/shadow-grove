@@ -73,6 +73,10 @@
                 (transient {})
                 coll))
 
+            _
+            (when (not= (count new-keys) new-len)
+              (throw (ex-info "collection contains duplicated keys" {})))
+
             _ ;; now remove item when key no longer exists
             (loop [idx (dec old-len)]
               (when (nat-int? idx)
@@ -207,17 +211,21 @@
 
           ;; {<key> <item>}, same instance as in array
           keys
-          (reduce-kv
-            (fn [keys idx val]
-              (let [key (key-fn val)
-                    rendered (render-fn val idx key)
-                    managed (p/as-managed rendered env)
-                    item (KeyedItem. key managed false)]
+          (persistent!
+            (reduce-kv
+              (fn [keys idx val]
+                (let [key (key-fn val)
+                      rendered (render-fn val idx key)
+                      managed (p/as-managed rendered env)
+                      item (KeyedItem. key managed false)]
 
-                (aset items idx item)
-                (assoc! keys key item)))
-            (transient {})
-            coll)]
+                  (aset items idx item)
+                  (assoc! keys key item)))
+              (transient {})
+              coll))]
+
+      (when (not= (count keys) len)
+        (throw (ex-info "collection contains duplicated keys" {})))
 
       (KeyedCollection.
         env
@@ -225,7 +233,7 @@
         key-fn
         render-fn
         items
-        (persistent! keys)
+        keys
         marker-before
         marker-after
         false)))
