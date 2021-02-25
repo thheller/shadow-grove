@@ -14,54 +14,67 @@
 (defn vec-conj [x y]
   (if (nil? x) [y] (conj x y)))
 
+(defn js-set-union [a b]
+  (.forEach b (fn [x] (.add a x))))
+
 (defn reduce-> [init rfn coll]
   (reduce rfn init coll))
 
-(defn index-query* [idx query query-keys]
-  (reduce
-    (fn [idx key]
-      (update idx key set-conj query))
-    idx
-    query-keys))
-
-(defn index-query-diff* [idx query prev-keys next-keys]
-  (-> idx
-      ;; add new keys
-      (reduce->
-        (fn [idx key]
-          (if (contains? prev-keys key)
-            idx
-            (update idx key set-conj query)))
-        next-keys)
-
-      ;; delete keys no longer used
-      (reduce->
-        (fn [idx key]
-          (if (contains? next-keys key)
-            idx
-            (update idx key disj query)))
-        prev-keys)))
+;; FIXME: this needs some kind of GC
+;; currently does not remove empty sets from query-index-map
 
 (defn index-query
-  [{::rt/keys [query-index-ref] :as env} query prev-keys next-keys]
-  ;; FIXME: should the index be using the query-id instead of the query?
-  ;; its an int so it could fall back to using js/Set or an object?
-  ;; can't use js colls for keys though
-  (if (nil? prev-keys)
-    ;; first run, no need to diff keys
-    (swap! query-index-ref index-query* query next-keys)
-    (swap! query-index-ref index-query-diff* query prev-keys next-keys)))
+  [{::rt/keys [key-index-seq key-index-ref query-index-map]} query-id prev-keys next-keys]
+  (let [key-index @key-index-ref]
 
-(defn unindex-query* [idx query query-keys]
-  (reduce
-    (fn [idx key]
-      (update idx key disj query))
-    idx
-    query-keys))
+    ;; index keys that weren't used previously
+    (reduce
+      (fn [_ key]
+        (when-not (contains? prev-keys key)
+          (let [key-idx
+                (or (get key-index key)
+                    (let [idx (swap! key-index-seq inc)]
+                      (swap! key-index-ref assoc key idx)
+                      idx))
+
+                query-set
+                (or (.get query-index-map key-idx)
+                    (let [query-set (js/Set.)]
+                      (.set query-index-map key-idx query-set)
+                      query-set))]
+
+            (.add query-set query-id)))
+        nil)
+      nil
+      next-keys)
+
+    ;; remove old keys that are no longer used
+    (when prev-keys
+      (reduce
+        (fn [_ key]
+          (when-not (contains? next-keys key)
+            (let [key-idx (get key-index key)
+                  query-set (.get query-index-map key-idx)]
+              (.delete query-set query-id))))
+        nil
+        prev-keys))))
 
 (defn unindex-query
-  [env query keys]
-  (swap! (::rt/query-index-ref env) unindex-query* query keys))
+  [{::rt/keys [key-index-seq key-index-ref query-index-map]} query-id keys]
+
+  (let [key-index @key-index-ref]
+    (reduce
+      (fn [_ key]
+        (let [key-idx
+              (or (get key-index key)
+                  (let [idx (swap! key-index-seq inc)]
+                    (swap! key-index-ref assoc key idx)
+                    idx))]
+
+          (let [query-set (.get query-index-map key-idx)]
+            (.delete query-set query-id))))
+      nil
+      keys)))
 
 (defn invalidate-keys!
   [env keys-new keys-removed keys-updated]
@@ -87,31 +100,34 @@
   ;; maybe instead of just (dissoc db key) it could (assoc db key :db/removed)
   ;; so on query we could detect deleted data and have the query choose how to handle it?
 
-  (let [keys-to-invalidate
-        (set/union keys-new keys-updated)
-
+  (let [keys-to-invalidate (set/union keys-new keys-updated)
         idx @(::rt/query-index-ref env)
 
-        queries
-        (persistent!
-          (reduce
-            (fn [queries key]
-              (let [used-by (get idx key)]
-                (if-not (seq used-by)
-                  queries
-                  (reduce conj! queries used-by))))
+        active-queries @(::rt/active-queries-ref env)
 
-            (transient #{})
-            keys-to-invalidate))]
+        query-index-map (::rt/query-index-map env)
+        key-index @(::rt/key-index-ref env)
+
+        query-ids (js/Set.)]
+
+    (reduce
+      (fn [_ key]
+        ;; key might not be used by any query so might not have an id
+        (when-some [key-id (get key-index key)]
+          ;; same here
+          (when-some [query-set (.get query-index-map key-id)]
+            (js-set-union query-ids query-set))))
+
+      nil
+      keys-to-invalidate)
 
     ;; just refreshes all affected queries in no deterministic order
     ;; each query will figure out on its own if if actually triggers an update
     ;; FIXME: figure out if this can be smarter
-    (reduce
-      (fn [_ #?(:clj query :cljs ^IQuery query)]
-        (query-refresh! query))
-      nil
-      queries)))
+    (.forEach query-ids
+      (fn [query-id]
+        (let [query (get active-queries query-id)]
+          (query-refresh! query))))))
 
 (defn tx*
   [{::rt/keys [data-ref event-config fx-config]

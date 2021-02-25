@@ -46,7 +46,7 @@
           new-keys (db/observed-keys observed-data)]
 
       ;; remember this even if query is still loading
-      (ev/index-query env this read-keys new-keys)
+      (ev/index-query env query-id read-keys new-keys)
       (set! read-keys new-keys)
 
       ;; if query is still loading don't send to main
@@ -68,7 +68,7 @@
 
   (destroy! [this]
     (set! destroyed? true)
-    (ev/unindex-query env this read-keys)))
+    (ev/unindex-query env query-id read-keys)))
 
 (defmulti worker-message (fn [env msg] (first msg)) :default ::default)
 

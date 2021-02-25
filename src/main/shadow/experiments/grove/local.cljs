@@ -33,7 +33,7 @@
           new-keys (db/observed-keys observed-data)]
 
       ;; remember this even if query is still loading
-      (ev/index-query env this read-keys new-keys)
+      (ev/index-query env query-id read-keys new-keys)
       (set! read-keys new-keys)
 
       ;; if query is still loading don't send to main
@@ -52,7 +52,7 @@
 
   (destroy! [this]
     (set! destroyed? true)
-    (ev/unindex-query @rt-ref this read-keys)))
+    (ev/unindex-query @rt-ref query-id read-keys)))
 
 (deftype LocalEngine [rt-ref active-queries-ref]
   gp/IQueryEngine

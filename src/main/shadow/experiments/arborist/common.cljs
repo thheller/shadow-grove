@@ -36,8 +36,13 @@
       (.cljs$core$IFn$_invoke$arity$3 x a b c))
     x))
 
-(defn dom-marker [env]
-  (js/document.createTextNode ""))
+(defn dom-marker
+  ([env]
+   (js/document.createTextNode ""))
+  ([env label]
+   (if ^boolean js/goog.DEBUG
+     (js/document.createComment label)
+     (js/document.createTextNode ""))))
 
 (defn in-document? [el]
   (gdom/isInDocument el))

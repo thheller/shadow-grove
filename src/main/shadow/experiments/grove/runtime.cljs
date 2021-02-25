@@ -15,6 +15,9 @@
                    ::event-config {}
                    ::fx-config {}
                    ::active-queries-ref (atom {})
+                   ::key-index-seq (atom 0)
+                   ::key-index-ref (atom {})
+                   ::query-index-map (js/Map.)
                    ::query-index-ref (atom {}))
             (atom))]
 
