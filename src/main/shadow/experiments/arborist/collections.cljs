@@ -6,7 +6,10 @@
 
 (declare KeyedCollectionInit)
 
-(deftype KeyedItem [key value moved?])
+(deftype KeyedItem [key value moved?]
+  IHash
+  (-hash [this]
+    (js/goog.getUid this)))
 
 (deftype KeyedCollection
   [env

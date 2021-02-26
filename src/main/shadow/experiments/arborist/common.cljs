@@ -56,7 +56,7 @@
     (p/destroy! old-managed)
     new-managed))
 
-(defn replace-managed [env old nval]
+(defn replace-managed ^not-native [env old nval]
   (let [new (p/as-managed nval env)]
     (fragment-replace old new)))
 

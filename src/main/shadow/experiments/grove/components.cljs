@@ -239,11 +239,12 @@
       (.remove (.-marker-before this))
       (.remove (.-marker-after this)))
     (set! destroyed? true)
-    (run!
-      (fn [hook]
+
+    (.forEach hooks
+      (fn [^not-native hook]
         (when hook
-          (gp/hook-destroy! hook)))
-      hooks)
+          (gp/hook-destroy! hook))))
+
     (p/destroy! root))
 
   ;; FIXME: figure out default event handler

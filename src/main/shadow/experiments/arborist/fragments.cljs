@@ -146,11 +146,11 @@
 (defn update-managed [^ManagedFragment fragment env nodes idx oval nval]
   ;; not comparing oval/nval because impls can do that if needed
   (let [^not-native el (aget nodes idx)]
-    (if (p/supports? el nval)
+    (if ^boolean (p/supports? el nval)
       (p/dom-sync! el nval)
       (let [next (common/replace-managed env el nval)]
         (aset nodes idx next)
-        (when (.-dom-entered? fragment)
+        (when ^boolean (.-dom-entered? fragment)
           (p/dom-entered! next))))))
 
 ;; called by macro generated code
