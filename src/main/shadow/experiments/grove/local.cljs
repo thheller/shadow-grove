@@ -29,13 +29,14 @@
 
   Object
   (do-read! [this]
-    (let [env @rt-ref
-          observed-data (db/observed @(::rt/data-ref env))
-          result (eql/query env observed-data query)
+    (let [query-env @rt-ref
+          observed-data (db/observed @(::rt/data-ref query-env))
+          result (eql/query query-env observed-data query)
           new-keys (db/observed-keys observed-data)]
 
       ;; remember this even if query is still loading
-      (ev/index-query env query-id read-keys new-keys)
+      (ev/index-query query-env query-id read-keys new-keys)
+
       (set! read-keys new-keys)
 
       ;; if query is still loading don't send to main
@@ -62,26 +63,21 @@
    ^:mutable config
    component
    idx
-   env
-   query-engine
+   rt-ref
+   active-queries-ref
    query-id
    ^:mutable ready?
+   ^:mutable read-count
+   ^:mutable read-keys
    ^:mutable read-result]
 
   gp/IHook
   (hook-init! [this]
-    (.register-query! this)
+    (.do-read! this))
 
-    ;; async query will suspend
-    ;; regular query should just proceed immediately
-    (when-not (some? read-result)
-      (.set-loading! this)))
-
-  (hook-ready? [this]
-    (or (false? (:suspend config)) ready?))
-
-  (hook-value [this]
-    read-result)
+  ;; FIXME: suspend support is missing
+  (hook-ready? [this] ready?)
+  (hook-value [this] read-result)
 
   ;; node deps changed, check if query changed
   (hook-deps-update! [this ^QueryHook val]
@@ -89,55 +85,71 @@
              (= query (.-query val))
              (= config (.-config val)))
       false
-      ;; query changed, remove it entirely and wait for new one
-      (do (.unregister-query! this)
-          (set! ident (.-ident val))
+      ;; query changed, perform read immediately
+      (do (set! ident (.-ident val))
           (set! query (.-query val))
           (set! config (.-config val))
-          (.set-loading! this)
-          (.register-query! this)
-          true)))
+          (let [old-result read-result]
+            (.do-read! this)
+            (not= old-result read-result)))))
 
-  ;; node was invalidated and needs update, but its dependencies didn't change
+  ;; node was invalidated and needs update
   (hook-update! [this]
-    true)
+    (let [old-result read-result]
+      (.do-read! this)
+      (not= old-result read-result)))
 
   (hook-destroy! [this]
-    (.unregister-query! this))
+    (ev/unindex-query @rt-ref query-id read-keys)
+    (swap! active-queries-ref dissoc query-id))
+
+  ev/IQuery
+  (query-refresh! [this]
+    (if-not ready?
+      (comp/hook-ready! component idx)
+      (comp/hook-invalidate! component idx)))
 
   Object
-  (register-query! [this]
-    (gp/query-init query-engine query-id (if ident [{ident query}] query) config
-      (fn [result]
-        (.set-data! this result))))
+  (do-read! [this]
+    ;; query env is not the component env
+    (let [query-env @rt-ref
+          observed-data (db/observed @(::rt/data-ref query-env))
 
-  (unregister-query! [this]
-    (gp/query-destroy query-engine query-id))
+          db-query (if ident [{ident query}] query)
+          result (eql/query query-env observed-data db-query)
 
-  (set-loading! [this]
-    (set! ready? (false? (:suspend config)))
-    (set! read-result (assoc (:default config {}) ::loading-state :loading)))
+          new-keys (db/observed-keys observed-data)]
 
-  (set-data! [this data]
-    (let [data (if ident (get data ident) data)
-          first-run? (nil? read-result)]
-      (set! read-result (assoc data ::loading-state :ready))
+      (ev/index-query query-env query-id read-keys new-keys)
 
-      ;; first run may provide result immedialy in which case which don't need to tell the
-      ;; component that we are ready separately, it'll just check ready? on its own
-      ;; async queries never have their data immediately ready and will suspend unless configured not to
-      (if first-run?
-        (set! ready? true)
-        (if ready?
-          (comp/hook-invalidate! component idx)
-          (do (comp/hook-ready! component idx)
-              (set! ready? true)))))))
+      (set! read-keys new-keys)
+
+      (if (keyword-identical? result :db/loading)
+        (set! read-result {})
+        (do (set! read-result (if ident (get result ident) result))
+            (set! ready? true))))))
 
 (deftype LocalEngine [rt-ref active-queries-ref]
   gp/IQueryEngine
   (query-hook-build [this env component idx ident query config]
-    (QueryHook. ident query config component idx env this (util/next-id) false nil))
+    (let [query-id (util/next-id)
+          hook (QueryHook.
+                 ident
+                 query
+                 config
+                 component
+                 idx
+                 rt-ref
+                 active-queries-ref
+                 query-id
+                 false
+                 0
+                 nil
+                 nil)]
+      (swap! active-queries-ref assoc query-id hook)
+      hook))
 
+  ;; direct query, hooks don't use this
   (query-init [this query-id query config callback]
     (let [q (ActiveQuery. rt-ref query-id query callback nil nil false)]
       (swap! active-queries-ref assoc query-id q)
