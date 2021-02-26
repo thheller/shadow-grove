@@ -31,91 +31,16 @@
   ;; FIXME: should schedule properly when it isn't in event handler already
   (gp/handle-event! parent ev-map nil))
 
-(deftype QueryHook
-  [^:mutable ident
-   ^:mutable query
-   ^:mutable config
-   component
-   idx
-   env
-   query-engine
-   query-id
-   ^:mutable ready?
-   ^:mutable read-result]
-
+(deftype QueryInit [ident query config]
   gp/IBuildHook
-  (hook-build [this c i]
+  (hook-build [this component idx]
     ;; support multiple query engines by allowing queries to supply which key to use
-    (let [env (comp/get-env c)
+    (let [env (comp/get-env component)
           engine-key (:engine config ::gp/query-engine)
           query-engine (get env engine-key)]
+
       (assert query-engine (str "no query engine in env for key " engine-key))
-      (QueryHook. ident query config c i env query-engine (util/next-id) false nil)))
-
-  gp/IHook
-  (hook-init! [this]
-    (.register-query! this)
-
-    ;; async query will suspend
-    ;; regular query should just proceed immediately
-    (when-not (some? read-result)
-      (.set-loading! this)))
-
-  (hook-ready? [this]
-    (or (false? (:suspend config)) ready?))
-
-  (hook-value [this]
-    read-result)
-
-  ;; node deps changed, check if query changed
-  (hook-deps-update! [this ^QueryHook val]
-    (if (and (= ident (.-ident val))
-             (= query (.-query val))
-             (= config (.-config val)))
-      false
-      ;; query changed, remove it entirely and wait for new one
-      (do (.unregister-query! this)
-          (set! ident (.-ident val))
-          (set! query (.-query val))
-          (set! config (.-config val))
-          (.set-loading! this)
-          (.register-query! this)
-          true)))
-
-  ;; node was invalidated and needs update, but its dependencies didn't change
-  (hook-update! [this]
-    true)
-
-  (hook-destroy! [this]
-    (.unregister-query! this))
-
-  Object
-  (register-query! [this]
-    (gp/query-init query-engine query-id (if ident [{ident query}] query) config
-      (fn [result]
-        (.set-data! this result))))
-
-  (unregister-query! [this]
-    (gp/query-destroy query-engine query-id))
-
-  (set-loading! [this]
-    (set! ready? (false? (:suspend config)))
-    (set! read-result (assoc (:default config {}) ::loading-state :loading)))
-
-  (set-data! [this data]
-    (let [data (if ident (get data ident) data)
-          first-run? (nil? read-result)]
-      (set! read-result (assoc data ::loading-state :ready))
-
-      ;; first run may provide result immedialy in which case which don't need to tell the
-      ;; component that we are ready separately, it'll just check ready? on its own
-      ;; async queries never have their data immediately ready and will suspend unless configured not to
-      (if first-run?
-        (set! ready? true)
-        (if ready?
-          (comp/hook-invalidate! component idx)
-          (do (comp/hook-ready! component idx)
-              (set! ready? true)))))))
+      (gp/query-hook-build query-engine env component idx ident query config))))
 
 (defn query-ident
   ([ident query]
@@ -126,7 +51,7 @@
           (keyword? (first ident))
           (vector? query)
           (map? config)]}
-   (QueryHook. ident query config nil nil nil nil nil false nil)))
+   (QueryInit. ident query config)))
 
 (defn query-root
   ([query]
@@ -134,7 +59,7 @@
   ([query config]
    {:pre [(vector? query)
           (map? config)]}
-   (QueryHook. nil query config nil nil nil nil nil false nil)))
+   (QueryInit. nil query config)))
 
 (defn tx*
   [{::gp/keys [query-engine] :as env} tx with-return?]
@@ -330,19 +255,17 @@
   (volatile! nil))
 
 (defn effect
-  "runs passed effect callback when provided deps argument changes
-   effect runs after render.
-
+  "calls (callback env) after render when provided deps argument changes
    callback can return a function which will be called if cleanup is required"
   [deps callback]
   (comp/EffectHook. deps callback nil true nil nil))
 
 (defn render-effect
-  "call callback after every render"
+  "call (callback env) after every render"
   [callback]
   (comp/EffectHook. :render callback nil true nil nil))
 
 (defn mount-effect
-  "call callback on mount once"
+  "call (callback env) on mount once"
   [callback]
   (comp/EffectHook. :mount callback nil true nil nil))
