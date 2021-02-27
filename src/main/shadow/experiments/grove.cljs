@@ -94,6 +94,9 @@
   (run-now! [this action]
     (set! update-pending? true)
     (action)
+    ;; work must happen immediately since (action) may need the DOM event that triggered it
+    ;; any delaying the work here may result in additional paint calls (making things slower overall)
+    ;; if things could have been async the work should have been queued as such and not ended up here
     (.process-work! this))
 
   Object
