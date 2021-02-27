@@ -189,11 +189,14 @@
     :synced)
 
   (destroy! [this]
-    (.remove marker-before)
+    (doto (js/document.createRange)
+      (.setStartBefore marker-before)
+      (.setEndAfter marker-after)
+      (.deleteContents))
+
     (.forEach items
       (fn [item]
-        (p/destroy! ^not-native (.-value item))))
-    (.remove marker-after)))
+        (p/destroy! ^not-native (.-value item))))))
 
 (deftype KeyedCollectionInit [coll key-fn render-fn]
   p/IConstruct
