@@ -23,44 +23,86 @@
 ;; FIXME: this needs some kind of GC
 ;; currently does not remove empty sets from query-index-map
 
-(defn index-query
-  [{::rt/keys [key-index-seq key-index-ref query-index-map]} query-id prev-keys next-keys]
-  (let [key-index @key-index-ref]
+(defonce index-queue (js/Array.))
 
-    ;; index keys that weren't used previously
-    (reduce
-      (fn [_ key]
-        (when-not (contains? prev-keys key)
-          (let [key-idx
-                (or (get key-index key)
-                    (let [idx (swap! key-index-seq inc)]
-                      (swap! key-index-ref assoc key idx)
-                      idx))
+(defonce work-queued? false)
+(defonce work-timeout nil)
 
-                query-set
-                (or (.get query-index-map key-idx)
-                    (let [query-set (js/Set.)]
-                      (.set query-index-map key-idx query-set)
-                      query-set))]
+(defn index-work-all! []
+  (set! work-queued? false)
+  (when work-timeout
+    (js/window.cancelIdleCallback work-timeout)
+    (set! work-timeout nil))
 
-            (.add query-set query-id)))
-        nil)
-      nil
-      next-keys)
+  (loop [^function task (.shift index-queue)]
+    (when ^boolean task
+      (task))))
 
-    ;; remove old keys that are no longer used
-    (when prev-keys
+(defn index-work-some! [^js deadline]
+  (loop []
+    (when (pos? (.timeRemaining deadline))
+      (let [^function task (.shift index-queue)]
+        (when ^boolean task
+          (task)
+          (recur)))))
+
+  (if (pos? (alength index-queue))
+    (do (set! work-timeout (js/window.requestIdleCallback index-work-some!))
+        (set! work-queued? true))
+    (do (set! work-timeout nil)
+        (set! work-queued? false))))
+
+(defn index-queue-some! []
+  (when-not work-queued?
+    (set! work-timeout (js/window.requestIdleCallback index-work-some!))
+    (set! work-queued? true)))
+
+(defn index-query*
+  [{::rt/keys [active-queries-ref key-index-seq key-index-ref query-index-map]} query-id prev-keys next-keys]
+  (when (contains? @active-queries-ref query-id)
+    (let [key-index @key-index-ref]
+
+      ;; index keys that weren't used previously
       (reduce
         (fn [_ key]
-          (when-not (contains? next-keys key)
-            (let [key-idx (get key-index key)
-                  query-set (.get query-index-map key-idx)]
-              (.delete query-set query-id))))
-        nil
-        prev-keys))))
+          (when-not (contains? prev-keys key)
+            (let [key-idx
+                  (or (get key-index key)
+                      (let [idx (swap! key-index-seq inc)]
+                        (swap! key-index-ref assoc key idx)
+                        idx))
 
-(defn unindex-query
+                  query-set
+                  (or (.get query-index-map key-idx)
+                      (let [query-set (js/Set.)]
+                        (.set query-index-map key-idx query-set)
+                        query-set))]
+
+              (.add query-set query-id)))
+          nil)
+        nil
+        next-keys)
+
+      ;; remove old keys that are no longer used
+      (when prev-keys
+        (reduce
+          (fn [_ key]
+            (when-not (contains? next-keys key)
+              (let [key-idx (get key-index key)
+                    query-set (.get query-index-map key-idx)]
+                (.delete query-set query-id))))
+          nil
+          prev-keys)))))
+
+(defn index-query [env query-id prev-keys next-keys]
+  (.push index-queue #(index-query* env query-id prev-keys next-keys))
+  (index-queue-some!))
+
+(defn unindex-query*
   [{::rt/keys [key-index-seq key-index-ref query-index-map]} query-id keys]
+
+  ;; FIXME: does this need to check if query is still active?
+  ;; I don't think so because unindex is called on destroy and things are never destroyed twice
 
   (let [key-index @key-index-ref]
     (reduce
@@ -75,6 +117,10 @@
             (.delete query-set query-id))))
       nil
       keys)))
+
+(defn unindex-query [env query-id keys]
+  (.push index-queue #(unindex-query* env query-id keys))
+  (index-queue-some!))
 
 (defn invalidate-keys!
   [env keys-new keys-removed keys-updated]
@@ -99,6 +145,11 @@
 
   ;; maybe instead of just (dissoc db key) it could (assoc db key :db/removed)
   ;; so on query we could detect deleted data and have the query choose how to handle it?
+
+  ;; before we can invalidate anything we need to make sure the index is updated
+  ;; we delay updating index stuff to be async since we only need it here later
+  (when work-queued?
+    (index-work-all!))
 
   (let [keys-to-invalidate (set/union keys-new keys-updated)
         idx @(::rt/query-index-ref env)
