@@ -14,7 +14,7 @@
                    ::data-ref data-ref
                    ::event-config {}
                    ::fx-config {}
-                   ::active-queries-ref (atom {})
+                   ::active-queries-map (js/Map.)
                    ::key-index-seq (atom 0)
                    ::key-index-ref (atom {})
                    ::query-index-map (js/Map.)

@@ -76,15 +76,15 @@
   (js/console.warn "unhandled worker msg" msg))
 
 (defmethod worker-message :query-init
-  [{::rt/keys [active-queries-ref] :as env} [_ query-id query opts]]
+  [{::rt/keys [active-queries-map] :as env} [_ query-id query opts]]
   (let [q (ActiveQuery. env query-id query nil nil false)]
-    (swap! active-queries-ref assoc query-id q)
+    (.set active-queries-map query-id q)
     (.do-read! q)))
 
 (defmethod worker-message :query-destroy
-  [{::rt/keys [active-queries-ref] :as env} [_ query-id]]
-  (when-some [query (get @active-queries-ref query-id)]
-    (swap! active-queries-ref dissoc query-id)
+  [{::rt/keys [active-queries-map] :as env} [_ query-id]]
+  (when-some [query (.get active-queries-map query-id)]
+    (.delete active-queries-map query-id)
     (.destroy! query)))
 
 (defmethod worker-message :tx [env [_ tx]]
@@ -217,7 +217,7 @@
     (swap! active-streams-ref assoc stream-key stream)))
 
 (defn refresh-all-queries! [app-ref]
-  (let [{::rt/keys [active-queries-ref]} @app-ref]
-    (doseq [^ActiveQuery query (vals @active-queries-ref)]
-      ;; recomputes and updates main if data changed
-      (.do-read! query))))
+  (let [{::rt/keys [active-queries-map]} @app-ref]
+    (.forEach active-queries-map
+      (fn [query-id query]
+        (.do-read! query)))))

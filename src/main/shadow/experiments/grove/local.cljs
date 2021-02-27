@@ -64,7 +64,7 @@
    component
    idx
    rt-ref
-   active-queries-ref
+   active-queries-map
    query-id
    ^:mutable ready?
    ^:mutable read-count
@@ -101,7 +101,7 @@
 
   (hook-destroy! [this]
     (ev/unindex-query @rt-ref query-id read-keys)
-    (swap! active-queries-ref dissoc query-id))
+    (.delete active-queries-map query-id))
 
   ev/IQuery
   (query-refresh! [this]
@@ -129,7 +129,7 @@
         (do (set! read-result (if ident (get result ident) result))
             (set! ready? true))))))
 
-(deftype LocalEngine [rt-ref active-queries-ref]
+(deftype LocalEngine [rt-ref active-queries-map]
   gp/IQueryEngine
   (query-hook-build [this env component idx ident query config]
     (let [query-id (util/next-id)
@@ -140,24 +140,24 @@
                  component
                  idx
                  rt-ref
-                 active-queries-ref
+                 active-queries-map
                  query-id
                  false
                  0
                  nil
                  nil)]
-      (swap! active-queries-ref assoc query-id hook)
+      (.set active-queries-map query-id hook)
       hook))
 
   ;; direct query, hooks don't use this
   (query-init [this query-id query config callback]
     (let [q (ActiveQuery. rt-ref query-id query callback nil nil false)]
-      (swap! active-queries-ref assoc query-id q)
+      (.set active-queries-map query-id q)
       (.do-read! q)))
 
   (query-destroy [this query-id]
-    (when-some [q (get @active-queries-ref query-id)]
-      (swap! active-queries-ref dissoc query-id)
+    (when-some [q (.get active-queries-map query-id)]
+      (.delete active-queries-map query-id)
       (.destroy! q)))
 
   (transact! [this tx with-return?]
@@ -173,5 +173,5 @@
 
 (defn init [rt-ref]
   (fn [env]
-    (let [{::rt/keys [active-queries-ref data-ref]} @rt-ref]
-      (assoc env ::gp/query-engine (LocalEngine. rt-ref active-queries-ref)))))
+    (let [{::rt/keys [active-queries-map data-ref]} @rt-ref]
+      (assoc env ::gp/query-engine (LocalEngine. rt-ref active-queries-map)))))

@@ -66,7 +66,7 @@
   [env db current result query-part]
   (cond
     (keyword-identical? query-part :db/all)
-    (reduce-kv assoc! result current)
+    (transient current)
 
     ;; simple attr
     (keyword? query-part)

@@ -58,8 +58,8 @@
     (set! work-queued? true)))
 
 (defn index-query*
-  [{::rt/keys [active-queries-ref key-index-seq key-index-ref query-index-map]} query-id prev-keys next-keys]
-  (when (contains? @active-queries-ref query-id)
+  [{::rt/keys [active-queries-map key-index-seq key-index-ref query-index-map]} query-id prev-keys next-keys]
+  (when (.has active-queries-map query-id)
     (let [key-index @key-index-ref]
 
       ;; index keys that weren't used previously
@@ -154,7 +154,7 @@
   (let [keys-to-invalidate (set/union keys-new keys-updated)
         idx @(::rt/query-index-ref env)
 
-        active-queries @(::rt/active-queries-ref env)
+        active-queries (::rt/active-queries-map env)
 
         query-index-map (::rt/query-index-map env)
         key-index @(::rt/key-index-ref env)
@@ -177,7 +177,7 @@
     ;; FIXME: figure out if this can be smarter
     (.forEach query-ids
       (fn [query-id]
-        (let [query (get active-queries query-id)]
+        (let [query (.get active-queries query-id)]
           (query-refresh! query))))))
 
 (defn tx*
