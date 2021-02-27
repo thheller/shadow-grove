@@ -113,8 +113,9 @@
 
   (dom-entered! [this])
 
-  (destroy! [this]
-    (.remove element)
+  (destroy! [this dom-remove?]
+    (when dom-remove?
+      (.remove element))
     (.remove-field form field))
 
   Object

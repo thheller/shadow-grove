@@ -23,40 +23,6 @@
 ;; FIXME: this needs some kind of GC
 ;; currently does not remove empty sets from query-index-map
 
-(defonce index-queue (js/Array.))
-
-(defonce work-queued? false)
-(defonce work-timeout nil)
-
-(defn index-work-all! []
-  (set! work-queued? false)
-  (when work-timeout
-    (js/window.cancelIdleCallback work-timeout)
-    (set! work-timeout nil))
-
-  (loop [^function task (.shift index-queue)]
-    (when ^boolean task
-      (task))))
-
-(defn index-work-some! [^js deadline]
-  (loop []
-    (when (pos? (.timeRemaining deadline))
-      (let [^function task (.shift index-queue)]
-        (when ^boolean task
-          (task)
-          (recur)))))
-
-  (if (pos? (alength index-queue))
-    (do (set! work-timeout (js/window.requestIdleCallback index-work-some!))
-        (set! work-queued? true))
-    (do (set! work-timeout nil)
-        (set! work-queued? false))))
-
-(defn index-queue-some! []
-  (when-not work-queued?
-    (set! work-timeout (js/window.requestIdleCallback index-work-some!))
-    (set! work-queued? true)))
-
 (defn index-query*
   [{::rt/keys [active-queries-map key-index-seq key-index-ref query-index-map]} query-id prev-keys next-keys]
   (when (.has active-queries-map query-id)
@@ -94,9 +60,6 @@
           nil
           prev-keys)))))
 
-(defn index-query [env query-id prev-keys next-keys]
-  (.push index-queue #(index-query* env query-id prev-keys next-keys))
-  (index-queue-some!))
 
 (defn unindex-query*
   [{::rt/keys [key-index-seq key-index-ref query-index-map]} query-id keys]
@@ -118,12 +81,15 @@
       nil
       keys)))
 
-(defn unindex-query [env query-id keys]
-  (.push index-queue #(unindex-query* env query-id keys))
-  (index-queue-some!))
-
 (defn invalidate-keys!
-  [env keys-new keys-removed keys-updated]
+  [{::rt/keys
+    [active-queries-map
+     ^function query-index-queue-flush!
+     query-index-map
+     key-index-ref] :as env}
+   keys-new
+   keys-removed
+   keys-updated]
 
   ;; ignoring keys-removed since that would notify components that queried the removed data
   ;; leading to an empty query result which they can't do anything with
@@ -148,17 +114,12 @@
 
   ;; before we can invalidate anything we need to make sure the index is updated
   ;; we delay updating index stuff to be async since we only need it here later
-  (when work-queued?
-    (index-work-all!))
+  (when query-index-queue-flush!
+    (query-index-queue-flush!))
+
 
   (let [keys-to-invalidate (set/union keys-new keys-updated)
-        idx @(::rt/query-index-ref env)
-
-        active-queries (::rt/active-queries-map env)
-
-        query-index-map (::rt/query-index-map env)
-        key-index @(::rt/key-index-ref env)
-
+        key-index @key-index-ref
         query-ids (js/Set.)]
 
     (reduce
@@ -177,7 +138,7 @@
     ;; FIXME: figure out if this can be smarter
     (.forEach query-ids
       (fn [query-id]
-        (let [query (.get active-queries query-id)]
+        (let [query (.get active-queries-map query-id)]
           (query-refresh! query))))))
 
 (defn tx*

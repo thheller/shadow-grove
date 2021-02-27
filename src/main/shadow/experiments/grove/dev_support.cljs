@@ -76,26 +76,26 @@
   (datafy [this]
     {:val (.-val this)}))
 
-(extend-type sg/QueryHook
-  cp/Datafiable
-  (datafy [this]
-    {:ident (.-ident this)
-     :query (.-query this)
-     :component (.-component this)
-     :idx (.-idx this)
-     :env (.-env this)
-     :read-keys (.-read-keys this)
-     :read-result (.-read-result this)}
-    )
+#_(extend-type sg/QueryHook
+    cp/Datafiable
+    (datafy [this]
+      {:ident (.-ident this)
+       :query (.-query this)
+       :component (.-component this)
+       :idx (.-idx this)
+       :env (.-env this)
+       :read-keys (.-read-keys this)
+       :read-result (.-read-result this)}
+      )
 
-  IPrintWithWriter
-  (-pr-writer [this writer opts]
-    (-pr-writer
-      [::sg/QueryHook
-       (.-ident this)
-       (.-query this)]
-      writer
-      opts)))
+    IPrintWithWriter
+    (-pr-writer [this writer opts]
+      (-pr-writer
+        [::sg/QueryHook
+         (.-ident this)
+         (.-query this)]
+        writer
+        opts)))
 
 #_(extend-type sa/TreeScheduler
     cp/Datafiable

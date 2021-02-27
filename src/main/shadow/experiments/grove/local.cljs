@@ -13,6 +13,48 @@
 
 (set! *warn-on-infer* false)
 
+(defonce index-queue (js/Array.))
+
+(defonce work-queued? false)
+(defonce work-timeout nil)
+
+(defn index-work-all! []
+  (set! work-queued? false)
+  (when work-timeout
+    (js/window.cancelIdleCallback work-timeout)
+    (set! work-timeout nil))
+
+  (loop [^function task (.shift index-queue)]
+    (when ^boolean task
+      (task))))
+
+(defn index-work-some! [^js deadline]
+  (loop []
+    (when (pos? (.timeRemaining deadline))
+      (let [^function task (.shift index-queue)]
+        (when ^boolean task
+          (task)
+          (recur)))))
+
+  (if (pos? (alength index-queue))
+    (do (set! work-timeout (js/window.requestIdleCallback index-work-some!))
+        (set! work-queued? true))
+    (do (set! work-timeout nil)
+        (set! work-queued? false))))
+
+(defn index-queue-some! []
+  (when-not work-queued?
+    (set! work-timeout (js/window.requestIdleCallback index-work-some!))
+    (set! work-queued? true)))
+
+(defn index-query [env query-id prev-keys next-keys]
+  (.push index-queue #(ev/index-query* env query-id prev-keys next-keys))
+  (index-queue-some!))
+
+(defn unindex-query [env query-id keys]
+  (.push index-queue #(ev/unindex-query* env query-id keys))
+  (index-queue-some!))
+
 (deftype ActiveQuery
   [rt-ref
    query-id
@@ -35,7 +77,7 @@
           new-keys (db/observed-keys observed-data)]
 
       ;; remember this even if query is still loading
-      (ev/index-query query-env query-id read-keys new-keys)
+      (index-query query-env query-id read-keys new-keys)
 
       (set! read-keys new-keys)
 
@@ -55,7 +97,7 @@
 
   (destroy! [this]
     (set! destroyed? true)
-    (ev/unindex-query @rt-ref query-id read-keys)))
+    (unindex-query @rt-ref query-id read-keys)))
 
 (deftype QueryHook
   [^:mutable ident
@@ -100,7 +142,7 @@
       (not= old-result read-result)))
 
   (hook-destroy! [this]
-    (ev/unindex-query @rt-ref query-id read-keys)
+    (unindex-query @rt-ref query-id read-keys)
     (.delete active-queries-map query-id))
 
   ev/IQuery
@@ -120,7 +162,7 @@
 
           new-keys (db/observed-keys observed-data)]
 
-      (ev/index-query query-env query-id read-keys new-keys)
+      (index-query query-env query-id read-keys new-keys)
 
       (set! read-keys new-keys)
 
@@ -172,6 +214,13 @@
   (stream-clear [this stream-key]))
 
 (defn init [rt-ref]
+
+  ;; kinda ugly but shortest way to have worker not depend this
+  (swap! rt-ref assoc ::rt/query-index-queue-flush!
+    (fn []
+      (when work-queued?
+        (index-work-all!))))
+
   (fn [env]
     (let [{::rt/keys [active-queries-map data-ref]} @rt-ref]
       (assoc env ::gp/query-engine (LocalEngine. rt-ref active-queries-map)))))
