@@ -189,10 +189,11 @@
     :synced)
 
   (destroy! [this ^boolean dom-remove?]
-    (doto (js/document.createRange)
-      (.setStartBefore marker-before)
-      (.setEndAfter marker-after)
-      (.deleteContents))
+    (when dom-remove?
+      (doto (js/document.createRange)
+        (.setStartBefore marker-before)
+        (.setEndAfter marker-after)
+        (.deleteContents)))
 
     (.forEach items
       (fn [item]
@@ -339,12 +340,14 @@
 
   (destroy! [this ^boolean dom-remove?]
     (when dom-remove?
-      (.remove marker-before)
-      (.remove marker-after))
+      (doto (js/document.createRange)
+        (.setStartBefore marker-before)
+        (.setEndAfter marker-after)
+        (.deleteContents)))
 
     (.forEach items
       (fn [^not-native item]
-        (p/destroy! item dom-remove?)))
+        (p/destroy! item false)))
     ))
 
 (deftype SimpleCollectionInit [coll render-fn]
