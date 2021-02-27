@@ -47,7 +47,7 @@
             (reduce-kv
               (fn [c idx ^not-native child]
                 (if (>= idx nc)
-                  (do (p/destroy! child)
+                  (do (p/destroy! child true)
                       c)
                   (let [next (nth next-nodes idx)]
                     (if (p/supports? child next)
@@ -56,7 +56,7 @@
                       (let [first (p/dom-first child)
                             new-managed (p/as-managed next env)]
                         (p/dom-insert new-managed node first)
-                        (p/destroy! child)
+                        (p/destroy! child true)
                         (when entered?
                           (p/dom-entered! new-managed))
                         (conj! c new-managed))))))
@@ -80,9 +80,10 @@
         (set! children (persistent! next-children))
         (set! attrs next-attrs))))
 
-  (destroy! [this]
-    (.remove node)
-    (run! #(p/destroy! %) children)))
+  (destroy! [this ^boolean dom-remove?]
+    (when dom-remove?
+      (.remove node))
+    (run! #(p/destroy! % dom-remove?) children)))
 
 (defn parse-tag* [spec]
   (let [spec (name spec)
@@ -191,7 +192,7 @@
           (reduce-kv
             (fn [c idx ^not-native child]
               (if (>= idx nc)
-                (do (p/destroy! child)
+                (do (p/destroy! child true)
                     c)
                 (let [next (nth next-nodes idx)]
                   (if (p/supports? child next)
@@ -200,7 +201,7 @@
                     (let [first (p/dom-first child)
                           new-managed (p/as-managed next env)]
                       (p/dom-insert new-managed node first)
-                      (p/destroy! child)
+                      (p/destroy! child true)
                       (when entered?
                         (p/dom-entered! new-managed))
                       (conj! c new-managed))))))
@@ -223,10 +224,13 @@
 
       (set! children (persistent! next-children))))
 
-  (destroy! [this]
-    (.remove marker-start)
-    (run! (fn [^not-native child] (p/destroy! child)) children)
-    (.remove marker-end)))
+  (destroy! [this ^boolean dom-remove?]
+    (when dom-remove?
+      (.remove marker-start)
+      (.remove marker-end))
+
+    (run! (fn [^not-native child] (p/destroy! child dom-remove?)) children)
+    ))
 
 (defn as-managed-fragment [vec env]
   (let [children (into [] (map #(p/as-managed % env)) (subvec vec 1))]
@@ -259,8 +263,8 @@
     (let [res (apply type (subvec next 1))]
       (p/dom-sync! delegate res)))
 
-  (destroy! [this]
-    (p/destroy! delegate)))
+  (destroy! [this ^boolean dom-remove?]
+    (p/destroy! delegate dom-remove?)))
 
 (extend-type cljs.core/PersistentVector
   p/IConstruct

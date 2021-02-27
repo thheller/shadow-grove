@@ -14,7 +14,9 @@
   ;; implementations must properly propagate this to children if needed
   (dom-entered! [this])
 
-  (destroy! [this]))
+  ;; if parent node was already removed from DOM the children
+  ;; don't need to bother removing themselves again
+  (destroy! [this ^boolean dom-remove?]))
 
 ;; root user api
 (defprotocol IDirectUpdate

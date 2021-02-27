@@ -75,9 +75,11 @@
       (set! vals nvals))
     :synced)
 
-  (destroy! [this]
-    (.remove marker)
-    (. code (destroy-fn env exports vals))))
+  (destroy! [this ^boolean dom-remove?]
+    (when dom-remove?
+      (.remove marker))
+
+    (. code (destroy-fn env exports vals dom-remove?))))
 
 (deftype FragmentInit [vals element-ns ^FragmentCode code]
   p/IConstruct
@@ -139,8 +141,8 @@
 (defn managed-insert [component parent anchor]
   (p/dom-insert component parent anchor))
 
-(defn managed-remove [component]
-  (p/destroy! component))
+(defn managed-remove [component dom-remove?]
+  (p/destroy! component dom-remove?))
 
 ;; called by macro generated code
 (defn update-managed [^ManagedFragment fragment env nodes idx oval nval]

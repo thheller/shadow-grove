@@ -232,12 +232,14 @@
     (when (.work-pending? this)
       (.schedule! this)))
 
-  (destroy! [this]
+  (destroy! [this ^boolean dom-remove?]
     (.unschedule! this)
     (when DEBUG
       (swap! instances-ref disj this)
-      (.remove (.-marker-before this))
-      (.remove (.-marker-after this)))
+      (when dom-remove?
+        (.remove (.-marker-before this))
+        (.remove (.-marker-after this))))
+
     (set! destroyed? true)
 
     (.forEach hooks
@@ -245,7 +247,7 @@
         (when hook
           (gp/hook-destroy! hook))))
 
-    (p/destroy! root))
+    (p/destroy! root dom-remove?))
 
   ;; FIXME: figure out default event handler
   ;; don't want to declare all events all the time
@@ -699,8 +701,9 @@
 
   (dom-sync! [this other])
 
-  (destroy! [this]
-    (.remove node))
+  (destroy! [this ^boolean dom-remove?]
+    (when dom-remove?
+      (.remove node)))
 
   gp/IHook
   (hook-init! [this]

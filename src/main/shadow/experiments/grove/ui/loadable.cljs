@@ -57,11 +57,12 @@
     (when managed
       (ap/dom-entered! managed)))
 
-  (destroy! [this]
+  (destroy! [this ^boolean dom-remove?]
     ;; (js/console.log ::destroy! this)
-    (.remove marker)
+    (when dom-remove?
+      (.remove marker))
     (when managed
-      (ap/destroy! managed)))
+      (ap/destroy! managed dom-remove?)))
 
   Object
   (init! [this]

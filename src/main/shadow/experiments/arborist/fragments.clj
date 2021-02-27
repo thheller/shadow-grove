@@ -396,6 +396,7 @@
         exports-sym (gensym "exports")
         env-sym (gensym "env")
         oldv-sym (gensym "oldv")
+        dom-remove-sym (with-meta (gensym "dom_remove") {:tag 'boolean})
 
         destroy-calls
         (reduce
@@ -406,12 +407,16 @@
                   (cond->
                     ;; can skip removing nodes when the parent is already removed
                     (nil? (:parent ast))
-                    (conj `(dom-remove (aget ~exports-sym ~(get sym->idx sym)))))
+                    (conj `(when ~dom-remove-sym (dom-remove (aget ~exports-sym ~(get sym->idx sym))))))
                   (reduce-> step-fn (:children ast)))
 
               :code-ref
               (-> calls
-                  (conj `(managed-remove (aget ~exports-sym ~(get sym->idx sym))))
+                  (conj `(managed-remove
+                           (aget ~exports-sym ~(get sym->idx sym))
+                           ~(if (:parent ast)
+                              false
+                              dom-remove-sym)))
                   (reduce-> step-fn (:children ast)))
 
               ;; only clean up qualified keywords
@@ -436,7 +441,7 @@
           []
           ast)]
 
-    `(fn [~env-sym ~exports-sym ~oldv-sym]
+    `(fn [~env-sym ~exports-sym ~oldv-sym ~dom-remove-sym]
        ~@destroy-calls)))
 
 (def shadow-analyze-top

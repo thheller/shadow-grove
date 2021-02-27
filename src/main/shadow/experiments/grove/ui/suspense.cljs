@@ -84,7 +84,7 @@
       ;; if new offscreen does not suspend immediately replace display placeholder
       ;; otherwise keep offscreen
       offscreen
-      (do (ap/destroy! offscreen)
+      (do (ap/destroy! offscreen true)
           (.cancel! offscreen-scheduler)
 
           (let [scheduler
@@ -145,15 +145,16 @@
     (set! dom-entered? true)
     (ap/dom-entered! display))
 
-  (destroy! [this]
+  (destroy! [this ^boolean dom-remove?]
     (when timeout
       (js/clearTimeout timeout))
-    (.remove marker)
+    (when dom-remove?
+      (.remove marker))
     (when display
-      (ap/destroy! display))
+      (ap/destroy! display dom-remove?))
     (when offscreen
       (.cancel! offscreen-scheduler)
-      (ap/destroy! offscreen)))
+      (ap/destroy! offscreen false)))
 
   Object
   (init! [this]
@@ -197,7 +198,7 @@
 
   (tree-did-finish! [this]
     (ap/dom-insert offscreen (.-parentElement marker) marker)
-    (ap/destroy! display)
+    (ap/destroy! display true)
     (set! display offscreen)
     (set! offscreen nil)
     (set! offscreen-scheduler nil)

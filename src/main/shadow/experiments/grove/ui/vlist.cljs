@@ -174,15 +174,17 @@
       (.measure! this)
       (.update-query! this)))
 
-  (destroy! [this]
+  (destroy! [this ^boolean dom-remove?]
     (when query
       (gp/query-destroy query-engine query-id))
 
-    (.remove container-el)
+    (when dom-remove?
+      (.remove container-el))
+
     (when items ;; query might still be pending
       (.forEach items ;; sparse array, doseq processes too many
         (fn [^ListItem item idx]
-          (ap/destroy! (.-managed item))))))
+          (ap/destroy! (.-managed item) false)))))
 
   Object
   ;; FIXME: this unfortunately has to fetch all visible rows
@@ -229,7 +231,7 @@
         (not= item-count (.-length items))
         (do (.forEach items ;; sparse array, doseq processes too many
               (fn [^ListItem item idx]
-                (ap/destroy! (.-managed item))))
+                (ap/destroy! (.-managed item) true)))
             (set! items (js/Array. item-count))
             (set! container-el -scrollTop 0)
             (gs/setStyle inner-el "height" (str (* item-count item-height) "px")))
@@ -323,7 +325,7 @@
     (.forEach items
       (fn [^ListItem item idx]
         (when-not (.in-visible-range? this idx)
-          (ap/destroy! (.-managed item))
+          (ap/destroy! (.-managed item) true)
           (js-delete items idx)))))
 
   (measure! [this]

@@ -53,7 +53,7 @@
         parent (.-parentNode first-node)]
 
     (p/dom-insert new-managed parent first-node)
-    (p/destroy! old-managed)
+    (p/destroy! old-managed true)
     new-managed))
 
 (defn replace-managed ^not-native [env old nval]
@@ -89,10 +89,11 @@
   (dom-sync! [this next]
     (throw (ex-info "invalid use, don't sync roots?" {:this this :next next})))
 
-  (destroy! [this]
-    (.remove marker)
+  (destroy! [this ^boolean dom-remove?]
+    (when dom-remove?
+      (.remove marker))
     (when node
-      (p/destroy! node)))
+      (p/destroy! node dom-remove?)))
 
   p/IDirectUpdate
   (update! [this next]
@@ -143,8 +144,9 @@
       (set! node -data (str next)))
     :synced)
 
-  (destroy! [this]
-    (.remove node)))
+  (destroy! [this ^boolean dom-remove?]
+    (when dom-remove?
+      (.remove node))))
 
 (defn managed-text [env val]
   (ManagedText. env val (js/document.createTextNode (str val))))

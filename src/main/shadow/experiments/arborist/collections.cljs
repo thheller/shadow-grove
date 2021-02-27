@@ -83,7 +83,7 @@
                 (fn [^KeyedItem item]
                   (if (contains? new-keys (.-key item))
                     true
-                    (do (p/destroy! (.-value item))
+                    (do (p/destroy! (.-value item) true)
                         false))))]
 
           ;; old-items now matches what is in the DOM and only contains items still present in new coll
@@ -144,7 +144,7 @@
                         (p/dom-insert new-managed dom-parent anchor)
                         (when dom-entered?
                           (p/dom-entered! new-managed))
-                        (p/destroy! managed)
+                        (p/destroy! managed true)
                         (set! new-item -value new-managed)
                         (recur (p/dom-first new-managed) (dec idx) (dec old-idx))
                         )))
@@ -180,7 +180,7 @@
                         (p/dom-insert new-managed dom-parent anchor)
                         (when dom-entered?
                           (p/dom-entered! new-managed))
-                        (p/destroy! managed)
+                        (p/destroy! managed true)
                         (recur (p/dom-first new-managed) (dec idx) (dec old-idx))
                         ))))))))
 
@@ -188,7 +188,7 @@
         (set! items new-items)))
     :synced)
 
-  (destroy! [this]
+  (destroy! [this ^boolean dom-remove?]
     (doto (js/document.createRange)
       (.setStartBefore marker-before)
       (.setEndAfter marker-after)
@@ -196,7 +196,7 @@
 
     (.forEach items
       (fn [item]
-        (p/destroy! ^not-native (.-value item))))))
+        (p/destroy! ^not-native (.-value item) false)))))
 
 (deftype KeyedCollectionInit [coll key-fn render-fn]
   p/IConstruct
@@ -320,7 +320,7 @@
         (do (dotimes [idx (- oc nc)]
               (let [idx (+ max-idx idx)
                     item (aget items idx)]
-                (p/destroy! item)))
+                (p/destroy! item true)))
             (set! (.-length items) max-idx))
 
         ;; old had fewer items, append at end
@@ -337,12 +337,15 @@
 
     :synced)
 
-  (destroy! [this]
-    (.remove marker-before)
+  (destroy! [this ^boolean dom-remove?]
+    (when dom-remove?
+      (.remove marker-before)
+      (.remove marker-after))
+
     (.forEach items
       (fn [^not-native item]
-        (p/destroy! item)))
-    (.remove marker-after)))
+        (p/destroy! item dom-remove?)))
+    ))
 
 (deftype SimpleCollectionInit [coll render-fn]
   p/IConstruct

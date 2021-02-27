@@ -27,9 +27,9 @@
         )))
 
   Object
-  (destroy! [this]
+  (destroy! [this ^boolean dom-remove?]
     (when root
-      (p/destroy! root))))
+      (p/destroy! root dom-remove?))))
 
 (defn dom-root
   ([container env]
@@ -59,4 +59,4 @@
   (p/update! x next))
 
 (defn destroy! [root]
-  (p/destroy! root))
+  (p/destroy! root true))

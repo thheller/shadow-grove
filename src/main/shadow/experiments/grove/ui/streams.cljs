@@ -149,14 +149,16 @@
 
     (set! dom-entered? true))
 
-  (destroy! [this]
+  (destroy! [this ^boolean dom-remove?]
     (gp/stream-destroy stream-engine stream-id stream-key)
 
     (.dispose key-handler)
-    (.remove container-el)
+
+    (when dom-remove?
+      (.remove container-el))
 
     (doseq [{:keys [managed]} (array-seq items)]
-      (ap/destroy! managed))
+      (ap/destroy! managed false))
 
     (when-some [ref (:ref opts)]
       (vreset! ref nil))
@@ -170,7 +172,7 @@
     (loop []
       (when-some [^goog div (.-lastElementChild inner-el)]
         (let [managed (.-shadow$managed div)]
-          (ap/destroy! managed)
+          (ap/destroy! managed true)
           (.remove div)
           (recur)))))
 
