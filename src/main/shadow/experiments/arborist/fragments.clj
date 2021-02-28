@@ -59,6 +59,7 @@
       extra
       {:op :code-ref
        :parent (:parent env)
+       :src code
        :sym (if element-id
               (symbol (str "d" element-id)) ;; dynamic "elements"
               (gensym))
@@ -284,7 +285,11 @@
 
                 :code-ref
                 (-> env
-                    (update :bindings conj sym (with-loc ast `(managed-create ~env-sym (aget ~vals-sym ~(:ref-id ast)))))
+                    (update :bindings conj sym
+                      (with-loc ast
+                        `(managed-create
+                           ~env-sym
+                           (aget ~vals-sym ~(:ref-id ast)))))
                     (cond->
                       parent-sym
                       (update :mutations conj (with-loc ast `(managed-append ~parent-sym ~sym)))))
