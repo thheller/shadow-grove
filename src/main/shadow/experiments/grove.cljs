@@ -113,6 +113,15 @@
 
     (set! update-pending? false)))
 
+(defn default-error-handler [component ex]
+  ;; FIXME: this would be the only place there component-name is accessed
+  ;; without this access closure removes it completely in :advanced which is nice
+  ;; ok to access in debug builds though
+  (if ^boolean js/goog.DEBUG
+    (js/console.error (str "An Error occurred in " (.. component -config -component-name) ", it will not be rendered.") component)
+    (js/console.error "An Error occurred in Component, it will not be rendered." component))
+  (js/console.error ex))
+
 (defn init* [app-id init-env init-features]
   {:pre [(some? app-id)
          (map? init-env)
@@ -122,10 +131,14 @@
   (let [scheduler (RootScheduler. false (js/Set.))
 
         env
-        (assoc init-env
-          ::app-id app-id
-          ::comp/scheduler scheduler
-          ::suspense-keys (atom {}))
+        (-> init-env
+            (assoc
+              ::app-id app-id
+              ::comp/scheduler scheduler
+              ::suspense-keys (atom {}))
+            (cond->
+              (not (contains? init-env ::comp/error-handler))
+              (assoc ::comp/error-handler default-error-handler)))
 
         env
         (reduce

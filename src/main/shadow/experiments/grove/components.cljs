@@ -166,6 +166,7 @@
   (field ^boolean needs-render? true) ;; initially needs a render
   (field ^boolean suspended? false)
   (field ^boolean destroyed? false)
+  (field ^boolean error? false)
   (field ^boolean dom-entered? false)
   (field work-set (js/Set.)) ;; sub-tree pending work
 
@@ -213,10 +214,10 @@
 
   (dom-entered! [this]
     (set! dom-entered? true)
-    (p/dom-entered! root)
-
-    ;; trigger first on mount
-    (.did-update! this true))
+    (when-not error?
+      (p/dom-entered! root)
+      ;; trigger first on mount
+      (.did-update! this true)))
 
   (supports? [this next]
     (and (component-init? next)
@@ -296,25 +297,36 @@
   ;; parent tells us to work
   gp/IWork
   (work! [this]
-    ;; always complete our own work first
-    ;; a re-render may cause the child tree to change
-    ;; and maybe some work to disappear
-    (while ^boolean (.work-pending? this)
-      (.run-next! this))
+    (when-not error?
+      (try
+        ;; always complete our own work first
+        ;; a re-render may cause the child tree to change
+        ;; and maybe some work to disappear
+        (while ^boolean (.work-pending? this)
+          (.run-next! this))
 
-    ;; FIXME: only process children when this is done and not suspended?
-    (let [iter (.values work-set)]
-      (loop []
-        (let [current (.next iter)]
-          (when (not ^boolean (.-done current))
-            (gp/work! ^not-native (.-value current))
+        ;; FIXME: only process children when this is done and not suspended?
+        (let [iter (.values work-set)]
+          (loop []
+            (let [current (.next iter)]
+              (when (not ^boolean (.-done current))
+                (gp/work! ^not-native (.-value current))
 
-            ;; should time slice later and only continue work
-            ;; until a given time budget is consumed
-            (recur))))))
+                ;; should time slice later and only continue work
+                ;; until a given time budget is consumed
+                (recur)))))
+        (catch :default ex
+          (.handle-error! this ex)))))
 
   ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
+  (handle-error! [this ex]
+    (set! error? true)
+    (.unschedule! this)
+
+    (let [err-fn (::error-handler parent-env)]
+      (err-fn this ex)))
+
   (get-hook-value [this idx]
     (gp/hook-value (aget hooks idx)))
 
@@ -428,6 +440,7 @@
   (work-pending? [this]
     (and (not destroyed?)
          (not suspended?)
+         (not error?)
          (or (pos? dirty-hooks)
              needs-render?
              (>= (alength (.-hooks config)) current-idx))))
