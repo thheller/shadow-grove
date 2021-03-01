@@ -83,7 +83,7 @@
                   (fn [^KeyedItem item]
                     (if (contains? new-keys (.-key item))
                       true
-                      (do (p/destroy! (.-managed item) true)
+                      (do (p/destroy! ^not-native (.-managed item) true)
                           false))))]
 
             ;; old-items now matches what is in the DOM and only contains items still present in new coll
@@ -109,7 +109,7 @@
                     ;; item does not exist in old coll, just create and insert
                     (not old-item)
                     (let [rendered (rfn (.-data new-item) idx (.-key new-item))
-                          managed (p/as-managed rendered env)]
+                          ^not-native managed (p/as-managed rendered env)]
 
                       (p/dom-insert managed dom-parent anchor)
 
@@ -164,7 +164,7 @@
                             ;; not updatable, swap.
                             ;; unlikely given that key was the same, result should be the same.
                             ;; still possible though
-                            (let [new-managed (p/as-managed rendered env)]
+                            (let [^not-native new-managed (p/as-managed rendered env)]
                               (p/dom-insert new-managed dom-parent anchor)
                               (when dom-entered?
                                 (p/dom-entered! new-managed))
@@ -207,7 +207,7 @@
                             ;; not updatable, swap.
                             ;; unlikely given that key was the same, result should be the same.
                             ;; still possible though
-                            (let [new-managed (p/as-managed rendered env)]
+                            (let [^not-native new-managed (p/as-managed rendered env)]
                               (set! new-item -managed new-managed)
                               (p/dom-insert new-managed dom-parent anchor)
                               (when dom-entered?
@@ -281,6 +281,20 @@
          (identical? render-fn (.-render-fn other))
          ;; compare coll last since its pointless if the others changed and typically more expensive to compare
          (= coll (.-coll other)))))
+
+(defn keyed-seq [coll key-fn render-fn]
+  {:pre [(sequential? coll)
+         (ifn? key-fn)
+         (ifn? render-fn)]}
+
+  ;; we always need compatible collections, it should already be a vector in most cases
+  ;; it must not allow lazy sequences since the sequence may not be used immediately
+  ;; some item may suspend and whatever the lazy seq did will happen in totally different phases
+  ;; cannot guarantee that some other data it previously may have relied upon is still valid
+  (let [coll (vec coll)]
+    (if (zero? (count coll))
+      nil ;; can skip much unneeded work for empty colls
+      (KeyedCollectionInit. coll key-fn render-fn))))
 
 (declare SimpleCollectionInit)
 
@@ -421,22 +435,10 @@
          ;; compare coll last since its pointless if the others changed and typically more expensive to compare
          (= coll (.-coll other)))))
 
-(defn node [coll key-fn render-fn]
+(defn simple-seq [coll render-fn]
   {:pre [(sequential? coll)
          (ifn? render-fn)]}
-  ;; we always need compatible collections, it should already be a vector in most cases
-  ;; it must not allow lazy sequences since the sequence may not be used immediately
-  ;; some item may suspend and whatever the lazy seq did will happen in totally different phases
-  ;; cannot guarantee that some other data it previously may have relied upon is still valid
   (let [coll (vec coll)]
-    (cond
-      (zero? (count coll))
+    (if (zero? (count coll))
       nil ;; can skip much unneeded work for empty colls
-
-      ;; FIXME: should likely use simple path for really small colls
-      ;; or maybe some other metrics we can infer here?
-      (some? key-fn)
-      (KeyedCollectionInit. coll key-fn render-fn)
-
-      :else
       (SimpleCollectionInit. coll render-fn))))

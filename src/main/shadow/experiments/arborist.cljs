@@ -51,9 +51,14 @@
 (defn fragment [& body]
   (throw (ex-info "fragment can only be used a macro" {})))
 
+(defn simple-seq [coll render-fn]
+  (coll/simple-seq coll render-fn))
+
 (defn render-seq [coll key-fn render-fn]
-  (when (some? coll)
-    (coll/node coll key-fn render-fn)))
+  (coll/keyed-seq coll key-fn render-fn))
+
+(defn keyed-seq [coll key-fn render-fn]
+  (coll/keyed-seq coll key-fn render-fn))
 
 (defn update! [x next]
   (p/update! x next))

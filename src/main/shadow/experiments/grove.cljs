@@ -7,6 +7,7 @@
     [shadow.experiments.arborist.common :as common]
     [shadow.experiments.arborist.fragments] ;; util macro references this
     [shadow.experiments.arborist :as sa]
+    [shadow.experiments.arborist.collections :as sc]
     [goog.async.nextTick]
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.components :as comp]
@@ -221,11 +222,13 @@
   (suspense/SuspenseInit. opts vnode))
 
 (defn simple-seq [coll render-fn]
-  (sa/render-seq coll nil render-fn))
+  (sc/simple-seq coll render-fn))
 
 (defn render-seq [coll key-fn render-fn]
-  (sa/render-seq coll key-fn render-fn))
+  (sc/keyed-seq coll key-fn render-fn))
 
+(defn keyed-seq [coll key-fn render-fn]
+  (sc/keyed-seq coll key-fn render-fn))
 
 (deftype TrackChange [^:mutable val ^:mutable trigger-fn ^:mutable result env component idx]
   gp/IBuildHook
