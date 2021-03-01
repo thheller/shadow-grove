@@ -5,13 +5,11 @@
 
 (declare KeyedCollectionInit)
 
-(deftype KeyedItem [key data managed moved?]
-  IHash
-  (-hash [this]
-    (js/goog.getUid this)))
+(deftype KeyedItem [key data managed moved?])
 
 (deftype KeyedCollection
   [env
+   ^:mutable coll
    ^:mutable ^function key-fn
    ^:mutable ^function render-fn
    ^:mutable items ;; array of KeyedItem instances
@@ -40,183 +38,186 @@
     (instance? KeyedCollectionInit next))
 
   (dom-sync! [this ^KeyedCollectionInit next]
-    (let [^not-native new-coll (.-coll next)
+    (let [^not-native old-coll coll
+          ^not-native new-coll (.-coll next)
           dom-parent (.-parentNode marker-after)
-
           rfn-identical? (identical? render-fn (.-render-fn next))]
 
       (when-not ^boolean dom-parent
         (throw (ex-info "sync while not in dom?" {})))
 
-      (set! key-fn (.-key-fn next))
-      (set! render-fn (.-render-fn next))
+      (when-not (and rfn-identical? (identical? old-coll new-coll))
 
-      (let [^function kfn (common/ifn1-wrap key-fn)
-            ^function rfn (common/ifn3-wrap render-fn)
+        (set! coll new-coll)
+        (set! key-fn (.-key-fn next))
+        (set! render-fn (.-render-fn next))
 
-            new-len (-count new-coll)
+        (let [^function kfn (common/ifn1-wrap key-fn)
+              ^function rfn (common/ifn3-wrap render-fn)
 
-            ;; array of KeyedItem with manage instances
-            old-items items
-            ;; array of KeyedItem but managed will be set later
-            new-items (js/Array. new-len)
+              new-len (-count new-coll)
 
-            ;; traverse new coll once to build key map and render items
-            ^not-native new-keys
-            (-persistent!
-              (reduce-kv
-                (fn [^not-native keys idx val]
-                  (let [key (kfn val)
-                        item (KeyedItem. key val nil false)]
+              ;; array of KeyedItem with manage instances
+              old-items items
+              ;; array of KeyedItem but managed will be set later
+              new-items (js/Array. new-len)
 
-                    (aset new-items idx item)
-                    (-assoc! keys key item)))
-                (-as-transient {})
-                new-coll))]
+              ;; traverse new coll once to build key map and render items
+              ^not-native new-keys
+              (-persistent!
+                (reduce-kv
+                  (fn [^not-native keys idx val]
+                    (let [key (kfn val)
+                          item (KeyedItem. key val nil false)]
 
-        (when (not= (-count new-keys) new-len)
-          (throw (ex-info "collection contains duplicated keys" {:coll new-coll :keys new-keys})))
+                      (aset new-items idx item)
+                      (-assoc! keys key item)))
+                  (-as-transient {})
+                  new-coll))]
 
-        (let [old-items
-              (.filter old-items
-                (fn [^KeyedItem item]
-                  (if (contains? new-keys (.-key item))
-                    true
-                    (do (p/destroy! (.-managed item) true)
-                        false))))]
+          (when (not= (-count new-keys) new-len)
+            (throw (ex-info "collection contains duplicated keys" {:coll new-coll :keys new-keys})))
 
-          ;; old-items now matches what is in the DOM and only contains items still present in new coll
+          (let [old-items
+                (.filter old-items
+                  (fn [^KeyedItem item]
+                    (if (contains? new-keys (.-key item))
+                      true
+                      (do (p/destroy! (.-managed item) true)
+                          false))))]
 
-          ;; this can never be more items than the new coll
-          ;; but it might be less in cases where items were removed
+            ;; old-items now matches what is in the DOM and only contains items still present in new coll
 
-          ;; now going backwards over the new collection and apply render results to items
-          ;; reverse order because of only being able to insert before anchor
+            ;; this can never be more items than the new coll
+            ;; but it might be less in cases where items were removed
 
-          ;; will create new items while traversing
-          ;; will move items when required
+            ;; now going backwards over the new collection and apply render results to items
+            ;; reverse order because of only being able to insert before anchor
 
-          (loop [anchor marker-after
-                 idx (dec new-len)
-                 old-idx (dec (alength old-items))]
+            ;; will create new items while traversing
+            ;; will move items when required
 
-            (when-not (neg? idx)
-              (let [^KeyedItem new-item (aget new-items idx)
-                    ^KeyedItem old-item (get item-keys (.-key new-item))]
+            (loop [anchor marker-after
+                   idx (dec new-len)
+                   old-idx (dec (alength old-items))]
 
-                (cond
-                  ;; item does not exist in old coll, just create and insert
-                  (not old-item)
-                  (let [rendered (rfn (.-data new-item) idx (.-key new-item))
-                        managed (p/as-managed rendered env)]
+              (when-not (neg? idx)
+                (let [^KeyedItem new-item (aget new-items idx)
+                      ^KeyedItem old-item (get item-keys (.-key new-item))]
 
-                    (p/dom-insert managed dom-parent anchor)
+                  (cond
+                    ;; item does not exist in old coll, just create and insert
+                    (not old-item)
+                    (let [rendered (rfn (.-data new-item) idx (.-key new-item))
+                          managed (p/as-managed rendered env)]
 
-                    ;; FIXME: call dom-entered! after syncing is done, item might not be in final position yet
-                    ;; other stuff may be inserted before it
-                    (when dom-entered?
-                      (p/dom-entered! managed))
+                      (p/dom-insert managed dom-parent anchor)
 
-                    (set! new-item -managed managed)
+                      ;; FIXME: call dom-entered! after syncing is done, item might not be in final position yet
+                      ;; other stuff may be inserted before it
+                      (when dom-entered?
+                        (p/dom-entered! managed))
 
-                    (recur (p/dom-first managed) (dec idx) old-idx))
+                      (set! new-item -managed managed)
 
-                  ;; item in same position, render update, move only when item was previously moved
-                  (identical? old-item (aget old-items old-idx))
-                  (let [^not-native managed (.-managed old-item)]
-                    ;; if the render-fn and data are identical we can skip over rendering them
-                    ;; since they rfn is supposed to be pure.
-                    ;; only checking identical? references since = may end up doing too much work
-                    ;; that the component/fragment will check again later anyways so we want to avoid
-                    ;; duplicating the work. skipping the rendering may save a couple allocation and
-                    ;; checks so this is worth doing when it can.
+                      (recur (p/dom-first managed) (dec idx) old-idx))
 
-                    ;; render-fn is never identical when using (render-seq coll key-fn (fn [data] ...))
-                    ;; but it is when using (render-seq coll key-fn component) or other function refs
-                    ;; that don't close over other data
+                    ;; item in same position, render update, move only when item was previously moved
+                    (identical? old-item (aget old-items old-idx))
+                    (let [^not-native managed (.-managed old-item)]
+                      ;; if the render-fn and data are identical we can skip over rendering them
+                      ;; since they rfn is supposed to be pure.
+                      ;; only checking identical? references since = may end up doing too much work
+                      ;; that the component/fragment will check again later anyways so we want to avoid
+                      ;; duplicating the work. skipping the rendering may save a couple allocation and
+                      ;; checks so this is worth doing when it can.
 
-                    (if (and rfn-identical? (identical? (.-data old-item) (.-data new-item)))
-                      (do (set! new-item -managed managed)
+                      ;; render-fn is never identical when using (render-seq coll key-fn (fn [data] ...))
+                      ;; but it is when using (render-seq coll key-fn component) or other function refs
+                      ;; that don't close over other data
 
-                          (when ^boolean (.-moved? old-item)
-                            ;; don't need to do this I think, never using old-item again
-                            ;; (set! old-item -moved? false)
-                            (p/dom-insert managed dom-parent anchor))
+                      (if (and rfn-identical? (identical? (.-data old-item) (.-data new-item)))
+                        (do (set! new-item -managed managed)
 
-                          (recur (p/dom-first managed) (dec idx) (dec old-idx)))
+                            (when ^boolean (.-moved? old-item)
+                              ;; don't need to do this I think, never using old-item again
+                              ;; (set! old-item -moved? false)
+                              (p/dom-insert managed dom-parent anchor))
 
-                      ;; need to render
-                      (let [rendered (rfn (.-data new-item) idx (.-key new-item))]
-                        (if (p/supports? managed rendered)
-                          ;; update in place if supported
-                          (do (p/dom-sync! managed rendered)
-                              (set! new-item -managed managed)
+                            (recur (p/dom-first managed) (dec idx) (dec old-idx)))
 
-                              ;; item was previously moved, move in DOM now
-                              (when ^boolean (.-moved? old-item)
-                                ;; don't need to do this I think, never using old-item again
-                                ;; (set! old-item -moved? false)
-                                (p/dom-insert managed dom-parent anchor))
+                        ;; need to render
+                        (let [rendered (rfn (.-data new-item) idx (.-key new-item))]
+                          (if (p/supports? managed rendered)
+                            ;; update in place if supported
+                            (do (p/dom-sync! managed rendered)
+                                (set! new-item -managed managed)
 
-                              (recur (p/dom-first managed) (dec idx) (dec old-idx)))
+                                ;; item was previously moved, move in DOM now
+                                (when ^boolean (.-moved? old-item)
+                                  ;; don't need to do this I think, never using old-item again
+                                  ;; (set! old-item -moved? false)
+                                  (p/dom-insert managed dom-parent anchor))
 
-                          ;; not updatable, swap.
-                          ;; unlikely given that key was the same, result should be the same.
-                          ;; still possible though
-                          (let [new-managed (p/as-managed rendered env)]
-                            (p/dom-insert new-managed dom-parent anchor)
-                            (when dom-entered?
-                              (p/dom-entered! new-managed))
-                            (p/destroy! managed true)
-                            (set! new-item -managed new-managed)
-                            (recur (p/dom-first new-managed) (dec idx) (dec old-idx))
-                            )))))
+                                (recur (p/dom-first managed) (dec idx) (dec old-idx)))
 
-                  ;; item not in proper position, find it and move it here
-                  ;; FIXME: this starts looking at the front of the collection
-                  ;; this might be a performance drain when collection is shuffled too much
-                  :else
-                  (let [seek-idx (.indexOf old-items old-item)
-                        ^KeyedItem old-item (aget old-items seek-idx)
-                        ^not-native managed (.-managed old-item)
+                            ;; not updatable, swap.
+                            ;; unlikely given that key was the same, result should be the same.
+                            ;; still possible though
+                            (let [new-managed (p/as-managed rendered env)]
+                              (p/dom-insert new-managed dom-parent anchor)
+                              (when dom-entered?
+                                (p/dom-entered! new-managed))
+                              (p/destroy! managed true)
+                              (set! new-item -managed new-managed)
+                              (recur (p/dom-first new-managed) (dec idx) (dec old-idx))
+                              )))))
 
-                        ;; current tail item
-                        ^KeyedItem item-at-idx (aget old-items old-idx)]
+                    ;; item not in proper position, find it and move it here
+                    ;; FIXME: this starts looking at the front of the collection
+                    ;; this might be a performance drain when collection is shuffled too much
+                    :else
+                    (let [seek-idx (.indexOf old-items old-item)
+                          ^KeyedItem old-item (aget old-items seek-idx)
+                          ^not-native managed (.-managed old-item)
 
-                    (set! item-at-idx -moved? true)
-                    (aset old-items seek-idx item-at-idx)
-                    (aset old-items old-idx old-item)
+                          ;; current tail item
+                          ^KeyedItem item-at-idx (aget old-items old-idx)]
 
-                    ;; again, may skip rendering if fully identical
-                    ;; still need to move it though
-                    (if (and rfn-identical? (identical? (.-data new-item) (.-data old-item)))
-                      (do (set! new-item -managed managed)
-                          (p/dom-insert managed dom-parent anchor)
-                          (recur (p/dom-first managed) (dec idx) (dec old-idx)))
+                      (set! item-at-idx -moved? true)
+                      (aset old-items seek-idx item-at-idx)
+                      (aset old-items old-idx old-item)
 
-                      ;; can't skip rendering
-                      (let [rendered (rfn (.-data new-item) idx (.-key new-item))]
-                        (if (p/supports? managed rendered)
-                          ;; update in place if supported
-                          (do (set! new-item -managed managed)
-                              (p/dom-sync! managed rendered)
-                              (p/dom-insert managed dom-parent anchor)
-                              (recur (p/dom-first managed) (dec idx) (dec old-idx)))
+                      ;; again, may skip rendering if fully identical
+                      ;; still need to move it though
+                      (if (and rfn-identical? (identical? (.-data new-item) (.-data old-item)))
+                        (do (set! new-item -managed managed)
+                            (p/dom-insert managed dom-parent anchor)
+                            (recur (p/dom-first managed) (dec idx) (dec old-idx)))
 
-                          ;; not updatable, swap.
-                          ;; unlikely given that key was the same, result should be the same.
-                          ;; still possible though
-                          (let [new-managed (p/as-managed rendered env)]
-                            (set! new-item -managed new-managed)
-                            (p/dom-insert new-managed dom-parent anchor)
-                            (when dom-entered?
-                              (p/dom-entered! new-managed))
-                            (p/destroy! managed true)
-                            (recur (p/dom-first new-managed) (dec idx) (dec old-idx))
-                            ))))))))))
+                        ;; can't skip rendering
+                        (let [rendered (rfn (.-data new-item) idx (.-key new-item))]
+                          (if (p/supports? managed rendered)
+                            ;; update in place if supported
+                            (do (set! new-item -managed managed)
+                                (p/dom-sync! managed rendered)
+                                (p/dom-insert managed dom-parent anchor)
+                                (recur (p/dom-first managed) (dec idx) (dec old-idx)))
 
-        (set! item-keys new-keys)
-        (set! items new-items)))
+                            ;; not updatable, swap.
+                            ;; unlikely given that key was the same, result should be the same.
+                            ;; still possible though
+                            (let [new-managed (p/as-managed rendered env)]
+                              (set! new-item -managed new-managed)
+                              (p/dom-insert new-managed dom-parent anchor)
+                              (when dom-entered?
+                                (p/dom-entered! new-managed))
+                              (p/destroy! managed true)
+                              (recur (p/dom-first new-managed) (dec idx) (dec old-idx))
+                              ))))))))))
+
+          (set! item-keys new-keys)
+          (set! items new-items))))
     :synced)
 
   (destroy! [this ^boolean dom-remove?]
@@ -262,6 +263,7 @@
 
       (KeyedCollection.
         env
+        coll
         key-fn
         render-fn
         items
@@ -282,8 +284,8 @@
 
 (declare SimpleCollectionInit)
 
-;; FIXME: verify this is actually faster in a meaningful way to have 2 separate impls
-;; seems like it should be faster but might not be
+(deftype SimpleItem [data managed])
+
 (deftype SimpleCollection
   [env
    ^:mutable coll
@@ -291,8 +293,7 @@
    ^:mutable ^array items
    marker-before
    marker-after
-   ^boolean ^:mutable dom-entered?
-   ]
+   ^boolean ^:mutable dom-entered?]
 
   p/IManaged
   (dom-first [this] marker-before)
@@ -300,71 +301,86 @@
   (dom-insert [this parent anchor]
     (.insertBefore parent marker-before anchor)
     (.forEach items
-      (fn [^not-native item]
-        (p/dom-insert item parent anchor)))
+      (fn [^SimpleItem item]
+        (p/dom-insert ^not-native (.-managed item) parent anchor)))
     (.insertBefore parent marker-after anchor))
 
   (dom-entered! [this]
     (set! dom-entered? true)
     (.forEach items
-      (fn [^not-native item]
-        (p/dom-entered! item))))
+      (fn [^SimpleItem item]
+        (p/dom-entered! ^not-native (.-managed item)))))
 
   (supports? [this next]
     (instance? SimpleCollectionInit next))
 
   (dom-sync! [this ^SimpleCollectionInit next]
-    (let [old-coll coll
-          new-coll (.-coll next)
-          dom-parent (.-parentNode marker-after)
+    (let [rfn-identical? (identical? render-fn (.-render-fn next))
 
-          oc (count old-coll)
-          nc (count new-coll)
+          ^not-native old-coll coll
+          ^not-native new-coll (.-coll next)]
 
-          max-idx (js/Math.min oc nc)]
+      ;; only checking identical since we want to avoid deep comparisons for items
+      ;; since the rendered results will likely do that again
+      (when-not (and rfn-identical? (identical? old-coll new-coll))
 
-      (when-not dom-parent
-        (throw (ex-info "sync while not in dom?" {})))
+        (let [dom-parent (.-parentNode marker-after)
 
-      (set! coll new-coll)
-      (set! render-fn (common/ifn2-wrap (.-render-fn next)))
+              oc (-count old-coll)
+              nc (-count new-coll)
 
-      (dotimes [idx max-idx]
-        (let [item (aget items idx)
-              new-val (nth new-coll idx)
-              new-rendered (render-fn new-val idx)]
+              max-idx (js/Math.min oc nc)]
 
-          (if (p/supports? item new-rendered)
-            (p/dom-sync! item new-rendered)
-            (let [new-managed (common/replace-managed env item new-rendered)]
-              (when dom-entered?
-                (p/dom-entered! new-managed))
-              (aset items idx new-managed)))))
+          (when-not dom-parent
+            (throw (ex-info "sync while not in dom?" {})))
 
-      (cond
-        (= oc nc)
-        :done
+          (set! coll new-coll)
+          (set! render-fn (.-render-fn next))
 
-        ;; old had more items, remove tail
-        ;; FIXME: might be faster to remove in last one first? less node re-ordering
-        (> oc nc)
-        (do (dotimes [idx (- oc nc)]
-              (let [idx (+ max-idx idx)
-                    item (aget items idx)]
-                (p/destroy! item true)))
-            (set! (.-length items) max-idx))
+          (let [^function rfn (common/ifn2-wrap render-fn)]
 
-        ;; old had fewer items, append at end
-        (< oc nc)
-        (dotimes [idx (- nc oc)]
-          (let [idx (+ max-idx idx)
-                val (nth new-coll idx)
-                rendered (render-fn val idx)
-                managed (p/as-managed rendered env)]
-            (.push items managed)
-            (p/dom-insert managed dom-parent marker-after)
-            (when dom-entered?
-              (p/dom-entered! managed))))))
+            (dotimes [idx max-idx]
+              (let [^SimpleItem item (aget items idx)
+                    ^not-native managed (.-managed item)
+                    new-data (-nth new-coll idx)]
+
+                (when-not (and rfn-identical? (identical? new-data (.-data item)))
+
+                  (let [new-rendered (rfn new-data idx)]
+                    (set! item -data new-data)
+
+                    (if (p/supports? managed new-rendered)
+                      (p/dom-sync! managed new-rendered)
+                      (let [new-managed (common/replace-managed env managed new-rendered)]
+                        (when dom-entered?
+                          (p/dom-entered! new-managed))
+
+                        (set! item -managed new-managed)))))))
+
+            (cond
+              (= oc nc)
+              :done
+
+              ;; old had more items, remove tail
+              ;; FIXME: might be faster to remove in last one first? less node re-ordering
+              (> oc nc)
+              (do (dotimes [idx (- oc nc)]
+                    (let [idx (+ max-idx idx)
+                          ^SimpleItem item (aget items idx)]
+                      (p/destroy! ^not-native (.-managed item) true)))
+                  (set! (.-length items) max-idx))
+
+              ;; old had fewer items, append at end
+              (< oc nc)
+              (dotimes [idx (- nc oc)]
+                (let [idx (+ max-idx idx)
+                      data (-nth new-coll idx)
+                      rendered (rfn data idx)
+                      managed (p/as-managed rendered env)]
+                  (.push items (SimpleItem. data managed))
+                  (p/dom-insert managed dom-parent marker-after)
+                  (when dom-entered?
+                    (p/dom-entered! managed)))))))))
 
     :synced)
 
@@ -376,8 +392,8 @@
         (.deleteContents)))
 
     (.forEach items
-      (fn [^not-native item]
-        (p/destroy! item false)))
+      (fn [^SimpleItem item]
+        (p/destroy! ^not-native (.-managed item) false)))
     ))
 
 (deftype SimpleCollectionInit [coll render-fn]
@@ -389,12 +405,12 @@
           rfn (common/ifn2-wrap render-fn)]
 
       (reduce-kv
-        (fn [_ idx val]
-          (aset arr idx (p/as-managed (rfn val idx) env)))
+        (fn [_ idx data]
+          (aset arr idx (SimpleItem. data (p/as-managed (rfn data idx) env))))
         nil
         coll)
 
-      (SimpleCollection. env coll rfn arr marker-before marker-after false)))
+      (SimpleCollection. env coll render-fn arr marker-before marker-after false)))
 
   IEquiv
   (-equiv [this ^SimpleCollectionInit other]

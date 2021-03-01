@@ -56,7 +56,8 @@
             (when-not (contains? next-keys key)
               (let [key-idx (get key-index key)
                     query-set (.get query-index-map key-idx)]
-                (.delete query-set query-id))))
+                (when ^boolean query-set
+                  (.delete query-set query-id)))))
           nil
           prev-keys)))))
 
@@ -76,7 +77,7 @@
                     (swap! key-index-ref assoc key idx)
                     idx))]
 
-          (let [query-set (.get query-index-map key-idx)]
+          (when-some [query-set (.get query-index-map key-idx)]
             (.delete query-set query-id))))
       nil
       keys)))

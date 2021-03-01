@@ -165,7 +165,7 @@
           (set! read-keys new-keys)
 
           ;; only need to index once
-          (when (nil? read-result)
+          (when (zero? read-count)
             (index-query query-env query-id nil new-keys))
 
           (if (keyword-identical? result :db/loading)
@@ -186,7 +186,9 @@
           (if (keyword-identical? result :db/loading)
             (set! read-result {})
             (do (set! read-result (if ident (get result ident) result))
-                (set! ready? true))))))))
+                (set! ready? true))))))
+
+    (set! read-count (inc read-count))))
 
 (deftype LocalEngine [rt-ref active-queries-map]
   gp/IQueryEngine
