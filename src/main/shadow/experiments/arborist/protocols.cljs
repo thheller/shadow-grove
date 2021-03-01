@@ -2,7 +2,7 @@
   (:refer-clojure :exclude #{swap!}))
 
 (defprotocol IManaged
-  (supports? [this next])
+  (^boolean supports? [this next])
   (dom-sync! [this next])
 
   (dom-insert [this parent anchor])
