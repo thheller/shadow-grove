@@ -87,7 +87,7 @@
   [^function send! active-queries-ref active-streams-ref pending-tx-ref]
   gp/IQueryEngine
   (query-hook-build [this env component idx ident query config]
-    (QueryHook. ident query config component idx env this (util/next-id) false nil))
+    (QueryHook. ident (or query [:db/all]) config component idx env this (util/next-id) false nil))
 
   (query-init [this query-id query config callback]
     (swap! active-queries-ref assoc query-id callback)

@@ -1,7 +1,6 @@
 (ns shadow.experiments.arborist.collections
   (:require
     [shadow.experiments.arborist.protocols :as p]
-    [shadow.experiments.arborist.fragments :as frag]
     [shadow.experiments.arborist.common :as common]))
 
 (declare KeyedCollectionInit)

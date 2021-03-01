@@ -153,23 +153,40 @@
 
   Object
   (do-read! [this]
-    ;; query env is not the component env
     (let [query-env @rt-ref
-          observed-data (db/observed @(::rt/data-ref query-env))
+          db @(::rt/data-ref query-env)]
 
-          db-query (if ident [{ident query}] query)
-          result (eql/query query-env observed-data db-query)
+      (if (and ident (nil? query))
+        ;; shortcut for just getting data for an ident
+        ;; don't need all the query stuff for those
+        (let [result (get db ident)
+              new-keys #{ident}]
 
-          new-keys (db/observed-keys observed-data)]
+          (set! read-keys new-keys)
 
-      (index-query query-env query-id read-keys new-keys)
+          ;; only need to index once
+          (when (nil? read-result)
+            (index-query query-env query-id nil new-keys))
 
-      (set! read-keys new-keys)
+          (if (keyword-identical? result :db/loading)
+            (set! read-result {})
+            (do (set! read-result result)
+                (set! ready? true))))
 
-      (if (keyword-identical? result :db/loading)
-        (set! read-result {})
-        (do (set! read-result (if ident (get result ident) result))
-            (set! ready? true))))))
+        ;; query env is not the component env
+        (let [observed-data (db/observed db)
+              db-query (if ident [{ident query}] query)
+              result (eql/query query-env observed-data db-query)
+              new-keys (db/observed-keys observed-data)]
+
+          (index-query query-env query-id read-keys new-keys)
+
+          (set! read-keys new-keys)
+
+          (if (keyword-identical? result :db/loading)
+            (set! read-result {})
+            (do (set! read-result (if ident (get result ident) result))
+                (set! ready? true))))))))
 
 (deftype LocalEngine [rt-ref active-queries-map]
   gp/IQueryEngine

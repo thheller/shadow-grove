@@ -43,6 +43,12 @@
       (gp/query-hook-build query-engine env component idx ident query config))))
 
 (defn query-ident
+  ;; shortcut for ident lookups that can skip EQL queries
+  ([ident]
+   {:pre [(vector? ident)]}
+   (QueryInit. ident nil {}))
+
+  ;; EQL queries
   ([ident query]
    (query-ident ident query {}))
   ([ident query config]
