@@ -224,9 +224,6 @@
 (defn simple-seq [coll render-fn]
   (sc/simple-seq coll render-fn))
 
-(defn render-seq [coll key-fn render-fn]
-  (sc/keyed-seq coll key-fn render-fn))
-
 (defn keyed-seq [coll key-fn render-fn]
   (sc/keyed-seq coll key-fn render-fn))
 
