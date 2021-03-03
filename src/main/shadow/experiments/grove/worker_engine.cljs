@@ -66,12 +66,12 @@
 
   (set-loading! [this]
     (set! ready? (false? (:suspend config)))
-    (set! read-result (assoc (:default config {}) ::loading-state :loading)))
+    (set! read-result (assoc (:default config {}) :shadow.experiments.grove/loading-state :loading)))
 
   (set-data! [this data]
     (let [data (if ident (get data ident) data)
           first-run? (nil? read-result)]
-      (set! read-result (assoc data ::loading-state :ready))
+      (set! read-result (assoc data :shadow.experiments.grove/loading-state :ready))
 
       ;; first run may provide result immedialy in which case which don't need to tell the
       ;; component that we are ready separately, it'll just check ready? on its own
