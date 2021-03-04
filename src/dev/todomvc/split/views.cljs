@@ -55,7 +55,7 @@
 
   (render
     (<< [:ul.filters
-         (sg/render-seq filter-options :value
+         (sg/keyed-seq filter-options :value
            (fn [{:keys [label value]}]
              (<< [:li [:a
                        {:class {:selected (= current-filter value)}
@@ -69,7 +69,7 @@
       [::m/filtered-todos]))
 
   (render
-    (<< [:ul.todo-list (sg/render-seq filtered-todos identity todo-item)])))
+    (<< [:ul.todo-list (sg/keyed-seq filtered-todos identity todo-item)])))
 
 (defc ui-root []
   (event ::m/set-filter! sg/tx)

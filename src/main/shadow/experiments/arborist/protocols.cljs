@@ -30,3 +30,7 @@
   (let [am (get (meta a) `as-managed)
         bm (get (meta b) `as-managed)]
     (and am bm (identical? am bm))))
+
+(defprotocol IHandleDOMEvents
+  (validate-dom-event-value! [this env event value])
+  (handle-dom-event! [this env event ev-value dom-event]))

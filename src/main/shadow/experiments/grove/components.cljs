@@ -179,6 +179,7 @@
       (-> parent-env
           (update ::depth safe-inc)
           (assoc ::parent (::component parent-env)
+                 ::p/dom-event-handler this
                  ::component this
                  ::scheduler this)))
 
@@ -270,7 +271,6 @@
         (if-some [parent (::component parent-env)]
           (gp/handle-event! parent ev-map e)
           (js/console.warn "event not handled" ev-id ev-map)))))
-
 
   gp/IScheduleUpdates
   (did-suspend! [this work-task]
@@ -494,6 +494,22 @@
   (set-slot! [this slot-id slot]
     (set! slots (assoc slots slot-id slot))))
 
+;; FIXME: no clue why I can't put this in ManagedComponent directly
+;; compiler complains with undeclared var ManagedComponent
+;; probably something in defclass I missed
+
+(extend-type ManagedComponent
+  p/IHandleDOMEvents
+  (validate-dom-event-value! [this env event ev-map]
+    (when ^boolean js/goog.DEBUG
+      (when-not (map? ev-map)
+        (throw (ex-info "event handler expects a map arg" {:event event :value ev-map})))))
+
+  (handle-dom-event! [this event-env event ev-map dom-event]
+    ;; (js/console.log "dom-event" this event-env event ev-map dom-event)
+    (gp/run-now! (.-scheduler this)
+      #(gp/handle-event! this ev-map dom-event))))
+
 (set! *warn-on-infer* true)
 
 (defn component-create [env ^gp/ComponentConfig config args]
@@ -519,78 +535,6 @@
 
 (defn component-init? [x]
   (instance? ComponentInit x))
-
-(defn call-event-fn [{::keys [^ManagedComponent component] :as env} ev-map e]
-  (when-not component
-    (throw (ex-info "event handlers can only be used in components" {:env env :event ev-map})))
-
-  (gp/run-now! (.-scheduler component) #(gp/handle-event! component ev-map e)))
-
-(defn event-attr [env node event oval ev-map]
-
-  (when ^boolean js/goog.DEBUG
-    (when-not (map? ev-map)
-      (throw (ex-info "event handler expects a map arg" {:event event :node node :nval ev-map}))))
-
-  (let [ev-key (str "__shadow$" (name event))]
-    (when-let [ev-fn (gobj/get node ev-key)]
-      (.removeEventListener node (name event) ev-fn))
-
-    ;(js/console.log "adding ev fn" val)
-
-    (let [ev-fn #(call-event-fn env ev-map %)
-          ev-opts #js {}]
-
-      ;; FIXME: need to track if once already happened. otherwise may re-attach and actually fire more than once
-      ;; but it should be unlikely to have a changing val with ^:once?
-      (when-let [m (meta ev-map)]
-        (when (:once m)
-          (gobj/set ev-opts "once" true))
-
-        (when (:passive m)
-          (gobj/set ev-opts "passive" true)))
-
-      ;; FIXME: ev-opts are not supported by all browsers
-      ;; closure lib probably has something to handle that
-      (.addEventListener node (name event) ev-fn ev-opts)
-
-      (gobj/set node ev-key ev-fn))))
-
-(a/add-attr :on-click
-  (fn [env node oval nval]
-    (event-attr env node :click oval nval)))
-
-(a/add-attr :on-dblclick
-  (fn [env node oval nval]
-    (event-attr env node :dblclick oval nval)))
-
-(a/add-attr :on-keydown
-  (fn [env node oval nval]
-    (event-attr env node :keydown oval nval)))
-
-(a/add-attr :on-change
-  (fn [env node oval nval]
-    (event-attr env node :change oval nval)))
-
-(a/add-attr :on-blur
-  (fn [env node oval nval]
-    (event-attr env node :blur oval nval)))
-
-(a/add-attr :on-mouseenter
-  (fn [env node oval nval]
-    (event-attr env node :mouseenter oval nval)))
-
-(a/add-attr :on-mousemove
-  (fn [env node oval nval]
-    (event-attr env node :mousemove oval nval)))
-
-(a/add-attr :on-mouseout
-  (fn [env node oval nval]
-    (event-attr env node :mouseout oval nval)))
-
-(a/add-attr :on-mouseleave
-  (fn [env node oval nval]
-    (event-attr env node :mouseleave oval nval)))
 
 (deftype HookConfig [depends-on affects run])
 

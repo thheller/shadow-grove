@@ -1,6 +1,7 @@
 (ns shadow.experiments.arborist.attributes
   (:require
     [goog.object :as gobj]
+    [goog.string :as gstr]
     [clojure.string :as str]
     [shadow.experiments.arborist.protocols :as p]
     ))
@@ -42,24 +43,83 @@
 (defn add-attr [^Keyword kw handler]
   {:pre [(keyword? kw)
          (fn? handler)]}
-  (js/goog.object.set attr-handlers (.-fqn kw) handler))
+  (gobj/set attr-handlers (.-fqn kw) handler))
+
+(defn dom-attribute? [name]
+  (or (str/starts-with? name "data-")
+      (str/starts-with? name "aria-")))
+
+(defonce camel-case-cache #js {})
+
+(defn camel-case [x]
+  (let [y (gobj/get camel-case-cache x)]
+    (if ^boolean y
+      y
+      (let [y (gstr/toCamelCase x)]
+        (gobj/set camel-case-cache x y)
+        y))))
+
+(defn event-attr [env node event oval nval]
+  (let [ev-key (str "__shadow$" event)]
+
+    (when-let [ev-fn (gobj/get node ev-key)]
+      (.removeEventListener node event ev-fn))
+
+    (when (some? nval)
+      (let [^not-native ev-handler (::p/dom-event-handler env)]
+
+        (when-not ev-handler
+          (throw (ex-info "missing dom-event-handler!" {:env env :event event :node node :value nval})))
+
+        ;; validate value now so it fails on construction
+        ;; slightly better experience than firing on-event
+        ;; easier to miss in tests and stuff that don't test particular events
+        (p/validate-dom-event-value! ev-handler env event nval)
+
+        (let [ev-fn (fn [dom-event] (p/handle-dom-event! ev-handler env event nval dom-event))
+              ev-opts #js {}]
+
+          ;; FIXME: need to track if once already happened. otherwise may re-attach and actually fire more than once
+          ;; but it should be unlikely to have a changing val with ^:once?
+          (when-let [m (meta nval)]
+            (when (:once m)
+              (gobj/set ev-opts "once" true))
+
+            (when (:passive m)
+              (gobj/set ev-opts "passive" true)))
+
+          ;; FIXME: ev-opts are not supported by all browsers
+          ;; closure lib probably has something to handle that
+          (.addEventListener node event ev-fn ev-opts)
+
+          (gobj/set node ev-key ev-fn))))))
 
 ;; quasi multi-method. not using multi-method because it does too much stuff I don't accidentally
 ;; want to run into (eg. keyword inheritance). while that might be interesting for some cases
 ;; it may also blow up badly. also this is less code in :advanced.
 (defn set-attr [env ^js node ^Keyword key oval nval]
   {:pre [(keyword? key)]}
-  (let [^function handler (js/goog.object.get attr-handlers (.-fqn key))]
-    (if (some? handler)
+  (let [^function handler (gobj/get attr-handlers (.-fqn key))]
+    (if ^boolean handler
       (handler env node oval nval)
 
-      ;; FIXME: behave like goog.dom.setProperties?
-      ;; https://github.com/google/closure-library/blob/31e914b9ecc5c6918e2e6462cbbd4c77f90be753/closure/goog/dom/dom.js#L453
-      ;; FIXME: for web component interop this shouldn't be using setAttribute
-      (if nval
-        (.setAttribute node (.-name key) nval)
-        (.removeAttribute node (.-name key))))))
+      (let [prop-name (.-name key)]
+        (cond
+          (dom-attribute? prop-name)
+          (.setAttribute node prop-name nval)
 
+          ;; :on-* convention for events
+          ;; only handled when there is an actual handler for it registered in the env
+          ;; which will usually be components which I don't want to reference here
+          ;; but is common enough that it should also be extensible somewhat
+          (str/starts-with? prop-name "on-")
+          (event-attr env node (subs prop-name 3) oval nval)
+
+          :else
+          (gobj/set node (camel-case prop-name) nval)
+          )))))
+
+;; special case "for" -> "htmlFor"
 (add-attr :for
   (fn [env ^js node oval nval]
     (set! node -htmlFor nval)))

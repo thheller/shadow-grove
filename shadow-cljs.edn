@@ -38,7 +38,8 @@
 
   :test
   {:target :browser-test
-   :test-dir "out/browser-test"}
+   :test-dir "out/browser-test"
+   :compiler-options {:output-feature-set :es-next}}
 
   :todomvc-simple
   {:target :browser

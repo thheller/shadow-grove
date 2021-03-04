@@ -92,34 +92,12 @@
    keys-removed
    keys-updated]
 
-  ;; ignoring keys-removed since that would notify components that queried the removed data
-  ;; leading to an empty query result which they can't do anything with
-  ;; most likely there is another collection that referenced the deleted item
-  ;; and will no longer contain it and leading to render-seq unmounting the component
-  ;; we didn't notify
-
-  ;; FIXME: this is a theory, need to verify that is good enough
-
-  ;; it won't work for cases where a component queries an ident directly
-  ;; without that ident being part of some collection that caused the mount
-  ;; in the first place.
-
-  ;; to fix this properly the queries would need to be refreshed in tree order
-  ;; but that would need to interleave the actual re-render since we only know
-  ;; things unmounted after render.
-
-  ;; there should be better ways to handle removal of data
-
-  ;; maybe instead of just (dissoc db key) it could (assoc db key :db/removed)
-  ;; so on query we could detect deleted data and have the query choose how to handle it?
-
   ;; before we can invalidate anything we need to make sure the index is updated
   ;; we delay updating index stuff to be async since we only need it here later
   (when query-index-queue-flush!
     (query-index-queue-flush!))
 
-
-  (let [keys-to-invalidate (set/union keys-new keys-updated)
+  (let [keys-to-invalidate (set/union keys-new keys-updated keys-removed)
         key-index @key-index-ref
         query-ids (js/Set.)]
 

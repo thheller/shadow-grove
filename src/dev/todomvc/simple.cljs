@@ -95,14 +95,14 @@
                  :checked false}]
                [:label {:for "toggle-all"} "Mark all as complete"]
 
-               [:ul.todo-list (sg/render-seq filtered-todos identity todo-item)]
+               [:ul.todo-list (sg/keyed-seq filtered-todos identity todo-item)]
 
                [:footer.footer
                 [:span.todo-count
                  [:strong num-active] (if (= num-active 1) " item" " items") " left"]
 
                 [:ul.filters
-                 (sg/render-seq filter-options :value
+                 (sg/keyed-seq filter-options :value
                    (fn [{:keys [label value]}]
                      (<< [:li [:a
                                {:class {:selected (= current-filter value)}
