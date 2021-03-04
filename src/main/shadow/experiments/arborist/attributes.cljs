@@ -130,8 +130,13 @@
       :else
       (let [prop (gstr/toCamelCase prop-name)]
         (fn [env node oval nval]
-          (gobj/set node prop nval))
-        ))))
+          ;; FIXME: must all attributes in svg elements go with setAttribute?
+          ;; can you make web components for svg elements?
+          ;; seems to break if we try to go with node.width=24 instead of .setAttribute
+          (if ^boolean (:dom/svg env)
+            (set-dom-attribute node (.-name key) nval)
+            (gobj/set node prop nval)
+            ))))))
 
 ;; quasi multi-method. not using multi-method because it does too much stuff I don't accidentally
 ;; want to run into (eg. keyword inheritance). while that might be interesting for some cases
