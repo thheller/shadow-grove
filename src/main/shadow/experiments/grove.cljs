@@ -258,18 +258,6 @@
 (defn track-change [val trigger-fn]
   (TrackChange. val trigger-fn nil nil nil nil))
 
-(a/add-attr :dom/ref
-  (fn [env node oval nval]
-    (cond
-      (nil? nval)
-      (vreset! oval nil)
-
-      (some? nval)
-      (vreset! nval node)
-
-      :else
-      nil)))
-
 ;; using volatile so nobody gets any ideas about add-watch
 ;; pretty sure that would cause havoc on the entire rendering
 ;; if sometimes does work immediately on set before render can even complete

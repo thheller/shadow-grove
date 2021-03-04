@@ -8,8 +8,6 @@
 
 (defonce attr-handlers #js {})
 
-;; FIXME: keep this code short, due to the set-attr* multimethod nothing this uses will ever be removed
-
 (defn vec->class [v]
   (reduce
     (fn [s c]
@@ -49,50 +47,90 @@
   (or (str/starts-with? name "data-")
       (str/starts-with? name "aria-")))
 
-(defonce camel-case-cache #js {})
+(defn set-dom-attribute [^js node prop-name nval]
+  (cond
+    (string? nval)
+    (.setAttribute node prop-name nval)
 
-(defn camel-case [x]
-  (let [y (gobj/get camel-case-cache x)]
-    (if ^boolean y
-      y
-      (let [y (gstr/toCamelCase x)]
-        (gobj/set camel-case-cache x y)
-        y))))
+    (number? nval)
+    (.setAttribute node prop-name nval)
 
-(defn event-attr [env node event oval nval]
-  (let [ev-key (str "__shadow$" event)]
+    (nil? nval)
+    (.removeAttribute node prop-name)
 
-    (when-let [ev-fn (gobj/get node ev-key)]
-      (.removeEventListener node event ev-fn))
+    (false? nval)
+    (.removeAttribute node prop-name)
 
-    (when (some? nval)
-      (let [^not-native ev-handler (::p/dom-event-handler env)]
+    ;; convention according to
+    ;; https://developer.mozilla.org/en-US/docs/Web/API/Element/setAttribute
+    ;; looks a little bit better in the inspector, no clue if this actually
+    ;; makes a difference anywhere
+    ;; <div data-thing> vs <div data-thing="true">
+    (true? nval)
+    (.setAttribute node prop-name "")
 
-        (when-not ev-handler
-          (throw (ex-info "missing dom-event-handler!" {:env env :event event :node node :value nval})))
+    :else
+    (.setAttribute node prop-name nval)))
 
-        ;; validate value now so it fails on construction
-        ;; slightly better experience than firing on-event
-        ;; easier to miss in tests and stuff that don't test particular events
-        (p/validate-dom-event-value! ev-handler env event nval)
+(defn make-attr-handler [^Keyword key]
+  (let [prop-name (.-name key)]
+    (when ^boolean (.-namespace key)
+      (throw
+        (ex-info
+          (str "namespaced attribute without setter: " key)
+          {:attr key})))
 
-        (let [ev-fn (fn [dom-event] (p/handle-dom-event! ev-handler env event nval dom-event))
-              ev-opts #js {}]
+    (cond
+      (dom-attribute? prop-name)
+      (fn [env node oval nval]
+        (set-dom-attribute node prop-name nval))
 
-          ;; FIXME: need to track if once already happened. otherwise may re-attach and actually fire more than once
-          ;; but it should be unlikely to have a changing val with ^:once?
-          (when-let [m (meta nval)]
-            (when (:once m)
-              (gobj/set ev-opts "once" true))
+      ;; :on-* convention for events
+      ;; only handled when there is an actual handler for it registered in the env
+      ;; which will usually be components which I don't want to reference here
+      ;; but is common enough that it should also be extensible somewhat
+      (str/starts-with? prop-name "on-")
+      (let [event (subs prop-name 3)
+            ev-key (str "__shadow$" event)]
 
-            (when (:passive m)
-              (gobj/set ev-opts "passive" true)))
+        (fn [env node oval nval]
+          (when-let [ev-fn (gobj/get node ev-key)]
+            (.removeEventListener node event ev-fn))
 
-          ;; FIXME: ev-opts are not supported by all browsers
-          ;; closure lib probably has something to handle that
-          (.addEventListener node event ev-fn ev-opts)
+          (when (some? nval)
+            (let [^not-native ev-handler (::p/dom-event-handler env)]
 
-          (gobj/set node ev-key ev-fn))))))
+              (when-not ev-handler
+                (throw (ex-info "missing dom-event-handler!" {:env env :event event :node node :value nval})))
+
+              ;; validate value now so it fails on construction
+              ;; slightly better experience than firing on-event
+              ;; easier to miss in tests and stuff that don't test particular events
+              (p/validate-dom-event-value! ev-handler env event nval)
+
+              (let [ev-fn (fn [dom-event] (p/handle-dom-event! ev-handler env event nval dom-event))
+                    ev-opts #js {}]
+
+                ;; FIXME: need to track if once already happened. otherwise may re-attach and actually fire more than once
+                ;; but it should be unlikely to have a changing val with ^:once?
+                (when-let [m (meta nval)]
+                  (when (:once m)
+                    (gobj/set ev-opts "once" true))
+
+                  (when (:passive m)
+                    (gobj/set ev-opts "passive" true)))
+
+                ;; FIXME: ev-opts are not supported by all browsers
+                ;; closure lib probably has something to handle that
+                (.addEventListener node event ev-fn ev-opts)
+
+                (gobj/set node ev-key ev-fn))))))
+
+      :else
+      (let [prop (gstr/toCamelCase prop-name)]
+        (fn [env node oval nval]
+          (gobj/set node prop nval))
+        ))))
 
 ;; quasi multi-method. not using multi-method because it does too much stuff I don't accidentally
 ;; want to run into (eg. keyword inheritance). while that might be interesting for some cases
@@ -103,21 +141,12 @@
     (if ^boolean handler
       (handler env node oval nval)
 
-      (let [prop-name (.-name key)]
-        (cond
-          (dom-attribute? prop-name)
-          (.setAttribute node prop-name nval)
-
-          ;; :on-* convention for events
-          ;; only handled when there is an actual handler for it registered in the env
-          ;; which will usually be components which I don't want to reference here
-          ;; but is common enough that it should also be extensible somewhat
-          (str/starts-with? prop-name "on-")
-          (event-attr env node (subs prop-name 3) oval nval)
-
-          :else
-          (gobj/set node (camel-case prop-name) nval)
-          )))))
+      ;; create and store attr handler for later
+      ;; avoids doing the same kind of work over and over to figure out what a key meant
+      (let [^function handler (make-attr-handler key)]
+        (gobj/set attr-handlers (.-fqn key) handler)
+        (handler env node oval nval)
+        ))))
 
 ;; special case "for" -> "htmlFor"
 (add-attr :for
@@ -178,6 +207,18 @@
       (if ^boolean (:dom/svg env)
         (.setAttribute node "class" sval)
         (set! node -className sval)))))
+
+(add-attr :dom/ref
+  (fn [env node oval nval]
+    (cond
+      (nil? nval)
+      (vreset! oval nil)
+
+      (some? nval)
+      (vreset! nval node)
+
+      :else
+      nil)))
 
 (defn merge-attrs
   "merge attributes from old/new attr maps"
