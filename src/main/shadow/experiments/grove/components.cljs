@@ -501,9 +501,11 @@
 (extend-type ManagedComponent
   p/IHandleDOMEvents
   (validate-dom-event-value! [this env event ev-map]
-    (when ^boolean js/goog.DEBUG
-      (when-not (map? ev-map)
-        (throw (ex-info "event handler expects a map arg" {:event event :value ev-map})))))
+    (when-not (map? ev-map)
+      (throw
+        (ex-info
+          (str "event: " event " expects a map value")
+          {:event event :value ev-map}))))
 
   (handle-dom-event! [this event-env event ev-map dom-event]
     ;; (js/console.log "dom-event" this event-env event ev-map dom-event)

@@ -103,10 +103,11 @@
               (when-not ev-handler
                 (throw (ex-info "missing dom-event-handler!" {:env env :event event :node node :value nval})))
 
-              ;; validate value now so it fails on construction
-              ;; slightly better experience than firing on-event
-              ;; easier to miss in tests and stuff that don't test particular events
-              (p/validate-dom-event-value! ev-handler env event nval)
+              (when ^boolean js/goog.DEBUG
+                ;; validate value now in dev so it fails on construction
+                ;; slightly better experience than firing on-event
+                ;; easier to miss in tests and stuff that don't test particular events
+                (p/validate-dom-event-value! ev-handler env event nval))
 
               (let [ev-fn (fn [dom-event] (p/handle-dom-event! ev-handler env event nval dom-event))
                     ev-opts #js {}]
