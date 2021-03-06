@@ -219,5 +219,5 @@
 (defn refresh-all-queries! [app-ref]
   (let [{::rt/keys [active-queries-map]} @app-ref]
     (.forEach active-queries-map
-      (fn [query-id query]
+      (fn [query query-id]
         (.do-read! query)))))
