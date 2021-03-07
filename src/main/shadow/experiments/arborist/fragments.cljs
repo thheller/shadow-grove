@@ -1,4 +1,5 @@
 (ns shadow.experiments.arborist.fragments
+  (:require-macros [shadow.experiments.arborist.fragments])
   (:require
     [shadow.experiments.arborist.protocols :as p]
     [shadow.experiments.arborist.attributes :as a]
@@ -113,6 +114,8 @@
 ;; for fallback code, relying on registry
 (def ^{:jsdoc ["@dict"]} known-fragments #js {})
 
+(defn reset-known-fragments! []
+  (set! known-fragments #js {}))
 
 (defn create-text
   ;; {:jsdoc ["@noinline"]}

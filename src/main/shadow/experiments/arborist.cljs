@@ -2,8 +2,7 @@
   {:doc "Arborists generally focus on the health and safety of individual plants and trees."
    :definition "https://en.wikipedia.org/wiki/Arborist"}
   (:require-macros
-    [shadow.experiments.arborist]
-    [shadow.experiments.arborist.fragments])
+    [shadow.experiments.arborist])
   (:require
     [shadow.experiments.arborist.protocols :as p]
     [shadow.experiments.arborist.fragments :as frag]

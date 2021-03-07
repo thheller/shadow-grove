@@ -8,10 +8,11 @@
  ["-XX:-OmitStackTraceInFastThrow"]
 
  :version
- "2.11.18"
+ "2.11.21"
 
  :dependencies
- [[metosin/reitit-core "0.5.12"]
+ [[com.google.javascript/closure-compiler-unshaded "v20210302"]
+  [metosin/reitit-core "0.5.12"]
   [com.wsscode/pathom "2.2.28"]
   ;; for benchmark purposes, not actually a dependency
   [reagent "0.9.0-rc3"]]
@@ -22,7 +23,8 @@
   3007 "examples/todomvc-split"
   3008 "examples/suspense"
   3009 "examples/bench-fragment"
-  3010 "out/browser-test"}
+  3010 "out/browser-test"
+  3011 "examples/app/public"}
 
  :build-defaults
  {:compiler-options
@@ -32,7 +34,25 @@
    :shadow-keywords true}}
 
  :builds
- {:test-dom
+ {:examples-bootstrap
+  {:target :bootstrap
+   :output-dir "examples/app/public/bootstrap"
+   :exclude #{cljs.js}
+   :entries [shadow.experiments.grove]
+   :macros []}
+
+  :examples-host
+  {:target :browser
+   :asset-path "js"
+   :output-dir "examples/app/public/js"
+
+   :modules {:main {:init-fn shadow.experiments.grove.examples.app/init}}
+
+   :compiler-options
+   {:optimizations :simple
+    :output-wrapper false}}
+
+  :test-dom
   {:target :browser
    :modules {:main {:init-fn shadow.experiments.grove.test-app.dom/init}}}
 

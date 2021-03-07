@@ -371,10 +371,13 @@
        ~@destroy-calls)))
 
 (def shadow-analyze-top
-  (try
-    (find-var 'shadow.build.compiler/*analyze-top*)
-    (catch Exception e
-      nil)))
+  #?(:cljs
+     nil
+     :clj
+     (try
+       (find-var 'shadow.build.compiler/*analyze-top*)
+       (catch Exception e
+         nil))))
 
 (defn make-fragment [macro-env macro-form body]
   (let [env
@@ -476,7 +479,9 @@
     (if (and (= 1 (count ast))
              (= :code-ref (:op (first ast))))
       (-> @(:code-ref env) first key)
-      (if-let [analyze-top (and (not (false? (::optimize macro-env))) shadow-analyze-top @shadow-analyze-top)]
+      (if-let [analyze-top (and (not (false? (::optimize macro-env)))
+                                shadow-analyze-top
+                                @shadow-analyze-top)]
         ;; optimal variant, best performance, requires special support from compiler
         (do (analyze-top (with-meta `(def ~code-id ~fragment-code) (meta macro-form)))
             `(fragment-init (cljs.core/array ~@code-snippets) ~ns-hint ~code-id))
@@ -489,6 +494,11 @@
              (cljs.core/unchecked-get known-fragments ~frag-id)
              (cljs.core/unchecked-set known-fragments ~frag-id ~fragment-code)))))))
 
+(defmacro html [& body]
+  (make-fragment &env &form body))
+
+(defmacro svg [& body]
+  (make-fragment (assoc &env ::svg true) &form body))
 
 (comment
   (require 'clojure.pprint)

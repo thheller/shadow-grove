@@ -1,25 +1,23 @@
-(ns shadow.experiments.grove
-  (:require [shadow.experiments.grove.components :as comp]
-            [shadow.experiments.arborist.fragments :as fragments]))
+(ns shadow.experiments.grove)
 
 ;; just for convenience, less imports for the user
 
 (defmacro defc [& args]
-  `(comp/defc ~@args))
+  `(shadow.experiments.grove.components/defc ~@args))
 
 (defmacro << [& body]
-  (fragments/make-fragment &env &form body))
+  (with-meta `(shadow.experiments.arborist.fragments/html ~@body) (meta &form)))
 
 ;; I prefer << but <> looks more familiar to reagent :<>
 ;; costs nothing to have both, let the user decide
 (defmacro <> [& body]
-  (fragments/make-fragment &env &form body))
+  (with-meta `(shadow.experiments.arborist.fragments/html ~@body) (meta &form)))
 
 (defmacro fragment [& body]
-  (fragments/make-fragment &env &form body))
+  (with-meta `(shadow.experiments.arborist.fragments/html ~@body) (meta &form)))
 
 (defmacro html [& body]
-  (fragments/make-fragment &env &form body))
+  (with-meta `(shadow.experiments.arborist.fragments/html ~@body) (meta &form)))
 
 (defmacro svg [& body]
-  (fragments/make-fragment (assoc &env ::fragments/svg true) &form body))
+  (with-meta `(shadow.experiments.arborist.fragments/svg ~@body) (meta &form)))

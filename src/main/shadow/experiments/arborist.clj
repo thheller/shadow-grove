@@ -1,25 +1,18 @@
-(ns shadow.experiments.arborist
-  (:require
-    [shadow.experiments.arborist.fragments :as fragments]
-    [shadow.experiments.grove.components :as comp]))
+(ns shadow.experiments.arborist)
 
 (defmacro << [& body]
-  (fragments/make-fragment &env &form body))
+  (with-meta `(shadow.experiments.arborist.fragments/html ~@body) (meta &form)))
 
 ;; I prefer << but <> looks more familiar to reagent :<>
 ;; costs nothing to have both, let the user decide
 (defmacro <> [& body]
-  (fragments/make-fragment &env &form body))
+  (with-meta `(shadow.experiments.arborist.fragments/html ~@body) (meta &form)))
 
 (defmacro fragment [& body]
-  (fragments/make-fragment &env &form body))
+  (with-meta `(shadow.experiments.arborist.fragments/html ~@body) (meta &form)))
 
 (defmacro html [& body]
-  (fragments/make-fragment &env &form body))
+  (with-meta `(shadow.experiments.arborist.fragments/html ~@body) (meta &form)))
 
 (defmacro svg [& body]
-  (fragments/make-fragment (assoc &env ::fragments/svg true) &form body))
-
-;; only here for bench-fragment, do not use directly.
-(defmacro fragment-fallback [& body]
-  (fragments/make-fragment (assoc &env ::fragments/optimize false) &form body))
+  (with-meta `(shadow.experiments.arborist.fragments/svg ~@body) (meta &form)))
