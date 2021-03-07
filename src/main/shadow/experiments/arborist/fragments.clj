@@ -67,49 +67,6 @@
 
 (declare analyze-node)
 
-(defn analyze-component [env [component attrs :as el]]
-  ;; FIXME: decide if [some-component ...] should be allowed alongside [:div ...]
-  ;; probably going to remove [some-component arg1 arg2] since it makes guessing if there are attributes
-  ;; annoying and calling (some-component arg1 arg2) makes it clear that its a regular fn call
-  ;; the only place where the vector style makes sense is for passing "slot" elements
-  ;; [some-component {:props 1} [:h1 "hello"] ...] but that is enough of a special case
-  ;; to warrant special syntax, this isn't too bad and avoids all ambiguities when parsing hiccup
-  ;; [:> (some-component {:props 1})
-  ;;   [:h1 "hello"]
-  ;;   [:p "world]]
-  ;; multi slot?
-  ;; [:> (some-component {:props 1})
-  ;;   [:slot/title
-  ;;     [:h1 "hello"]]
-  ;;   [:slot/body
-  ;;     [:p "world"]]]
-
-  ;; so the only remaining cause is [some-kw ...] if someone wants to dynamically switch between :div :button or so
-  ;; but that can also by covered by [:> (some-helper :div {:props 1}) ...]
-  (throw (ex-info "only keywords allowed, use (component {...}) for components"
-           (merge (meta el) {:type ::input-error})))
-
-  (assert (>= (count el) 1))
-  (let [id (next-el-id env)
-        el-sym (symbol (str "c" id))
-
-        [attrs children]
-        (if (and attrs (map? attrs))
-          [attrs (subvec el 2)]
-          [nil (subvec el 1)])
-
-        child-env
-        (assoc env :parent [:component el-sym])]
-
-    {:op :component
-     :parent (:parent env)
-     :component (make-code env component {})
-     :attrs (when attrs (make-code env attrs {}))
-     :element-id id
-     :sym el-sym
-     :src el
-     :children (into [] (map #(analyze-node child-env %)) children)}))
-
 (defn with-loc [{:keys [src] :as ast} form]
   (if-not src
     form
@@ -195,10 +152,8 @@
   (let [tag-kw (nth el 0)]
     (cond
       (not (keyword? tag-kw))
-      (analyze-component env el)
-
-      #_#_(= :> tag-kw)
-          (analyze-slotted env el)
+      (throw (ex-info "only keywords allowed, use (component {...}) for components"
+               (merge (meta el) {:type ::input-error})))
 
       ;; automatic switch to svg by turning
       ;; [:svg ...] into (svg [:svg ...])
@@ -255,26 +210,8 @@
                     (update :bindings conj sym (with-loc ast `(~element-fn-sym ~(:tag ast))))
                     (cond->
                       (and parent-sym (= parent-type :element))
-                      (update :mutations conj (with-loc ast `(append-child ~parent-sym ~sym)))
-
-                      (and parent-sym (= parent-type :component))
-                      (update :mutations conj (with-loc ast `(component-append ~parent-sym ~sym))))
+                      (update :mutations conj (with-loc ast `(append-child ~parent-sym ~sym))))
                     (reduce-> step-fn (:children ast)))
-
-                #_#_:component
-                    (-> env
-                        (update :bindings conj sym
-                          (with-loc ast
-                            `(component-create ~env-sym
-                               (aget ~vals-sym ~(-> ast :component :ref-id))
-                               ~(if-not (:attrs ast)
-                                  {}
-                                  `(aget ~vals-sym ~(-> ast :attrs :ref-id))))))
-                        (update :return conj sym)
-                        (cond->
-                          parent-sym
-                          (update :mutations conj (with-loc ast `(managed-append ~parent-sym ~sym))))
-                        (reduce-> step-fn (:children ast)))
 
                 :text
                 (-> env
@@ -329,22 +266,6 @@
             (case op
               :element
               (reduce-> mutations step-fn (:children ast))
-
-              #_#_:component
-                  (-> env
-                      (update :mutations conj
-                        (with-loc ast
-                          `(component-update
-                             ~env-sym
-                             ~exports-sym
-                             ~(:element-id ast)
-                             (aget ~oldv-sym ~(-> ast :component :ref-id))
-                             (aget ~newv-sym ~(-> ast :component :ref-id))
-                             ~@(if-not (-> ast :attrs)
-                                 [{} {}]
-                                 [`(aget ~oldv-sym ~(-> ast :attrs :ref-id))
-                                  `(aget ~newv-sym ~(-> ast :attrs :ref-id))]))))
-                      (reduce-> step-fn (:children ast)))
 
               :text
               mutations

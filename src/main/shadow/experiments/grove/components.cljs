@@ -156,7 +156,6 @@
   (field root)
   (field args)
   (field rendered-args)
-  (field slots {})
   (field ^number current-idx (int 0))
   (field ^array hooks)
   (field ^array hooks-with-effects #js [])
@@ -486,13 +485,7 @@
   (did-update! [this did-render?]
     (.forEach hooks-with-effects
       (fn [^not-native item]
-        (gp/hook-did-update! item did-render?))))
-
-  (get-slot [this slot-id]
-    (get slots slot-id))
-
-  (set-slot! [this slot-id slot]
-    (set! slots (assoc slots slot-id slot))))
+        (gp/hook-did-update! item did-render?)))))
 
 ;; FIXME: no clue why I can't put this in ManagedComponent directly
 ;; compiler complains with undeclared var ManagedComponent
@@ -593,10 +586,6 @@
 (defn arg-triggers-render! [^ManagedComponent comp idx]
   (.set-render-required! comp))
 
-(defn get-slot [^ManagedComponent comp slot-id]
-  {:pre [(keyword? slot-id)]}
-  (.get-slot comp slot-id))
-
 (defn get-env [^ManagedComponent comp]
   (.-component-env comp))
 
@@ -632,53 +621,4 @@
   default
   (hook-build [val component idx]
     (SimpleVal. val)))
-
-(deftype SlotHook
-  [slot-id ^ManagedComponent component idx node]
-  gp/IBuildHook
-  (hook-build [this c i]
-    (SlotHook. slot-id c i (common/dom-marker (get-env c))))
-
-  p/IConstruct
-  (as-managed [this env]
-    ;; FIXME: throw if env is not identical to our component env?
-    this)
-
-  p/IManaged
-  (dom-first [this] node)
-  (dom-insert [this parent anchor]
-    (when (.-parentNode node)
-      (throw (ex-info "slot already in document" {})))
-
-    (.insertBefore parent node anchor))
-
-  (dom-entered! [this]
-    (js/console.log "slot entered" this))
-
-  (supports? [this ^SlotHook other]
-    (identical? this other))
-
-  (dom-sync! [this other])
-
-  (destroy! [this ^boolean dom-remove?]
-    (when dom-remove?
-      (.remove node)))
-
-  gp/IHook
-  (hook-init! [this]
-    (.set-slot! component slot-id this))
-  (hook-ready? [this] true)
-  (hook-value [this] this)
-  (hook-update! [this]
-    (throw (ex-info "slot can't update?" {})))
-  (hook-deps-update! [this new-val]
-    (throw (ex-info "slot can't update?" {})))
-  (hook-destroy! [this]))
-
-(defn slot
-  ([]
-   (slot :default))
-  ([slot-id]
-   {:pre [(keyword? slot-id)]}
-   (SlotHook. slot-id nil nil nil)))
 

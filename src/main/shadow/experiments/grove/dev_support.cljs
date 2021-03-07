@@ -36,7 +36,6 @@
      :rendered-args (.-rendered-args this)
      :events (.-events this)
      :root (.-root this)
-     :slots (.-slots this)
      :current-idx (.-current-idx this)
      :hooks (vec (.-hooks this))
      :hook-values (into [] (map (fn [idx] (gp/hook-value (aget (.-hooks this) idx))))
