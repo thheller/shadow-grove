@@ -195,6 +195,17 @@
       (ap/destroy! app-root)
       (dissoc env ::app-root ::root-el)))
 
+;; FIXME: better public API for running tx outside component tree
+;; run-tx takes component env currently, maybe should also accept runtime ref?
+
+(defn app-tx [app-id tx]
+  (let [env (get @active-apps-ref app-id)]
+    (when-not env
+      (throw (ex-info "app not initialized" {:app-id app-id})))
+
+    ;; FIXME: should this use run-now!? likely calling this before any components are mounted
+    (run-tx env tx)))
+
 (defn watch
   "hook that watches an atom and triggers an update on change
    accepts an optional path-or-fn arg that can be used for quick diffs

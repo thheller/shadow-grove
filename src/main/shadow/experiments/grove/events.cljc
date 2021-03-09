@@ -117,7 +117,7 @@
     ;; FIXME: figure out if this can be smarter
     (.forEach query-ids
       (fn [query-id]
-        (let [query (.get active-queries-map query-id)]
+        (when-some [query (.get active-queries-map query-id)]
           (query-refresh! query))))))
 
 (defn tx*
@@ -143,7 +143,14 @@
             (db/transacted before)
 
             tx-env
-            (assoc env :db tx-db)
+            (assoc env
+              :db tx-db
+              ;; FIXME: should this be strict and only allow chaining tx from fx handlers?
+              ;; should be forbidden to execute side effects directly in tx handlers?
+              ;; but how do we enforce this cleanly? this feels kinda dirty maybe needless indirection?
+              :transact!
+              (fn [next-tx]
+                (throw (ex-info "transact! only allowed from fx env" {:tx next-tx}))))
 
             {^clj tx-after :db return-value :return :as result}
             (handler-fn tx-env tx)]

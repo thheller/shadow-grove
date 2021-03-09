@@ -8,7 +8,7 @@
  ["-XX:-OmitStackTraceInFastThrow"]
 
  :version
- "2.11.21"
+ "2.11.22"
 
  :dependencies
  [[com.google.javascript/closure-compiler-unshaded "v20210302"]
@@ -29,7 +29,6 @@
  :build-defaults
  {:compiler-options
   {:fn-invoke-direct true
-   ;; :infer-externs :auto
    :shadow-tweaks true
    :shadow-keywords true}}
 
@@ -50,7 +49,10 @@
 
    :compiler-options
    {:optimizations :simple
-    :output-wrapper false}}
+    :output-wrapper false}
+
+   :js-options
+   {:js-package-dirs ["packages/examples/node_modules"]}}
 
   :test-dom
   {:target :browser

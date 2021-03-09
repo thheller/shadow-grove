@@ -3,12 +3,11 @@
   "version": "0.0.1",
   "private": true,
   "devDependencies": {
-    "shadow-cljs": "2.11.4"
+    "shadow-cljs": "2.11.21"
   },
   "dependencies": {
     "benchmark": "^2.1.4",
     "microtime": "^3.0.0",
-    "prettier": "^2.2.1",
     "react": "^16.12.0",
     "react-dom": "^16.12.0"
   }

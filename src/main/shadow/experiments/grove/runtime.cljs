@@ -7,10 +7,10 @@
 ;; actual code shouldn't use this anywhere
 (defonce known-runtimes-ref (atom {}))
 
-(defn prepare [init-env data-ref app-id]
+(defn prepare [init-env data-ref runtime-id]
   (let [rt-ref
         (-> init-env
-            (assoc ::app-id app-id
+            (assoc ::runtime-id runtime-id
                    ::data-ref data-ref
                    ::event-config {}
                    ::fx-config {}
@@ -22,6 +22,6 @@
             (atom))]
 
     (when ^boolean js/goog.DEBUG
-      (swap! known-runtimes-ref assoc app-id rt-ref))
+      (swap! known-runtimes-ref assoc runtime-id rt-ref))
 
     rt-ref))

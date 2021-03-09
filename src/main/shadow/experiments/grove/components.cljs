@@ -493,17 +493,22 @@
 
 (extend-type ManagedComponent
   p/IHandleDOMEvents
-  (validate-dom-event-value! [this env event ev-map]
-    (when-not (map? ev-map)
+  (validate-dom-event-value! [this env event ev-value]
+    (when-not (or (keyword? ev-value) (map? ev-value))
       (throw
         (ex-info
-          (str "event: " event " expects a map value")
-          {:event event :value ev-map}))))
+          (str "event: " event " expects a map or keyword value")
+          {:event event :value ev-value}))))
 
-  (handle-dom-event! [this event-env event ev-map dom-event]
-    ;; (js/console.log "dom-event" this event-env event ev-map dom-event)
-    (gp/run-now! (.-scheduler this)
-      #(gp/handle-event! this ev-map dom-event))))
+  (handle-dom-event! [this event-env event ev-value dom-event]
+    (let [ev-map
+          (if (map? ev-value)
+            ev-value
+            {:e ev-value})]
+
+      ;; (js/console.log "dom-event" this event-env event ev-map dom-event)
+      (gp/run-now! (.-scheduler this)
+        #(gp/handle-event! this ev-map dom-event)))))
 
 (set! *warn-on-infer* true)
 

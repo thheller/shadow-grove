@@ -30,6 +30,6 @@
      [thheller/shadow-undertow "0.1.0"]]}
    :cljs-dev ;; using this in shadow-cljs so can't use dev profile (Cursive complains about circular dep)
    {:dependencies
-    [[thheller/shadow-cljs "2.11.21"]
+    [[thheller/shadow-cljs "2.11.22"]
      ]}})
 
