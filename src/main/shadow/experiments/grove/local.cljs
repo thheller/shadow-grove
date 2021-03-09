@@ -18,7 +18,7 @@
   (if js/window.requestIdleCallback
     (fn [work-task]
       (js/window.requestIdleCallback work-task))
-    (fn [work-task]
+    (fn [^function work-task]
       ;; microtask or goog.async.run don't do what we want
       ;; we want the browser to prioritise rendering stuff
       ;; the other work can be delayed until idle. setTimeout seems closest.
