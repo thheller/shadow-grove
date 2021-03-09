@@ -13,6 +13,33 @@
 
 (set! *warn-on-infer* false)
 
+(def ^function
+  work-queue-task!
+  (if js/window.requestIdleCallback
+    (fn [work-task]
+      (js/window.requestIdleCallback work-task))
+    (fn [work-task]
+      ;; microtask or goog.async.run don't do what we want
+      ;; we want the browser to prioritise rendering stuff
+      ;; the other work can be delayed until idle. setTimeout seems closest.
+      (js/setTimeout
+        (fn []
+          (let [start (js/Date.now)
+                fake-deadline
+                #js {:timeRemaining
+                     #(< 16 (- (js/Date.now) start))}]
+            (work-task fake-deadline)))
+        ;; usually 4 or so minimum but that is good enough for our purposes
+        0))))
+
+(def ^function
+  work-queue-cancel!
+  (if js/window.cancelIdleCallback
+    (fn [id]
+      (js/window.cancelIdleCallback id))
+    (fn [id]
+      (js/clearTimeout id))))
+
 (defonce index-queue (js/Array.))
 
 (defonce work-queued? false)
@@ -21,7 +48,7 @@
 (defn index-work-all! []
   (set! work-queued? false)
   (when work-timeout
-    (js/window.cancelIdleCallback work-timeout)
+    (work-queue-cancel! work-timeout)
     (set! work-timeout nil))
 
   (loop [^function task (.shift index-queue)]
@@ -37,14 +64,14 @@
           (recur)))))
 
   (if (pos? (alength index-queue))
-    (do (set! work-timeout (js/window.requestIdleCallback index-work-some!))
+    (do (set! work-timeout (work-queue-task! index-work-some!))
         (set! work-queued? true))
     (do (set! work-timeout nil)
         (set! work-queued? false))))
 
 (defn index-queue-some! []
   (when-not work-queued?
-    (set! work-timeout (js/window.requestIdleCallback index-work-some!))
+    (set! work-timeout (work-queue-task! index-work-some!))
     (set! work-queued? true)))
 
 (defn index-query [env query-id prev-keys next-keys]

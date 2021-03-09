@@ -38,6 +38,7 @@
    :output-dir "examples/app/public/bootstrap"
    :exclude #{cljs.js}
    :entries [shadow.experiments.grove]
+   :compiler-options {:output-feature-set :es6}
    :macros []}
 
   :examples-host
@@ -49,7 +50,8 @@
 
    :compiler-options
    {:optimizations :simple
-    :output-wrapper false}
+    :output-wrapper false
+    :output-feature-set :es6}
 
    :js-options
    {:js-package-dirs ["packages/examples/node_modules"]}}
