@@ -2,7 +2,7 @@
   "grove - a small wood or forested area (ie. trees)
    a mini re-frame/fulcro hybrid. re-frame event styles + somewhat normalized db"
   (:require
-    [cognitect.transit :as transit]
+    [shadow.experiments.grove.transit :as transit]
     [shadow.experiments.grove.db :as db]
     [shadow.experiments.grove.runtime :as rt]
     [shadow.experiments.grove.events :as ev]
@@ -11,7 +11,7 @@
 
 (set! *warn-on-infer* false)
 
-(defn send-to-main [{::keys [transit-str] :as env} msg]
+(defn send-to-main [{::rt/keys [transit-str] :as env} msg]
   ;; (js/console.log "main-write" env msg)
   (js/self.postMessage (transit-str msg)))
 
@@ -129,24 +129,17 @@
 
 ;; FIXME: only this should be worker specific
 (defn init! [app-ref]
-  (let [tr (transit/reader :json)
-        tw (transit/writer :json)
-
-        transit-read
-        (fn transit-read [data]
-          (transit/read tr data))
-
-        transit-str
-        (fn transit-str [obj]
-          (transit/write tw obj))
-
-        active-streams-ref
+  (let [active-streams-ref
         (atom {})
 
+        {::rt/keys [transit-str transit-read]}
+        @app-ref
+
         env
-        {::active-streams-ref active-streams-ref
-         ::transit-read transit-read
-         ::transit-str transit-str}]
+        {::active-streams-ref active-streams-ref}]
+
+    (when-not (and transit-str transit-read)
+      (throw (ex-info "shadow.experiments.grove.transit not initialized!" {})))
 
     (swap! app-ref merge env)
 
