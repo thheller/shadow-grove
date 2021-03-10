@@ -1,7 +1,10 @@
 (ns shadow.experiments.grove.examples.app
   (:require
+    [goog.object :as gobj]
     [cljs.js :as cljs]
+    [cljs.compiler :as comp]
     [cljs.env :as cljs-env]
+    [clojure.string :as str]
     ;; commonjs variant doesn't work
     ["prettier/esm/standalone.mjs$default" :as prettier]
     ["prettier/esm/parser-babel.mjs" :default prettier-babel]
@@ -11,6 +14,7 @@
     [shadow.experiments.arborist.fragments :as frag]
     [shadow.experiments.grove :as sg :refer (<< defc)]
     [shadow.experiments.grove.events :as ev]
+    [shadow.experiments.grove.http-fx :as http-fx]
     [shadow.experiments.grove.local :as local-eng]
     [shadow.experiments.grove.examples.env :as env]
     [shadow.experiments.grove.examples.model :as m]
@@ -28,16 +32,28 @@
        ::m/example-result
        ::m/example-js]))
 
+  (bind ed-cljs-ref
+    (sg/ref))
+
   (render
     (<< [:div.inset-0.fixed.flex.flex-col
          [:div {:class "border-b border-t p-2"}
-          [:div.text-xl.font-bold "shadow-grove Playground"]
-          [:div.text-xs "ctrl+enter to eval"]]
+          [:div.text-xl.font-bold "shadow-grove Playground"]]
 
          [:div {:class "flex flex-1 overflow-hidden"}
-          [:div {:class "flex-1 text-sm"}
-           (ed-cljs/editor {:value example-code
-                            :submit-event {:e ::m/compile!}})]
+          [:div {:class "flex-1 text-sm flex flex-col"}
+           [:div.flex-1.relative
+            [:div.absolute.inset-0
+             (ed-cljs/editor
+               {:editor-ref ed-cljs-ref
+                :value example-code
+                :submit-event {:e ::m/compile!}})]]
+
+           [:div.border-t.p-4
+            [:button.px-4.border.shadow
+             {:on-click ::m/compile!}
+             "Eval"]
+            " or ctrl+enter or shift+enter to eval"]]
 
           [:div {:class "flex-1 border-l-2 flex flex-col"}
            [:div.font-bold.py-4.border-b
@@ -48,9 +64,9 @@
              {:on-click {:e ::m/select-tab! :tab :code}}
              "JS Code"]]
 
-           ;; always embedding this to avoid unmounting/mounting examples when switching tabs
+           ;; hiding/showing to avoid unmounting/mounting examples when switching tabs
            ;; they might use local state which would get lost
-           [:div {:class (str "p-2 flex-none" (when (not= example-tab :result) " hidden")) :style "height: 300px"}
+           [:div {:class (str "p-2 flex-none overflow-auto" (when (not= example-tab :result) " hidden")) :style "height: 300px"}
             example-result]
 
            (when (= :code example-tab)
@@ -63,13 +79,13 @@
                    "This is " [:span.font-bold "unoptimized"] " JS code. :advanced optimizations will shrink this significantly. shadow-cljs output is also slighty more optimized than self-hosted"]]))]
           ]]))
 
-  ;; FIXME: should need to declare these, should just have a default handler
-  (event ::m/compile! sg/tx)
+  ;; FIXME: code is already present when using keyboard submit
+  (event ::m/compile! [env e _]
+    (sg/run-tx env (assoc e :code (.getValue @ed-cljs-ref))))
+
   (event ::m/select-tab! sg/tx))
 
 (def source-ref (atom ""))
-
-(def code (rc/inline "./basic_example.cljs"))
 
 (ev/reg-event env/rt-ref ::m/select-tab!
   (fn [{:keys [db] :as env} {:keys [tab] :as e}]
@@ -85,9 +101,7 @@
 (defn handle-compile-result
   [{:keys [transact!] :as env}
    source-ref
-   {:keys [error value] :as result}]
-
-  ;; (js/console.log "result" result env)
+   {:keys [error ns value] :as result}]
 
   ;; FIXME: handle error
 
@@ -96,26 +110,69 @@
   ;; only needed to filter out fragments compiled by self-hosted code
   (frag/reset-known-fragments!)
 
-  (when (fn? value)
-    ;; calling this directly makes stacktraces unusable since its somewhere deep
-    ;; in compiler internals for some reason, just delaying with timeout fixes that
-    (js/setTimeout
-      (fn []
-        (let [formatted-source
-              (prettier/format
-                @source-ref
-                #js {:parser "babel"
-                     :plugins #js [prettier-babel]})
+  (let [example-fqn
+        (str ns "/example")
 
-              render-result
-              (value)]
+        example-fn-str
+        (comp/munge example-fqn)
 
-          ;; (js/console.log "handle-compile-result" env result)
-          (transact!
-            {:e ::m/compile-result!
-             :source formatted-source
-             :result render-result})
-          )))))
+        example-fn
+        (js/goog.getObjectByName example-fn-str)]
+
+    (if-not (and example-fn (fn? example-fn))
+      (transact!
+        {:e ::m/compile-missing-example-fn!
+         :example-fqn example-fqn})
+
+      ;; calling this directly makes stacktraces unusable since its somewhere deep
+      ;; in compiler internals for some reason, just delaying with timeout fixes that
+      (js/setTimeout
+        (fn []
+          (let [formatted-source
+                (prettier/format
+                  @source-ref
+                  #js {:parser "babel"
+                       :plugins #js [prettier-babel]})
+
+                render-result
+                (example-fn)]
+
+            ;; (js/console.log "handle-compile-result" env result)
+            (transact!
+              {:e ::m/compile-result!
+               :example-fqn example-fqn
+               :source formatted-source
+               :result render-result})
+            ))))))
+
+(defn get-only-entry [obj]
+  ;; FIXME: add least assert that there is actually only one entry
+  ;; files contains an object with files : { "some-file.cljs" : {} ... }
+  (gobj/get obj (aget (gobj/getKeys obj) 0)))
+
+(ev/reg-event env/rt-ref ::m/gist-loaded!
+  (fn [{:keys [db] :as env} {:keys [gist-id result]}]
+    (let [code
+          (-> result
+              (gobj/get "files")
+              (get-only-entry)
+              (gobj/get "content"))]
+
+      {:db (assoc db ::m/example-code code
+                     ::m/example-result "Compiling ...")
+       :cljs-compile code})))
+
+(ev/reg-event env/rt-ref ::m/load-gist!
+  (fn [{:keys [db] :as env} {:keys [gist-id] :as e}]
+    {:db
+     (assoc db ::m/gist-id gist-id ::m/example-code ";; Loading Gist ...")
+
+     :gist-api
+     {:request
+      {:uri gist-id}
+
+      :on-success
+      {:e ::m/gist-loaded! :gist-id gist-id}}}))
 
 (ev/reg-event env/rt-ref ::m/compile!
   (fn [{:keys [db] :as env} {:keys [code] :as e}]
@@ -128,7 +185,6 @@
     (let [source-ref (atom "")
           compile-state-ref (::m/compile-state-ref env)]
 
-      ;; FIXME: fx me
       (cljs/eval-str
         (::m/compile-state-ref env)
         code
@@ -151,10 +207,20 @@
 
         #(handle-compile-result env source-ref %)))))
 
-(def example-source (rc/inline "./basic_example.cljs"))
+(def example-code
+  (->> [";; The Playground will compile the code and call the example function"
+        ""
+        ";; Obligatory Hello World Example"
+        ";; The result of the function call is rendered over there ->"
+        ""
+        "(defn example []"
+        "  \"Hello World\")"]
+       (str/join "\n")))
 
 (defn ^:dev/after-load start []
-  (sg/app-tx ::app {:e ::m/compile! :code example-source})
+  (if-let [[_ gist-id] (re-find #"\?id=(\w+)" js/document.location.search)]
+    (sg/app-tx ::app {:e ::m/load-gist! :gist-id gist-id})
+    (sg/app-tx ::app {:e ::m/compile! :code example-code}))
 
   (sg/start ::app dom-root (ui-root)))
 
@@ -162,6 +228,13 @@
   (sg/init ::app
     {}
     [(local-eng/init env/rt-ref)])
+
+  (ev/reg-fx env/rt-ref :gist-api
+    (http-fx/make-handler
+      {:on-error {:e ::m/request-error!}
+       :base-url "https://api.github.com/gists/"
+       :with-credentials false
+       :request-format :json}))
 
   (boot/init (::m/compile-state-ref @env/rt-ref)
     {:path "bootstrap"}

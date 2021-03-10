@@ -187,7 +187,9 @@
             )))
 
       (set! (.-responseType xhr-req) "text")
-      (set! (.-withCredentials xhr-req) (not (false? (:with-credentials opts))))
+      (set! (.-withCredentials xhr-req)
+        (and (not (false? (:with-credentials opts)))
+             (not (false? (:with-credentials config)))))
 
       (when body?
         (.setRequestHeader xhr-req "content-type" content-type))
@@ -218,7 +220,7 @@
     (read-fn (.-responseText xhr-req))))
 
 (defn parse-json [env ^js xhr-req]
-  ;; FIXME: should take a fn from the env to convert to CLJS data, not by default though
+  ;; FIXME: should have used responseType = "json" and responseJSON
   (js/JSON.parse (.-responseText xhr-req)))
 
 (def default-response-formats

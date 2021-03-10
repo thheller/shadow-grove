@@ -7,7 +7,8 @@
     [shadow.experiments.grove.transit :as transit]))
 
 (defonce data-ref
-  (-> {::m/example-tab :result}
+  (-> {::m/example-tab :result
+       ::m/example-result "No Result yet."}
       (db/configure m/schema)
       (atom)))
 

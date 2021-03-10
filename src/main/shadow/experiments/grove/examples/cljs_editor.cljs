@@ -49,7 +49,7 @@
   ;; which kill performance quite badly
   (dom-entered! [this]
     (ds/write!
-      (let [{:keys [value cm-opts clojure]}
+      (let [{:keys [editor-ref value cm-opts clojure]}
             opts
 
             ;; FIXME: this config stuff needs to be cleaned up, this is horrible
@@ -71,6 +71,7 @@
                 (.insertBefore (.-parentElement marker) el marker))
               cm-opts)
 
+            ;; FIXME: this sucks
             submit-fn
             (fn [e]
               (let [val (str/trim (.getValue ed))]
@@ -80,6 +81,10 @@
 
         (set! editor ed)
 
+        (when editor-ref
+          (vreset! editor-ref ed))
+
+        ;; FIXME: this sucks, find a better way to handle configuration like this
         (when (:submit-event opts)
           (.setOption ed "extraKeys"
             #js {"Ctrl-Enter" submit-fn
@@ -89,6 +94,10 @@
           (par-cm/init ed)))))
 
   (destroy! [this dom-remove?]
+
+    (when-some [editor-ref (:editor-ref opts)]
+      (vreset! editor-ref nil))
+
     (when dom-remove?
       (when editor-el
         ;; FIXME: can't find a dispose method on codemirror?
