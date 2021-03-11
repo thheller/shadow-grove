@@ -1,89 +1,11 @@
 (ns shadow.experiments.arborist.interpreted
+  "EXTREMELY SLOW! DO NOT USE!"
   (:require
     [shadow.experiments.arborist.fragments :as frag]
     [shadow.experiments.arborist.attributes :as a]
     [shadow.experiments.arborist.protocols :as p]
     [clojure.string :as str]
     [shadow.experiments.arborist.common :as common]))
-
-(deftype ManagedVector
-  [env
-   ^:mutable node
-   ^:mutable tag-kw
-   ^:mutable attrs
-   ^:mutable children
-   ^:mutable entered?]
-
-  p/IManaged
-  (dom-first [this] node)
-
-  (dom-insert [this parent anchor]
-    (run! #(p/dom-insert ^not-native % node nil) children)
-    (.insertBefore parent node anchor))
-
-  (dom-entered! [this]
-    (run! #(p/dom-entered! ^not-native %) children)
-    (set! entered? true))
-
-  (supports? [this next]
-    (and (vector? next)
-         (keyword-identical? tag-kw (get next 0))))
-
-  (dom-sync! [this [_ next-attrs :as next]]
-    ;; FIXME: could be optimized
-    (let [[next-attrs next-nodes]
-          (if (map? next-attrs)
-            [attrs (subvec next 2)]
-            [nil (subvec next 1)])]
-
-      (a/merge-attrs env node attrs next-attrs)
-
-      (let [oc (count children)
-            nc (count next-nodes)
-
-            ;; FIXME: transient?
-            ;; update previous children
-            next-children
-            (reduce-kv
-              (fn [c idx ^not-native child]
-                (if (>= idx nc)
-                  (do (p/destroy! child true)
-                      c)
-                  (let [next (nth next-nodes idx)]
-                    (if (p/supports? child next)
-                      (do (p/dom-sync! child next)
-                          (conj! c child))
-                      (let [first (p/dom-first child)
-                            new-managed (p/as-managed next env)]
-                        (p/dom-insert new-managed node first)
-                        (p/destroy! child true)
-                        (when entered?
-                          (p/dom-entered! new-managed))
-                        (conj! c new-managed))))))
-              (transient [])
-              children)
-
-            ;; append if there were more children
-            next-children
-            (if-not (> nc oc)
-              next-children
-              (reduce
-                (fn [c el]
-                  (let [new-managed (p/as-managed el env)]
-                    (p/dom-insert new-managed node nil)
-                    (when entered?
-                      (p/dom-entered! new-managed))
-                    (conj! c new-managed)))
-                next-children
-                (subvec next-nodes oc)))]
-
-        (set! children (persistent! next-children))
-        (set! attrs next-attrs))))
-
-  (destroy! [this ^boolean dom-remove?]
-    (when dom-remove?
-      (.remove node))
-    (run! #(p/destroy! % dom-remove?) children)))
 
 (defn parse-tag* [spec]
   (let [spec (name spec)
@@ -123,26 +45,117 @@
     (unchecked-get tag-cache (.-fqn spec))
     (unchecked-set tag-cache (.-fqn spec) (parse-tag* spec))))
 
-(defn as-managed-vector [tag-kw attrs this env]
+(defn merge-tag-attrs [tag-kw attrs]
+  (let [[tag html-id html-class]
+        (parse-tag tag-kw)]
+
+    [tag
+     (-> attrs
+         (cond->
+           html-id
+           (assoc :id html-id)
+
+           html-class
+           (maybe-css-join html-class)))]))
+
+(defn desugar [[tag-kw attrs :as form]]
   (let [[attrs children]
         (if (map? attrs)
-          [attrs (subvec this 2)]
-          [nil (subvec this 1)])
+          [attrs (subvec form 2)]
+          [nil (subvec form 1)])
 
-        [tag html-id html-class]
-        (parse-tag tag-kw)
+        [tag attrs]
+        (merge-tag-attrs tag-kw attrs)]
 
-        attrs
-        (-> attrs
-            (cond->
-              html-id
-              (assoc :id html-id)
+    [tag attrs children]))
 
-              html-class
-              (maybe-css-join html-class)))
+(deftype ManagedVector
+  [env
+   ^:mutable form
+   ^:mutable node
+   ^:mutable tag-kw
+   ^:mutable attrs
+   ^:mutable children
+   ^:mutable entered?]
+
+  p/IManaged
+  (dom-first [this] node)
+
+  (dom-insert [this parent anchor]
+    (run! #(p/dom-insert ^not-native % node nil) children)
+    (.insertBefore parent node anchor))
+
+  (dom-entered! [this]
+    (run! #(p/dom-entered! ^not-native %) children)
+    (set! entered? true))
+
+  (supports? [this next]
+    (and (vector? next)
+         (keyword-identical? tag-kw (get next 0))))
+
+  (dom-sync! [this [_ next-attrs :as next]]
+    ;; only compare identical? to allow skipping some diffs
+    ;; must not call = since something is likely different
+    ;; but that might be deeply nested leading to a lot of wasted comparisons
+
+    (when-not (identical? form next)
+      (let [[_ next-attrs next-nodes] (desugar next)]
+
+        (a/merge-attrs env node attrs next-attrs)
+
+        (let [oc (count children)
+              nc (count next-nodes)
+
+              ;; update previous children
+              next-children
+              (reduce-kv
+                (fn [c idx ^not-native child]
+                  (if (>= idx nc)
+                    (do (p/destroy! child true)
+                        c)
+                    (let [next (nth next-nodes idx)]
+                      (if (p/supports? child next)
+                        (do (p/dom-sync! child next)
+                            (conj! c child))
+                        (let [first (p/dom-first child)
+                              new-managed (p/as-managed next env)]
+                          (p/dom-insert new-managed node first)
+                          (p/destroy! child true)
+                          (when entered?
+                            (p/dom-entered! new-managed))
+                          (conj! c new-managed))))))
+                (transient [])
+                children)
+
+              ;; append if there were more children
+              next-children
+              (if-not (> nc oc)
+                next-children
+                (reduce
+                  (fn [c el]
+                    (let [new-managed (p/as-managed el env)]
+                      (p/dom-insert new-managed node nil)
+                      (when entered?
+                        (p/dom-entered! new-managed))
+                      (conj! c new-managed)))
+                  next-children
+                  (subvec next-nodes oc)))]
+
+          (set! form next)
+          (set! children (persistent! next-children))
+          (set! attrs next-attrs)))))
+
+  (destroy! [this ^boolean dom-remove?]
+    (when dom-remove?
+      (.remove node))
+    (run! #(p/destroy! % dom-remove?) children)))
+
+(defn as-managed-vector [this env]
+  (let [[tag-kw attrs children]
+        (desugar this)
 
         node
-        (js/document.createElement tag)
+        (js/document.createElement (name tag-kw))
 
         children
         (into [] (map #(p/as-managed % env)) children)]
@@ -153,7 +166,7 @@
       nil
       attrs)
 
-    (ManagedVector. env node tag-kw attrs children false)))
+    (ManagedVector. env this node tag-kw attrs children false)))
 
 (deftype ManagedFragment
   [env
@@ -268,16 +281,17 @@
 
 (extend-type cljs.core/PersistentVector
   p/IConstruct
-  (as-managed [[tag-kw attrs :as this] env]
-    (cond
-      (keyword-identical? tag-kw :<>)
-      (as-managed-fragment this env)
+  (as-managed [this env]
+    (let [tag-kw (nth this 0)]
+      (cond
+        (keyword-identical? tag-kw :<>)
+        (as-managed-fragment this env)
 
-      (keyword? tag-kw)
-      (as-managed-vector tag-kw attrs this env)
+        (keyword? tag-kw)
+        (as-managed-vector this env)
 
-      :else ;; FIXME: don't blindly assume callable, check
-      (let [res (apply tag-kw (subvec this 1))
-            ;; FIXME: variant 2, res could be a function which we need to call
-            man (p/as-managed res env)]
-        (ManagedComponent. env tag-kw man)))))
+        :else ;; FIXME: don't blindly assume callable, check
+        (let [res (apply tag-kw (subvec this 1))
+              ;; FIXME: variant 2, res could be a function which we need to call
+              man (p/as-managed res env)]
+          (ManagedComponent. env tag-kw man))))))
