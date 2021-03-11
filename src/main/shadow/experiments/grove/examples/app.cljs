@@ -66,7 +66,7 @@
 
            ;; hiding/showing to avoid unmounting/mounting examples when switching tabs
            ;; they might use local state which would get lost
-           [:div {:class (str "p-2 flex-none overflow-auto" (when (not= example-tab :result) " hidden")) :style "height: 300px"}
+           [:div {:class (str "p-2 flex-1 overflow-auto" (when (not= example-tab :result) " hidden"))}
             example-result]
 
            (when (= :code example-tab)
