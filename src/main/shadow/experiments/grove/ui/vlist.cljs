@@ -9,8 +9,10 @@
     [shadow.experiments.grove.ui.util :as util]
     [shadow.experiments.arborist.common :as common]
     [shadow.experiments.arborist.attributes :as a]
+    [shadow.experiments.arborist.collections :as coll]
     [shadow.experiments.grove.keyboard :as keyboard]
     [shadow.dom :as dom]
+    [shadow.experiments.grove.runtime :as rt]
     [shadow.experiments.grove.components :as comp])
   (:import [goog.events KeyHandler]))
 
@@ -38,6 +40,7 @@
   (field ^js container-el) ;; the other scroll container
   (field ^js inner-el) ;; the inner container providing the height
   (field ^js box-el) ;; the box element moving inside inner-el
+  (field ^not-native box-root)
   (field dom-entered? false)
 
   (field ^KeyHandler key-handler)
@@ -52,7 +55,8 @@
     (set! query-id (util/next-id))
     (set! ident (:ident opts))
 
-    (let [qe (::gp/query-engine env)]
+    (let [rt (::rt/runtime-ref env)
+          qe (::gp/query-engine @rt)]
       (when-not qe
         (throw (ex-info "missing query engine" {:env env})))
 
@@ -75,47 +79,48 @@
 
         (set! key-handler (KeyHandler. container-el))
 
-        (.listen key-handler "key" #_js/goog.events.KeyHandler.EventType
-          (fn [^goog e]
-            (case (keyboard/str-key e)
-              "arrowup"
-              (do (.focus-move! this -1)
-                  (dom/ev-stop e))
+        (comment
+          (.listen key-handler "key" #_js/goog.events.KeyHandler.EventType
+            (fn [^goog e]
+              (case (keyboard/str-key e)
+                "arrowup"
+                (do (.focus-move! this -1)
+                    (dom/ev-stop e))
 
-              "pageup"
-              (do (.focus-move! this -10)
-                  (dom/ev-stop e))
+                "pageup"
+                (do (.focus-move! this -10)
+                    (dom/ev-stop e))
 
-              "arrowdown"
-              (do (.focus-move! this 1)
-                  (dom/ev-stop e))
+                "arrowdown"
+                (do (.focus-move! this 1)
+                    (dom/ev-stop e))
 
-              "pagedown"
-              (do (.focus-move! this 10)
-                  (dom/ev-stop e))
+                "pagedown"
+                (do (.focus-move! this 10)
+                    (dom/ev-stop e))
 
-              "enter"
-              (when-some [select-event (:select-event opts)]
-                (let [item (aget items focus-idx)
-                      comp (comp/get-component env)]
+                "enter"
+                (when-some [select-event (:select-event opts)]
+                  (let [item (aget items focus-idx)
+                        comp (comp/get-component env)]
 
-                  (gp/handle-event! comp (assoc select-event :idx focus-idx :item (.-data item)) nil)
-                  ))
+                    (gp/handle-event! comp (assoc select-event :idx focus-idx :item (.-data item)) nil)
+                    ))
 
-              nil
+                nil
+                )))
+
+          (.addEventListener container-el "focus"
+            (fn [e]
+              (set! focused? true)
+              (.update-item! this focus-idx)
+              ))
+
+          (.addEventListener container-el "blur"
+            (fn [e]
+              (set! focused? false)
+              (.update-item! this focus-idx)
               )))
-
-        (.addEventListener container-el "focus"
-          (fn [e]
-            (set! focused? true)
-            (.update-item! this focus-idx)
-            ))
-
-        (.addEventListener container-el "blur"
-          (fn [e]
-            (set! focused? false)
-            (.update-item! this focus-idx)
-            ))
 
         (set! inner-el (js/document.createElement "div"))
         (gs/setStyle inner-el
@@ -128,6 +133,8 @@
         (let [box-style (merge box-style {:position "absolute" :top "0px" :width "100%"})]
           (a/set-attr env box-el :style nil box-style))
         (.appendChild inner-el box-el)
+
+        (set! box-root (common/managed-root env))
 
         (.addEventListener container-el "scroll"
           (gfn/debounce #(.handle-scroll! this %)
@@ -160,13 +167,16 @@
         )))
 
   (dom-insert [this parent anchor]
-    (.insertBefore parent container-el anchor))
+    (.insertBefore parent container-el anchor)
+    (ap/dom-insert box-root box-el nil))
 
   (dom-first [this]
     container-el)
 
   (dom-entered! [this]
     (set! dom-entered? true)
+
+    (ap/dom-entered! box-root)
 
     (ds/read!
       ;; can only measure once added to the actual document
@@ -180,6 +190,8 @@
 
     (when dom-remove?
       (.remove container-el))
+
+    (ap/destroy! box-root false)
 
     (when items ;; query might still be pending
       (.forEach items ;; sparse array, doseq processes too many
@@ -212,9 +224,11 @@
 
   (handle-query-result! [this result]
     (let [{:keys [item-count offset slice] :as data}
-          (if ident (get-in result [ident (.-attr config)] (get result (.-attr config))))
+          (if ident
+            (get-in result [ident (.-attr config)])
+            (get result (.-attr config)))
 
-          {:keys [item-height]}
+          {:keys [item-height key-fn]}
           (.-config config)]
 
       (set! last-result result)
@@ -223,110 +237,19 @@
         (gs/setStyle inner-el "height" (str (* item-count item-height) "px"))
         (set! remote-count item-count))
 
-      (cond
-        (not items)
-        (set! items (js/Array. item-count))
+      (ap/update! box-root
+        (if key-fn
+          (coll/keyed-seq slice key-fn
+            (fn [val idx key]
+              ;; FIXME: restore focus handling
+              (. config (item-fn val {:idx (+ offset idx)}))))
 
-        ;; FIXME: this needs to be handled differently, shouldn't just throw everything away
-        (not= item-count (.-length items))
-        (do (.forEach items ;; sparse array, doseq processes too many
-              (fn [^ListItem item idx]
-                (ap/destroy! (.-managed item) true)))
-            (set! items (js/Array. item-count))
-            (set! container-el -scrollTop 0)
-            (gs/setStyle inner-el "height" (str (* item-count item-height) "px")))
-
-        :else
-        nil)
-
-      (.cleanup! this)
-
-      ;; FIXME: this would likely be more efficient DOM wise when traversing backwards
-      ;; easier to keep track of anchor-el for dom-insert
-      (reduce-kv
-        (fn [_ offset-idx val]
-          (let [idx (+ offset-idx offset)]
-            ;; might have scrolled out while query was loading
-            ;; can skip render of elements that will be immediately replaced
-            (when (.in-visible-range? this idx)
-              ;; render and update/insert
-              (.render-item! this idx val))))
-        nil
-        slice)
-
+          (coll/simple-seq slice
+            (fn [val idx]
+              ;; FIXME: restore focus handling
+              (. config (item-fn val {:idx (+ offset idx)}))))))
 
       (gs/setStyle box-el "top" (str (* item-height visible-offset) "px"))))
-
-  (update-item! [this idx]
-    ;; item may not be available yet, will render later
-    (when-some [^ListItem item (aget items idx)]
-      (let [item-opts
-            (assoc opts
-              :idx idx
-              :focus (and focused? (= focus-idx idx)))
-
-            rendered
-            (. config (item-fn (.-data item) item-opts))]
-
-        (if (ap/supports? (.-managed item) rendered)
-          (ap/dom-sync! (.-managed item) rendered)
-
-          ;; unsupported, swap
-          (let [new-managed (common/replace-managed env (.-managed item) rendered)]
-            (set! item -managed new-managed)
-            (when dom-entered?
-              (ap/dom-entered! new-managed)))))))
-
-  (render-item! [this idx val]
-    (let [^ListItem current (aget items idx)
-
-          item-opts
-          (assoc opts
-            :idx idx
-            :focus (and focused? (= focus-idx idx)))
-
-          rendered
-          (. config (item-fn val item-opts))]
-
-      (cond
-        ;; doesn't exist, create managed and insert at correct DOM position
-        (not current)
-        (let [managed (ap/as-managed rendered env)
-              ;; FIXME: would be easier with wrapper elements
-              ;; just create them once and replace the contents
-              ;; but no wrappers means potentially supporting CSS grid?
-              ^ListItem next-item (.find-next-item this idx)
-              anchor-el (when next-item (ap/dom-first (.-managed next-item)))]
-
-          ;; insert before next item, or append if it doesn't exist
-          (ap/dom-insert managed box-el anchor-el)
-          (when dom-entered?
-            (ap/dom-entered! managed))
-          (aset items idx (ListItem. idx val managed)))
-
-        ;; current exists
-        :else
-        (do (set! current -data val)
-            (.update-item! this idx)))))
-
-  ;; sparse array, idx might be 6 and the next item is 10
-  ;; FIXME: should maintain the rendered items better and avoid all this logic
-  (find-next-item [this idx]
-    (loop [idx (inc idx)]
-      (when (< idx visible-end)
-        (if-some [item (aget items idx)]
-          item
-          (recur (inc idx))))))
-
-  (in-visible-range? [this idx]
-    (<= visible-offset idx visible-end))
-
-  (cleanup! [this]
-    (.forEach items
-      (fn [^ListItem item idx]
-        (when-not (.in-visible-range? this idx)
-          (ap/destroy! (.-managed item) true)
-          (js-delete items idx)))))
 
   (measure! [this]
     (let [scroll-top (.-scrollTop container-el)

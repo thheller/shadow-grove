@@ -3,7 +3,6 @@
     [shadow.remote.runtime.api :as p]
     [shadow.remote.runtime.shared :as shared]
     [shadow.cljs.devtools.client.shared :as cljs-shared]
-    [shadow.experiments.grove.worker :as sw]
     [shadow.experiments.grove.db :as db]
     [shadow.experiments.grove.runtime :as rt]
     [clojure.core.protocols :as cp]))
@@ -89,14 +88,3 @@
       svc))
   (fn [{:keys [runtime] :as svc}]
     (p/del-extension runtime ::db-explorer)))
-
-(extend-type sw/ActiveQuery
-  cp/Datafiable
-  (datafy [this]
-    {:env (.-env this)
-     :query-id (.-query-id this)
-     :query (.-query this)
-     :read-keys (.-read-keys this)
-     :read-result (.-read-result this)
-     :pending? (.-pending? this)
-     :destroyed? (.-destroyed? this)}))

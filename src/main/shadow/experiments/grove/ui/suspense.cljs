@@ -17,6 +17,7 @@
    ^SuspenseRoot root
    ^:mutable should-trigger?
    ^:mutable suspend-set]
+
   gp/IScheduleUpdates
   (schedule-update! [this target]
     (gp/schedule-update! parent-scheduler target))

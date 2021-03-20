@@ -7,10 +7,15 @@
 ;; actual code shouldn't use this anywhere
 (defonce known-runtimes-ref (atom {}))
 
-(defn prepare [init-env data-ref runtime-id]
+(defn ref? [x]
+  (and (atom x)
+       (::rt @x)))
+
+(defn prepare [init data-ref runtime-id]
   (let [rt-ref
-        (-> init-env
-            (assoc ::runtime-id runtime-id
+        (-> init
+            (assoc ::rt true
+                   ::runtime-id runtime-id
                    ::data-ref data-ref
                    ::event-config {}
                    ::fx-config {}
@@ -18,7 +23,8 @@
                    ::key-index-seq (atom 0)
                    ::key-index-ref (atom {})
                    ::query-index-map (js/Map.)
-                   ::query-index-ref (atom {}))
+                   ::query-index-ref (atom {})
+                   ::env-init [])
             (atom))]
 
     (when ^boolean js/goog.DEBUG

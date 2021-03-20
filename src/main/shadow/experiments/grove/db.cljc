@@ -281,6 +281,9 @@
     :else
     (throw (ex-info "don't know how to remove thing" {:thing thing}))))
 
+(defn remove-idents [data idents]
+  (reduce remove data idents))
+
 (defprotocol IObserved
   (observed-keys [this]))
 

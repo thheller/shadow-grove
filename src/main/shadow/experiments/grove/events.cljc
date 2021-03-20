@@ -126,7 +126,7 @@
    {ev-id :e :as tx}]
   {:pre [(map? tx)
          (keyword? ev-id)]}
-  ;; (js/console.log ::worker-tx ev-id tx env)
+  ;; (js/console.log ::tx* ev-id tx env)
 
   ;; FIXME: instead of interceptors allow handler-fn to be multiple things or use function comp
   ;; (reg-event-fx env ::foo (fn [env tx]))
@@ -135,7 +135,9 @@
   (let [^function handler-fn (get event-config ev-id)]
 
     (if-not handler-fn
-      (throw (ex-info "unhandled event" {:ev-id ev-id :tx tx}))
+      (throw (ex-info
+               (str "unhandled event " ev-id)
+               {:ev-id ev-id :tx tx}))
 
       (let [before @data-ref
 

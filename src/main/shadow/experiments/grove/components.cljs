@@ -345,6 +345,10 @@
     #_(when (not= current-idx idx)
         (js/console.warn "hook become ready while not being the current?" current-idx idx this))
 
+    (set! dirty-hooks (bit-set dirty-hooks idx))
+    (when (< idx current-idx)
+      (set! current-idx idx))
+
     (set! suspended? false)
     (.schedule! this))
 
@@ -361,7 +365,13 @@
     (set! current-idx (js/Math.min current-idx (alength (.-hooks config)))))
 
   (run-next! [^not-native this]
-    ;; (js/console.log "Component:run-next!" (.-component-name config) current-idx (alength (.-hooks config)) this)
+    #_(js/console.log "Component:run-next!"
+        (.-component-name config)
+        current-idx
+        (alength (.-hooks config))
+        dirty-hooks
+        (bit-test dirty-hooks current-idx)
+        this)
     (if (identical? current-idx (alength (.-hooks config)))
       ;; all hooks done
       (.component-render! this)
@@ -383,6 +393,10 @@
 
             (gp/hook-init! hook)
 
+            ;; previous hook may have marked hook as dirty since it used data
+            ;; but hook may have not been constructed yet, constructing must clear dirty bit
+            (set! dirty-hooks (bit-clear dirty-hooks current-idx))
+            ;; construction counts as updated since value became available for first time
             (set! updated-hooks (bit-set updated-hooks current-idx))
 
             (when (bit-test (.-render-deps config) current-idx)
@@ -393,7 +407,7 @@
 
             (if (gp/hook-ready? hook)
               (set! current-idx (inc current-idx))
-              (.suspend! this)))
+              (.suspend! this current-idx)))
 
           ;; marked dirty, update it
           ;; make others dirty if actually updated
@@ -431,7 +445,7 @@
 
             (if (gp/hook-ready? hook)
               (set! current-idx (inc current-idx))
-              (.suspend! this)))
+              (.suspend! this current-idx)))
 
           :else
           (set! current-idx (inc current-idx))))))
@@ -445,6 +459,8 @@
              (>= (alength (.-hooks config)) current-idx))))
 
   (suspend! [this hook-causing-suspend]
+    ;; (js/console.log "suspending" hook-causing-suspend this)
+
     ;; just in case we were already scheduled. should really track this more efficiently
     (.unschedule! this)
     (gp/did-suspend! scheduler this)

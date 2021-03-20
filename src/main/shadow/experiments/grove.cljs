@@ -3,13 +3,14 @@
    a mini re-frame/fulcro hybrid. re-frame event styles + somewhat normalized db"
   (:require-macros [shadow.experiments.grove])
   (:require
+    [goog.async.nextTick]
     [shadow.experiments.arborist.protocols :as ap]
     [shadow.experiments.arborist.common :as common]
     [shadow.experiments.arborist.fragments] ;; util macro references this
     [shadow.experiments.arborist :as sa]
     [shadow.experiments.arborist.collections :as sc]
-    [goog.async.nextTick]
     [shadow.experiments.grove.protocols :as gp]
+    [shadow.experiments.grove.runtime :as rt]
     [shadow.experiments.grove.components :as comp]
     [shadow.experiments.grove.ui.util :as util]
     [shadow.experiments.grove.ui.suspense :as suspense]
@@ -36,11 +37,11 @@
   gp/IBuildHook
   (hook-build [this component idx]
     ;; support multiple query engines by allowing queries to supply which key to use
-    (let [env (comp/get-env component)
+    (let [{::rt/keys [runtime-ref] :as env} (comp/get-env component)
           engine-key (:engine config ::gp/query-engine)
-          query-engine (get env engine-key)]
+          query-engine (get @runtime-ref engine-key)]
 
-      (assert query-engine (str "no query engine in env for key " engine-key))
+      (assert query-engine (str "no query engine in runtime for key " engine-key))
       (gp/query-hook-build query-engine env component idx ident query config))))
 
 (defn query-ident
@@ -69,16 +70,23 @@
    (QueryInit. nil query config)))
 
 (defn tx*
-  [{::gp/keys [query-engine] :as env} tx with-return?]
-  (assert query-engine "missing query-engine in env")
-  (assert (map? tx) "expected transaction to be a map")
-  (gp/transact! query-engine tx with-return?))
+  [runtime-ref tx with-return?]
+  (assert (rt/ref? runtime-ref) "expected runtime ref?")
 
-(defn tx [env ev-map e]
-  (tx* env ev-map false))
+  (let [{::gp/keys [query-engine]} @runtime-ref]
+    (assert query-engine "missing query-engine in env")
+    (assert (map? tx) "expected transaction to be a map")
 
-(defn run-tx [env tx]
-  (tx* env tx false))
+    (gp/transact! query-engine tx with-return?)))
+
+(defn tx [{::rt/keys [runtime-ref] :as env} ev-map e]
+  (tx* runtime-ref ev-map false))
+
+(defn run-tx [{::rt/keys [runtime-ref] :as env} tx]
+  (tx* runtime-ref tx false))
+
+(defn run-tx! [runtime-ref tx]
+  (tx* runtime-ref tx false))
 
 (defn run-tx-with-return [env tx]
   (tx* env tx true))
@@ -129,20 +137,25 @@
     (js/console.error "An Error occurred in Component, it will not be rendered." component))
   (js/console.error ex))
 
-(defn init* [app-id init-env init-features]
-  {:pre [(some? app-id)
-         (map? init-env)
-         (sequential? init-features)
-         (every? fn? init-features)]}
+(defn init-root
+  [rt-ref root-id root-el init-env]
+  {:pre [(rt/ref? rt-ref)
+         (some? root-id)
+         (map? init-env)]}
 
-  (let [scheduler (RootScheduler. false (js/Set.))
+  (let [scheduler
+        (RootScheduler. false (js/Set.))
+
+        env-init
+        (::rt/env-init @rt-ref)
 
         env
         (-> init-env
-            (assoc
-              ::app-id app-id
-              ::comp/scheduler scheduler
-              ::suspense-keys (atom {}))
+            (assoc ::comp/scheduler scheduler
+                   ::suspense-keys (atom {})
+                   ::rt/root-el root-el
+                   ::rt/root-id root-id
+                   ::rt/runtime-ref rt-ref)
             (cond->
               (not (contains? init-env ::comp/error-handler))
               (assoc ::comp/error-handler default-error-handler)))
@@ -152,24 +165,15 @@
           (fn [env init-fn]
             (init-fn env))
           env
-          init-features)]
+          env-init)]
 
-    env))
-
-(defn init [app-id init-env init-features]
-  {:pre [(some? app-id)
-         (map? init-env)
-         (sequential? init-features)
-         (every? fn? init-features)]}
-
-  (let [env (init* app-id init-env init-features)]
     ;; FIXME: throw if already initialized?
-    (swap! active-apps-ref assoc app-id env)
+    (swap! active-apps-ref assoc root-id env)
     ;; never expose the env so people don't get ideas about using it
-    app-id))
+    root-id))
 
-(defn start [app-id root-el root-node]
-  (let [env (get @active-apps-ref app-id)]
+(defn start [app-id root-node]
+  (let [{::rt/keys [root-el] :as env} (get @active-apps-ref app-id)]
     (if-not env
       (throw (ex-info "app not initialized" {:app-id app-id}))
       (let [active (get @active-roots-ref root-el)]
@@ -199,7 +203,7 @@
 ;; run-tx takes component env currently, maybe should also accept runtime ref?
 
 (defn app-tx [app-id tx]
-  (let [env (get @active-apps-ref app-id)]
+  (let [env (get @active-roots-ref app-id)]
     (when-not env
       (throw (ex-info "app not initialized" {:app-id app-id})))
 

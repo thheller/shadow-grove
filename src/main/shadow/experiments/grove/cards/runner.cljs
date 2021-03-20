@@ -18,18 +18,7 @@
       (js/setTimeout #(callback result) 0)))
   (query-destroy [this key])
   (transact! [this tx]
-    (js/console.log "tx" tx))
-
-  gp/IStreamEngine
-  (stream-init [this env stream-id stream-key opts callback]
-    (callback
-      {:op :init
-       :item-count 3
-       :items []})
-
-    (js/console.log "stream-init" env stream-id stream-key opts callback))
-  (stream-destroy [this stream-id stream-key]
-    (js/console.log "stream-destroy" stream-id)))
+    (js/console.log "tx" tx)))
 
 (defn test-query-engine [schema static-db static-streams]
   (let [db-data (db/configure static-db schema)]

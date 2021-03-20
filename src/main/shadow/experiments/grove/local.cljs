@@ -46,14 +46,18 @@
 (defonce work-timeout nil)
 
 (defn index-work-all! []
-  (set! work-queued? false)
   (when work-timeout
     (work-queue-cancel! work-timeout)
     (set! work-timeout nil))
 
-  (loop [^function task (.shift index-queue)]
-    (when ^boolean task
-      (task))))
+  ;; work until all work is done, immediately work off new tasks
+  (loop []
+    (let [^function task (.shift index-queue)]
+      (when ^boolean task
+        (task)
+        (recur))))
+
+  (set! work-queued? false))
 
 (defn index-work-some! [^js deadline]
   (loop []
@@ -144,8 +148,9 @@
   (hook-init! [this]
     (.do-read! this))
 
-  ;; FIXME: suspend support is missing
-  (hook-ready? [this] ready?)
+  (hook-ready? [this]
+    (or ready? (false? (:suspend config))))
+
   (hook-value [this] read-result)
 
   ;; node deps changed, check if query changed
@@ -196,7 +201,7 @@
             (index-query query-env query-id nil new-keys))
 
           (if (keyword-identical? result :db/loading)
-            (set! read-result {})
+            (set! read-result (assoc (:default config {}) :shadow.experiments.grove/loading-state :loading))
             (do (set! read-result result)
                 (set! ready? true))))
 
@@ -211,8 +216,11 @@
           (set! read-keys new-keys)
 
           (if (keyword-identical? result :db/loading)
-            (set! read-result {})
-            (do (set! read-result (if ident (get result ident) result))
+            (set! read-result (assoc (:default config {}) :shadow.experiments.grove/loading-state :loading))
+
+            (do (set! read-result
+                  (-> (if ident (get result ident) result)
+                      (assoc :shadow.experiments.grove/loading-state :ready)))
                 (set! ready? true))))))
 
     (set! read-count (inc read-count))))
@@ -252,21 +260,19 @@
     ;; FIXME: should this run in microtask instead?
     (let [return-val (ev/tx* @rt-ref tx)]
       (when with-return?
-        (js/Promise.resolve return-val))))
+        (js/Promise.resolve return-val)))))
 
-  gp/IStreamEngine
-  (stream-init [this env stream-id stream-key opts callback])
-  (stream-destroy [this stream-id stream-key])
-  (stream-clear [this stream-key]))
-
-(defn init [rt-ref]
-
+(defn init! [rt-ref]
   ;; kinda ugly but shortest way to have worker not depend this
   (swap! rt-ref assoc ::rt/query-index-queue-flush!
     (fn []
       (when work-queued?
         (index-work-all!))))
 
-  (fn [env]
-    (let [{::rt/keys [active-queries-map data-ref]} @rt-ref]
-      (assoc env ::gp/query-engine (LocalEngine. rt-ref active-queries-map)))))
+  (swap! rt-ref
+    (fn [{::rt/keys [active-queries-map] :as rt}]
+      (let [engine (LocalEngine. rt-ref active-queries-map)]
+        (assoc rt ::gp/query-engine engine)
+        )))
+
+  rt-ref)
