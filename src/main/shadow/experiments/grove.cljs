@@ -31,7 +31,7 @@
          (map? ev-map)
          (qualified-keyword? (:e ev-map))]}
   ;; FIXME: should schedule properly when it isn't in event handler already
-  (gp/handle-event! parent ev-map nil))
+  (gp/handle-event! parent ev-map nil env))
 
 (deftype QueryInit [ident query config]
   gp/IBuildHook
@@ -70,26 +70,28 @@
    (QueryInit. nil query config)))
 
 (defn tx*
-  [runtime-ref tx with-return?]
+  [runtime-ref tx origin]
   (assert (rt/ref? runtime-ref) "expected runtime ref?")
 
   (let [{::gp/keys [query-engine]} @runtime-ref]
     (assert query-engine "missing query-engine in env")
     (assert (map? tx) "expected transaction to be a map")
 
-    (gp/transact! query-engine tx with-return?)))
+    (gp/transact! query-engine tx origin)))
 
-(defn tx [{::rt/keys [runtime-ref] :as env} ev-map e]
-  (tx* runtime-ref ev-map false))
+(defn tx [{::rt/keys [runtime-ref] :as env} ev-map e origin]
+  (tx* runtime-ref ev-map origin))
 
-(defn run-tx [{::rt/keys [runtime-ref] :as env} tx]
-  (tx* runtime-ref tx false))
+(defn run-tx
+  [{::rt/keys [runtime-ref] :as env} tx]
+  (tx* runtime-ref tx env))
+
+(defn run-tx-with-return
+  [{::rt/keys [runtime-ref] :as env} tx]
+  (tx* runtime-ref tx env))
 
 (defn run-tx! [runtime-ref tx]
-  (tx* runtime-ref tx false))
-
-(defn run-tx-with-return [env tx]
-  (tx* env tx true))
+  (tx* runtime-ref tx nil))
 
 (deftype RootScheduler [^:mutable update-pending? work-set]
   gp/IScheduleUpdates
@@ -137,6 +139,11 @@
     (js/console.error "An Error occurred in Component, it will not be rendered." component))
   (js/console.error ex))
 
+(deftype RootEventTarget [rt-ref]
+  gp/IHandleEvents
+  (handle-event! [this ev-map e origin]
+    (tx* rt-ref ev-map origin)))
+
 (defn init-root
   [rt-ref root-id root-el init-env]
   {:pre [(rt/ref? rt-ref)
@@ -146,12 +153,16 @@
   (let [scheduler
         (RootScheduler. false (js/Set.))
 
+        event-target
+        (RootEventTarget. rt-ref)
+
         env-init
         (::rt/env-init @rt-ref)
 
         env
         (-> init-env
             (assoc ::comp/scheduler scheduler
+                   ::comp/event-target event-target
                    ::suspense-keys (atom {})
                    ::rt/root-el root-el
                    ::rt/root-id root-id
@@ -198,17 +209,6 @@
       (swap! active-roots-ref dissoc root-el)
       (ap/destroy! app-root)
       (dissoc env ::app-root ::root-el)))
-
-;; FIXME: better public API for running tx outside component tree
-;; run-tx takes component env currently, maybe should also accept runtime ref?
-
-(defn app-tx [app-id tx]
-  (let [env (get @active-roots-ref app-id)]
-    (when-not env
-      (throw (ex-info "app not initialized" {:app-id app-id})))
-
-    ;; FIXME: should this use run-now!? likely calling this before any components are mounted
-    (run-tx env tx)))
 
 (defn watch
   "hook that watches an atom and triggers an update on change

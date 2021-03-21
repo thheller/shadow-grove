@@ -3,10 +3,10 @@
   (:require
     [goog.object :as gobj]
     [shadow.cljs.modern :refer (defclass)]
-    [shadow.experiments.arborist.common :as common]
-    [shadow.experiments.arborist.protocols :as p]
-    [shadow.experiments.arborist.attributes :as a]
     [shadow.experiments.arborist :as sa]
+    [shadow.experiments.arborist.common :as common]
+    [shadow.experiments.arborist.protocols :as ap]
+    [shadow.experiments.arborist.attributes :as a]
     [shadow.experiments.grove.protocols :as gp]))
 
 (def ^{:tag boolean
@@ -178,8 +178,9 @@
       (-> parent-env
           (update ::depth safe-inc)
           (assoc ::parent (::component parent-env)
-                 ::p/dom-event-handler this
+                 ::ap/dom-event-handler this
                  ::component this
+                 ::event-target this
                  ::scheduler this)))
 
     ;; marks component boundaries in dev mode for easier inspect
@@ -199,23 +200,23 @@
   (-hash [this]
     (goog/getUid this))
 
-  p/IManaged
+  ap/IManaged
   (dom-first [this]
     (if DEBUG
       (.-marker-before this)
-      (p/dom-first root)))
+      (ap/dom-first root)))
 
   (dom-insert [this parent anchor]
     (when DEBUG
       (.insertBefore parent (.-marker-before this) anchor))
-    (p/dom-insert root parent anchor)
+    (ap/dom-insert root parent anchor)
     (when DEBUG
       (.insertBefore parent (.-marker-after this) anchor)))
 
   (dom-entered! [this]
     (set! dom-entered? true)
     (when-not error?
-      (p/dom-entered! root)
+      (ap/dom-entered! root)
       ;; trigger first on mount
       (.did-update! this true)))
 
@@ -248,12 +249,12 @@
         (when hook
           (gp/hook-destroy! hook))))
 
-    (p/destroy! root dom-remove?))
+    (ap/destroy! root dom-remove?))
 
   ;; FIXME: figure out default event handler
   ;; don't want to declare all events all the time
   gp/IHandleEvents
-  (handle-event! [this {ev-id :e :as ev-map} e]
+  (handle-event! [this {ev-id :e :as ev-map} e origin]
     (let [handler
           (cond
             (qualified-keyword? ev-id)
@@ -264,11 +265,11 @@
             (throw (ex-info "unknown event" {:event ev-map})))]
 
       (if handler
-        (handler component-env ev-map e)
+        (handler component-env ev-map e origin)
 
         ;; no handler, try parent
-        (if-some [parent (::component parent-env)]
-          (gp/handle-event! parent ev-map e)
+        (if-some [parent (::event-target parent-env)]
+          (gp/handle-event! parent ev-map e origin)
           (js/console.warn "event not handled" ev-id ev-map)))))
 
   gp/IScheduleUpdates
@@ -486,7 +487,7 @@
           (set! rendered-args args)
           (set! needs-render? false)
 
-          (p/update! root frag)))
+          (ap/update! root frag)))
 
       ;; only trigger dom effects when mounted
       (when dom-entered?
@@ -508,7 +509,7 @@
 ;; probably something in defclass I missed
 
 (extend-type ManagedComponent
-  p/IHandleDOMEvents
+  ap/IHandleDOMEvents
   (validate-dom-event-value! [this env event ev-value]
     (when-not (or (keyword? ev-value) (map? ev-value))
       (throw
@@ -516,6 +517,7 @@
           (str "event: " event " expects a map or keyword value")
           {:event event :value ev-value}))))
 
+  ;; event is "click" for :on-click etc which we just drop
   (handle-dom-event! [this event-env event ev-value dom-event]
     (let [ev-map
           (if (map? ev-value)
@@ -524,7 +526,7 @@
 
       ;; (js/console.log "dom-event" this event-env event ev-map dom-event)
       (gp/run-now! (.-scheduler this)
-        #(gp/handle-event! this ev-map dom-event)))))
+        #(gp/handle-event! this ev-map dom-event event-env)))))
 
 (set! *warn-on-infer* true)
 
@@ -539,7 +541,7 @@
     (gp/work!)))
 
 (deftype ComponentInit [component args]
-  p/IConstruct
+  ap/IConstruct
   (as-managed [this env]
     (component-create env component args))
 
@@ -619,6 +621,12 @@
 (defn get-events [^ManagedComponent comp]
   ;; FIXME: ... loses typehints?
   (. ^clj (. comp -config) -events))
+
+(defn get-parent [^ManagedComponent comp]
+  (get-component (. comp -parent-env)))
+
+(defn get-component-name [^ManagedComponent comp]
+  (. ^clj (. comp -config) -component-name))
 
 (defn hook-invalidate! [^ManagedComponent comp idx]
   (.invalidate-hook! comp idx))

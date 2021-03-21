@@ -256,11 +256,11 @@
       (.delete active-queries-map query-id)
       (.destroy! q)))
 
-  (transact! [this tx with-return?]
-    ;; FIXME: should this run in microtask instead?
-    (let [return-val (ev/tx* @rt-ref tx)]
-      (when with-return?
-        (js/Promise.resolve return-val)))))
+  (transact! [this tx origin]
+    (try
+      (js/Promise.resolve (ev/tx* @rt-ref tx origin))
+      (catch :default ex
+        (js/Promise.reject ex)))))
 
 (defn init! [rt-ref]
   ;; kinda ugly but shortest way to have worker not depend this

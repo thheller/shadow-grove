@@ -2,6 +2,7 @@
   "re-frame style event handling"
   (:require
     [clojure.set :as set]
+    [shadow.experiments.grove.components :as comp]
     [shadow.experiments.grove.runtime :as rt]
     [shadow.experiments.grove.db :as db]))
 
@@ -120,10 +121,29 @@
         (when-some [query (.get active-queries-map query-id)]
           (query-refresh! query))))))
 
+(defn unhandled-event-ex! [ev-id tx origin]
+  (if (and ^boolean js/goog.DEBUG (map? origin))
+    (loop [comp (comp/get-component origin)
+           err-msg (str "Unhandled Event " ev-id "\n    Component Trace:")]
+      (if-not comp
+        ;; FIXME: directly outputting this is here is kinda ugly?
+        (do (js/console.error err-msg)
+            (throw (ex-info (str "Unhandled Event " ev-id) {:ev-id ev-id :tx tx :origin origin})))
+
+        (recur
+          (comp/get-parent comp)
+          (str err-msg "\n    " (comp/get-component-name comp))
+          )))
+
+    (throw (ex-info
+             (str "Unhandled Event " ev-id)
+             {:ev-id ev-id :tx tx}))))
+
 (defn tx*
   [{::rt/keys [data-ref event-config fx-config]
     :as env}
-   {ev-id :e :as tx}]
+   {ev-id :e :as tx}
+   origin]
   {:pre [(map? tx)
          (keyword? ev-id)]}
   ;; (js/console.log ::tx* ev-id tx env)
@@ -135,9 +155,7 @@
   (let [^function handler-fn (get event-config ev-id)]
 
     (if-not handler-fn
-      (throw (ex-info
-               (str "unhandled event " ev-id)
-               {:ev-id ev-id :tx tx}))
+      (unhandled-event-ex! ev-id tx origin)
 
       (let [before @data-ref
 
@@ -167,7 +185,7 @@
                         ;; FIXME: should probably track the fx causing this transaction and the original tx
                         ;; FIXME: should probably prohibit calling this while tx is still processing?
                         ;; just meant for async events triggered by fx
-                        (tx* env fx-tx))
+                        (tx* env fx-tx origin))
                       fx-env
                       (assoc env :transact! transact-fn)]
                   (fx-fn fx-env value)))))
@@ -188,11 +206,6 @@
               (invalidate-keys! env keys-new keys-removed keys-updated))))
 
         return-value))))
-
-(defn run-tx [env tx]
-  {:pre [(map? tx)
-         (keyword? (:e tx))]}
-  (tx* env tx))
 
 (defn reg-event [app-ref ev-id handler-fn]
   {:pre [(keyword? ev-id)

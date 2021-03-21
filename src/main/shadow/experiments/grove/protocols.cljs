@@ -28,7 +28,8 @@
   (work! [this]))
 
 (defprotocol IHandleEvents
-  (handle-event! [this ev-map e]))
+  ;; e and origin can be considered optional and will be ignored by most actual handlers
+  (handle-event! [this ev-map e origin]))
 
 (defprotocol IScheduleUpdates
   (schedule-update! [this target])
@@ -83,5 +84,7 @@
   ;; would still do a bunch of needless work
   ;; only had one case where this might have been useful, maybe it isn't worth adding?
   ;; (query-once [this query config callback])
-  (transact! [this tx with-return?]))
+
+  ;; returns a promise, tx might need to go async
+  (transact! [this tx origin]))
 
