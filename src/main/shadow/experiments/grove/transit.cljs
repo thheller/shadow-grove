@@ -5,7 +5,7 @@
 
 ;; FIXME: custom handler config options
 
-(defn init [rt-env]
+(defn init! [rt-ref]
   (let [tr (transit/reader :json)
         tw (transit/writer :json)
 
@@ -17,7 +17,7 @@
         (fn transit-str [obj]
           (transit/write tw obj))]
 
-    (assoc rt-env
+    (swap! rt-ref assoc
       ::rt/transit-read transit-read
       ::rt/transit-str transit-str)))
 
