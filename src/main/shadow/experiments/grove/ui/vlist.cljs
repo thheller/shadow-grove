@@ -263,7 +263,11 @@
           (.-clientHeight container-el)
 
           _ (when (zero? container-height)
-              (js/console.warn "vlist container height measured zero!" container-el this))
+              (js/console.warn "vlist container height measured zero!" this)
+              (loop [el container-el]
+                (when el
+                  (js/console.log (.-clientHeight el) (.-isConnected el) el)
+                  (recur (.-parentElement el)))))
 
           max-items ;; inc to avoid half items
           (inc (js/Math.ceil (/ container-height item-height)))]
