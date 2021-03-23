@@ -11,10 +11,13 @@
     [shadow.experiments.arborist.attributes :as a]
     [shadow.experiments.arborist.collections :as coll]
     [shadow.experiments.grove.keyboard :as keyboard]
-    [shadow.dom :as dom]
     [shadow.experiments.grove.runtime :as rt]
     [shadow.experiments.grove.components :as comp])
   (:import [goog.events KeyHandler]))
+
+(defn ev-stop [^js e]
+  (.stopPropagation e)
+  (.preventDefault e))
 
 (declare VirtualInit)
 
@@ -79,48 +82,55 @@
 
         (set! key-handler (KeyHandler. container-el))
 
-        (comment
-          (.listen key-handler "key" #_js/goog.events.KeyHandler.EventType
-            (fn [^goog e]
-              (case (keyboard/str-key e)
-                "arrowup"
-                (do (.focus-move! this -1)
-                    (dom/ev-stop e))
+        (.listen key-handler "key" #_js/goog.events.KeyHandler.EventType
+          (fn [^goog e]
+            (case (keyboard/str-key e)
+              "arrowup"
+              (do (.focus-move! this -1)
+                  (ev-stop e))
 
-                "pageup"
-                (do (.focus-move! this -10)
-                    (dom/ev-stop e))
+              "pageup"
+              (do (.focus-move! this -10)
+                  (ev-stop e))
 
-                "arrowdown"
-                (do (.focus-move! this 1)
-                    (dom/ev-stop e))
+              "arrowdown"
+              (do (.focus-move! this 1)
+                  (ev-stop e))
 
-                "pagedown"
-                (do (.focus-move! this 10)
-                    (dom/ev-stop e))
+              "pagedown"
+              (do (.focus-move! this 10)
+                  (ev-stop e))
 
-                "enter"
-                (when-some [select-event (:select-event opts)]
-                  (let [item (aget items focus-idx)
-                        comp (comp/get-component env)]
+              "enter"
+              (when-some [select-event (:select-event opts)]
+                (let [{:keys [offset slice]}
+                      last-result
 
-                    (gp/handle-event! comp (assoc select-event :idx focus-idx :item (.-data item)) nil env)
-                    ))
+                      item-idx
+                      (- focus-idx offset)
 
-                nil
-                )))
+                      item
+                      (nth slice item-idx)
 
-          (.addEventListener container-el "focus"
-            (fn [e]
-              (set! focused? true)
-              (.update-item! this focus-idx)
-              ))
+                      comp
+                      (comp/get-component env)]
 
-          (.addEventListener container-el "blur"
-            (fn [e]
-              (set! focused? false)
-              (.update-item! this focus-idx)
+                  (gp/handle-event! comp (assoc select-event :idx focus-idx :item item) nil env)
+                  ))
+
+              nil
               )))
+
+        (.addEventListener container-el "focus"
+          (fn [e]
+            (set! focused? true)
+            (.render-slice! this)
+            ))
+
+        (.addEventListener container-el "blur"
+          (fn [e]
+            (set! focused? false)
+            (.render-slice! this)))
 
         (set! inner-el (js/document.createElement "div"))
         (gs/setStyle inner-el
@@ -159,11 +169,7 @@
 
         (set! opts next-opts)
 
-        ;; FIXME: this is least efficient way to re-render all items
-        ;; should be smarter here
-        (.handle-query-result! this last-result)
-
-        ;; (js/console.log "vlist sync, opts changed" this next)
+        (.render-slice! this)
         )))
 
   (dom-insert [this parent anchor]
@@ -222,34 +228,42 @@
 
     (gp/query-init query-engine query-id query {} #(.handle-query-result! this %)))
 
-  (handle-query-result! [this result]
-    (let [{:keys [item-count offset slice] :as data}
-          (if ident
-            (get-in result [ident (.-attr config)])
-            (get result (.-attr config)))
+  (render-slice! [this]
+    (let [{:keys [offset slice]}
+          last-result
 
-          {:keys [item-height key-fn]}
+          {:keys [key-fn]}
           (.-config config)]
-
-      (set! last-result result)
-
-      (when (not= remote-count item-count)
-        (gs/setStyle inner-el "height" (str (* item-count item-height) "px"))
-        (set! remote-count item-count))
 
       (ap/update! box-root
         (if key-fn
           (coll/keyed-seq slice key-fn
             (fn [val idx key]
-              ;; FIXME: restore focus handling
-              (. config (item-fn val {:idx (+ offset idx)}))))
+              (. config (item-fn val {:idx (+ offset idx)
+                                      :focus (and focused? (= focus-idx idx))}))))
 
           (coll/simple-seq slice
             (fn [val idx]
-              ;; FIXME: restore focus handling
-              (. config (item-fn val {:idx (+ offset idx)}))))))
+              (. config (item-fn val {:idx (+ offset idx)
+                                      :focus (and focused? (= focus-idx idx))}))))))))
 
-      (gs/setStyle box-el "top" (str (* item-height visible-offset) "px"))))
+  (handle-query-result! [this result]
+    (let [{:keys [item-count] :as data}
+          (if ident
+            (get-in result [ident (.-attr config)])
+            (get result (.-attr config)))
+
+          {:keys [item-height]}
+          (.-config config)]
+
+      (set! last-result data)
+
+      (when (not= remote-count item-count)
+        (gs/setStyle inner-el "height" (str (* item-count item-height) "px"))
+        (set! remote-count item-count))
+
+      (gs/setStyle box-el "top" (str (* item-height visible-offset) "px"))
+      (.render-slice! this)))
 
   (measure! [this]
     (let [scroll-top (.-scrollTop container-el)
@@ -282,15 +296,13 @@
       (.update-query! this)))
 
   (focus-set! [this next-idx]
-    (let [old-idx focus-idx]
-      (set! focus-idx next-idx)
-      (.update-item! this old-idx)
-      (.update-item! this next-idx)))
+    (set! focus-idx next-idx)
+    (.render-slice! this))
 
   ;; FIXME: need to load more data when moving out of visible area
   (focus-move! [this dir]
     (let [max
-          (dec (alength items))
+          (dec remote-count)
 
           next-idx
           (-> (+ focus-idx dir)
