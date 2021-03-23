@@ -77,7 +77,7 @@
                "min-height" "100%"
                "height" "100%"})
 
-        (when-some [tabindex (:tabindex opts)]
+        (when-some [tabindex (:tab-index opts)]
           (set! container-el -tabIndex tabindex))
 
         (set! key-handler (KeyHandler. container-el))
@@ -161,11 +161,11 @@
          (= ident (:ident (.-opts next)))))
 
   (dom-sync! [this ^VirtualInit next]
-    (let [{:keys [tabindex] :as next-opts} (.-opts next)]
+    (let [{:keys [tab-index] :as next-opts} (.-opts next)]
       (when (not= opts next-opts)
 
-        (when (not= (:tabindex opts) tabindex)
-          (set! container-el -tabIndex tabindex))
+        (when (not= (:tab-index opts) tab-index)
+          (set! container-el -tabIndex tab-index))
 
         (set! opts next-opts)
 
