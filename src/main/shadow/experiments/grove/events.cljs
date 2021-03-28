@@ -139,31 +139,79 @@
              (str "Unhandled Event " ev-id)
              {:ev-id ev-id :tx tx}))))
 
+
+(defn queue-fx [env fx-id fx-val]
+  (update env ::fx vec-conj [fx-id fx-val]))
+
+(defn merge-result [tx-env ev result]
+  (cond
+    (nil? result)
+    tx-env
+
+    (identical? (::tx-guard tx-env) (::tx-guard result))
+    result
+
+    ;; naively merge result into tx-env overwriting values
+    ;; and using proper queue-fx for registered fx entries
+    ;; does not warn about unknown key/vals
+    ;; makes no attempt to deep merge values except ::fx
+    ;; FIXME: I'm not sure this is at all worth doing
+    ;; maybe just enforce handlers returning updated tx-env?
+    (map? result)
+    (let [fx-config (::rt/fx-config tx-env)]
+      (reduce-kv
+        (fn [env rkey rval]
+          (cond
+            (contains? fx-config rkey)
+            (queue-fx env rkey rval)
+
+            (= ::fx rkey)
+            (update env ::fx into rval)
+
+            ;; FIXME: should this just accept :db or ::fx and warn on all others?
+            ;; typo in fx name just disappear silently
+            :else
+            (assoc env rkey rval)))
+        tx-env
+        result))
+
+    :else
+    (throw
+      (ex-info
+        (str "tx handler returned invalid result for event " (:e ev))
+        {:event ev
+         :env tx-env
+         :result result}))))
+
 (defn tx*
   [{::rt/keys [data-ref event-config fx-config]
     :as env}
-   {ev-id :e :as tx}
+   {ev-id :e :as ev}
    origin]
-  {:pre [(map? tx)
+  {:pre [(map? ev)
          (keyword? ev-id)]}
   ;; (js/console.log ::tx* ev-id tx env)
 
-  ;; FIXME: instead of interceptors allow handler-fn to be multiple things or use function comp
-  ;; (reg-event-fx env ::foo (fn [env tx]))
-  ;; (reg-event-fx env ::foo [pre (fn [env tx]) after]) ;; pre after just being functions
-  ;; (reg-event-fx env ::foo [{:enter (fn [env tx]) :exit (fn [return])} fn1 fn2]) ;; maybe
-  (let [^function handler-fn (get event-config ev-id)]
+  (let [handler (get event-config ev-id)]
 
-    (if-not handler-fn
-      (unhandled-event-ex! ev-id tx origin)
+    (if-not handler
+      (unhandled-event-ex! ev-id ev origin)
 
       (let [before @data-ref
 
             tx-db
             (db/transacted before)
 
+            tx-guard
+            (js/Object.)
+
+            tx-done-ref
+            (atom false)
+
             tx-env
             (assoc env
+              ::tx-guard tx-guard
+              ::fx []
               :db tx-db
               ;; FIXME: should this be strict and only allow chaining tx from fx handlers?
               ;; should be forbidden to execute side effects directly in tx handlers?
@@ -172,44 +220,51 @@
               (fn [next-tx]
                 (throw (ex-info "transact! only allowed from fx env" {:tx next-tx}))))
 
-            {^clj tx-after :db return-value :return :as result}
-            (handler-fn tx-env tx)]
+            result
+            (merge-result tx-env ev (handler tx-env ev))]
 
-        (reduce-kv
-          (fn [_ fx-key value]
-            (let [fx-fn (get fx-config fx-key)]
-              (if-not fx-fn
-                (throw (ex-info "invalid fx" {:fx-key fx-key :fx-value value}))
-                (let [transact-fn
-                      (fn [fx-tx]
-                        ;; FIXME: should probably track the fx causing this transaction and the original tx
-                        ;; FIXME: should probably prohibit calling this while tx is still processing?
-                        ;; just meant for async events triggered by fx
-                        (tx* env fx-tx origin))
-                      fx-env
-                      (assoc env :transact! transact-fn)]
+        (let [{^clj tx-after :db return-value :return} result]
+
+          (when tx-after
+            (let [{:keys [data keys-new keys-removed keys-updated] :as result}
+                  (db/commit! tx-after)]
+
+              (when-not (identical? @data-ref before)
+                (throw (ex-info "someone messed with app-state while in tx" {})))
+
+              (reset! data-ref data)
+
+              ;; FIXME: figure out if invalidation/refresh should be immediate or microtask'd/delayed?
+              (when-not (identical? before data)
+                (invalidate-keys! env keys-new keys-removed keys-updated))))
+
+          ;; FIXME: re-frame allows fx to edit db but we already committed it
+          ;; currently not checking fx-fn return value at all since they supposed to run side effects only
+          ;; and may still edit stuff in env, just not db?
+          (let [fx-env
+                (assoc result
+                  ;; FIXME: is this really needed?
+                  ;; meant for fx that want to trigger async events later
+                  :transact!
+                  (fn [fx-tx]
+                    (when-not @tx-done-ref
+                      (throw (ex-info "cannot start another tx yet, current one is still running. transact! is meant for async events" {})))
+                    (tx* env fx-tx origin)))]
+
+            (doseq [[fx-key value] (::fx result)]
+              (let [fx-fn (get fx-config fx-key)]
+                (if-not fx-fn
+                  (throw (ex-info (str "unknown fx " fx-key) {:fx-key fx-key :fx-value value}))
+
                   (fx-fn fx-env value)))))
-          nil
-          (dissoc result :db :return))
 
-        (when tx-after
-          (let [{:keys [data keys-new keys-removed keys-updated] :as result}
-                (db/commit! tx-after)]
+          (reset! tx-done-ref true)
 
-            (when-not (identical? @data-ref before)
-              (throw (ex-info "someone messed with app-state while in tx" {})))
-
-            (reset! data-ref data)
-
-            ;; FIXME: figure out if invalidation/refresh should be immediate or microtask'd/delayed?
-            (when-not (identical? before data)
-              (invalidate-keys! env keys-new keys-removed keys-updated))))
-
-        return-value))))
+          return-value)))))
 
 (defn reg-event [app-ref ev-id handler-fn]
   {:pre [(keyword? ev-id)
-         (fn? handler-fn)]}
+         (ifn? handler-fn)]}
   (swap! app-ref assoc-in [::rt/event-config ev-id] handler-fn)
   app-ref)
 
