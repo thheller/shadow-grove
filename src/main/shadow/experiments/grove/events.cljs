@@ -223,20 +223,39 @@
             result
             (merge-result tx-env ev (handler tx-env ev))]
 
-        (let [{^clj tx-after :db return-value :return} result]
+        (let [{:keys [data keys-new keys-removed keys-updated] :as tx-result}
+              (db/commit! (:db result))]
 
-          (when tx-after
-            (let [{:keys [data keys-new keys-removed keys-updated] :as result}
-                  (db/commit! tx-after)]
+          (when-not (identical? @data-ref before)
+            (throw (ex-info "someone messed with app-state while in tx" {})))
 
-              (when-not (identical? @data-ref before)
-                (throw (ex-info "someone messed with app-state while in tx" {})))
+          (reset! data-ref data)
 
-              (reset! data-ref data)
+          ;; FIXME: figure out if invalidation/refresh should be immediate or microtask'd/delayed?
+          (when-not (identical? before data)
+            (invalidate-keys! env keys-new keys-removed keys-updated))
 
-              ;; FIXME: figure out if invalidation/refresh should be immediate or microtask'd/delayed?
-              (when-not (identical? before data)
-                (invalidate-keys! env keys-new keys-removed keys-updated))))
+          (when-some [tx-reporter (::tx-reporter env)]
+            (let [report
+                  {:event ev
+                   :origin origin
+                   :keys-new keys-new
+                   :keys-removed keys-removed
+                   :keys-updated keys-updated
+                   :fx (::fx result)
+                   :db-before before
+                   :db-after data
+                   :env env
+                   :env-changes
+                   (reduce-kv
+                     (fn [report rkey rval]
+                       (if (identical? rval (get env rkey))
+                         report
+                         (assoc report rkey rval)))
+                     {}
+                     (dissoc result :db ::fx ::tx-guard :transact!))}]
+
+              (tx-reporter report)))
 
           ;; FIXME: re-frame allows fx to edit db but we already committed it
           ;; currently not checking fx-fn return value at all since they supposed to run side effects only
@@ -260,7 +279,7 @@
 
           (reset! tx-done-ref true)
 
-          return-value)))))
+          (:return result))))))
 
 (defn reg-event [app-ref ev-id handler-fn]
   {:pre [(keyword? ev-id)
