@@ -236,23 +236,29 @@
     (let [{:keys [offset slice]}
           last-result
 
-          {:keys [key-fn]}
-          (.-config config)]
+          {:keys [key-fn content-wrap]}
+          (.-config config)
+
+          content
+          (if key-fn
+            (coll/keyed-seq slice key-fn
+              (fn [val idx key]
+                (. config (item-fn val {:idx (+ offset idx)
+                                        :focus (and focused? (= focus-idx idx))}))))
+
+            (coll/simple-seq slice
+              (fn [val idx]
+                (. config (item-fn val {:idx (+ offset idx)
+                                        :focus (and focused? (= focus-idx idx))})))))]
 
       ;; FIXME: there are issues with rendering items into a box and only moving that box
       ;; don't know why yet but scrolling slowly with mousewheel causes visible flicker
 
       (ap/update! box-root
-        (if key-fn
-          (coll/keyed-seq slice key-fn
-            (fn [val idx key]
-              (. config (item-fn val {:idx (+ offset idx)
-                                      :focus (and focused? (= focus-idx idx))}))))
-
-          (coll/simple-seq slice
-            (fn [val idx]
-              (. config (item-fn val {:idx (+ offset idx)
-                                      :focus (and focused? (= focus-idx idx))}))))))))
+        (if-not content-wrap
+          content
+          (content-wrap content))
+        )))
 
   (handle-query-result! [this result]
     (let [{:keys [item-count] :as data}
