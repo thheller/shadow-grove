@@ -257,10 +257,17 @@
       (.destroy! q)))
 
   (transact! [this tx origin]
-    (try
-      (js/Promise.resolve (ev/tx* @rt-ref tx origin))
-      (catch :default ex
-        (js/Promise.reject ex)))))
+    (let [env @rt-ref]
+      (try
+        (js/Promise.resolve (ev/tx* env tx origin))
+        (catch :default ex
+          (js/Promise.reject
+            (ex-info
+              "transact! failed"
+              {:tx tx
+               :env env
+               :origin origin}
+              ex)))))))
 
 (defn init! [rt-ref]
   ;; kinda ugly but shortest way to have worker not depend this

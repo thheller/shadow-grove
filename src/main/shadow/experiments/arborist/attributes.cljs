@@ -2,6 +2,7 @@
   (:require
     [goog.object :as gobj]
     [goog.string :as gstr]
+    [goog.functions :as gfn]
     [clojure.string :as str]
     [shadow.experiments.arborist.protocols :as p]
     ))
@@ -97,6 +98,8 @@
           (when-let [ev-fn (gobj/get node ev-key)]
             (.removeEventListener node event ev-fn))
 
+          ;; FIXME: should maybe allow to just use a function as value
+          ;; skipping all the ev-handler logic and just calling it as a regular callback
           (when (some? nval)
             (let [^not-native ev-handler (::p/dom-event-handler env)]
 
@@ -109,17 +112,46 @@
                 ;; easier to miss in tests and stuff that don't test particular events
                 (p/validate-dom-event-value! ev-handler env event nval))
 
-              (let [ev-fn (fn [dom-event] (p/handle-dom-event! ev-handler env event nval dom-event))
-                    ev-opts #js {}]
+              (let [m?
+                    (map? nval)
 
-                ;; FIXME: need to track if once already happened. otherwise may re-attach and actually fire more than once
-                ;; but it should be unlikely to have a changing val with ^:once?
-                (when-let [m (meta nval)]
-                  (when (:once m)
-                    (gobj/set ev-opts "once" true))
+                    ev-fn
+                    (fn [dom-event]
+                      (p/handle-dom-event! ev-handler env event nval dom-event))
 
-                  (when (:passive m)
-                    (gobj/set ev-opts "passive" true)))
+                    ev-opts
+                    #js {}
+
+                    ev-fn
+                    (if-not m?
+                      ev-fn
+                      (let [{:e/keys [debounce throttle rate-limit once passive capture signal]} nval]
+
+                        ;; FIXME: need to track if once already happened. otherwise may re-attach and actually fire more than once
+                        ;; but it should be unlikely to have a changing val with :e/once?
+                        (when once
+                          (gobj/set ev-opts "once" true))
+
+                        (when passive
+                          (gobj/set ev-opts "passive" true))
+
+                        (when capture
+                          (gobj/set ev-opts "capture" true))
+
+                        (when signal
+                          (gobj/set ev-opts "signal" true))
+
+                        ;; FIXME: should these be exclusive?
+                        (cond-> ev-fn
+                          debounce
+                          (gfn/debounce debounce)
+
+                          throttle
+                          (gfn/debounce throttle)
+
+                          rate-limit
+                          (gfn/debounce rate-limit)
+                          )))]
 
                 ;; FIXME: ev-opts are not supported by all browsers
                 ;; closure lib probably has something to handle that

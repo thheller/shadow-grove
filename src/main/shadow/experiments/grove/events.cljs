@@ -148,6 +148,14 @@
     (nil? result)
     tx-env
 
+    (not (map? result))
+    (throw
+      (ex-info
+        (str "tx handler returned invalid result for event " (:e ev))
+        {:event ev
+         :env tx-env
+         :result result}))
+
     (identical? (::tx-guard tx-env) (::tx-guard result))
     result
 
@@ -157,7 +165,7 @@
     ;; makes no attempt to deep merge values except ::fx
     ;; FIXME: I'm not sure this is at all worth doing
     ;; maybe just enforce handlers returning updated tx-env?
-    (map? result)
+    :else
     (let [fx-config (::rt/fx-config tx-env)]
       (reduce-kv
         (fn [env rkey rval]
@@ -173,15 +181,7 @@
             :else
             (assoc env rkey rval)))
         tx-env
-        result))
-
-    :else
-    (throw
-      (ex-info
-        (str "tx handler returned invalid result for event " (:e ev))
-        {:event ev
-         :env tx-env
-         :result result}))))
+        result))))
 
 (defn tx*
   [{::rt/keys [data-ref event-config fx-config]

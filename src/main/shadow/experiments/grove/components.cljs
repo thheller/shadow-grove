@@ -615,7 +615,7 @@
 (defn get-scheduler [^ManagedComponent comp]
   (. comp -scheduler))
 
-(defn get-hook-value [^ManageComponent comp idx]
+(defn get-hook-value [^ManagedComponent comp idx]
   (.get-hook-value comp idx))
 
 (defn get-events [^ManagedComponent comp]

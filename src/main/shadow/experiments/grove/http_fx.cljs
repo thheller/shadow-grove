@@ -109,15 +109,21 @@
    ^function callback]
   (let [[method uri body opts]
         (cond
+          ;; :request [:GET request nil {}]
           (vector? request)
-          [:GET request nil {}]
+          request
 
+          ;; :request {:uri "/foo" :method :GET}
           (map? request)
           (let [{:keys [method uri body]} request]
             [(or method (if body :POST :GET))
              (or uri "")
              body
-             request]))
+             request])
+
+          ;; :request "/foo"
+          (string? request)
+          [:GET request nil {}])
 
         {:keys [timeout]}
         opts
@@ -207,8 +213,9 @@
 
 ;; taking the read-fns from env so this ns doesn't depend on either cljs.reader nor transit
 ;; there are also several other places that will require these fns anyways
+;; FIXME: realld should find a better way to handle this, harcoded these like this is bad
 (defn parse-edn [env ^js xhr-req]
-  (let [read-fn (:shadow.experiments.grove.runtime.worker/edn-read env)]
+  (let [read-fn (::rt/edn-read env)]
     (when-not read-fn
       (throw (ex-info "received a EDN response but didn't have edn-read fn" {})))
     (read-fn (.-responseText xhr-req))))
@@ -226,6 +233,7 @@
 (def default-response-formats
   {"text/plain" just-response-text
    "text/html" just-response-text
+   "text/edn" parse-edn
    "application/json" parse-json
    "application/edn" parse-edn
    "application/transit+json" parse-transit})

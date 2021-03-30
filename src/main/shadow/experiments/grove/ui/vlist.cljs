@@ -67,7 +67,7 @@
 
       ;; FIXME: this (.-config config) stuff sucks
       ;; only have it because config is VirtualConfig class which we check identical? on
-      (let [{:keys [scroll-delay box-style] :or {scroll-delay 16}} (.-config config)]
+      (let [{:keys [scroll-delay box-style box-class] :or {scroll-delay 16}} (.-config config)]
 
         (set! container-el (js/document.createElement "div"))
         (gs/setStyle container-el
@@ -142,6 +142,10 @@
         (set! box-el (js/document.createElement "div"))
         (let [box-style (merge box-style {:position "absolute" :top "0px" :width "100%"})]
           (a/set-attr env box-el :style nil box-style))
+
+        (when box-class
+          (a/set-attr env box-el :class nil box-class))
+
         (.appendChild inner-el box-el)
 
         (set! box-root (common/managed-root env))
@@ -234,6 +238,9 @@
 
           {:keys [key-fn]}
           (.-config config)]
+
+      ;; FIXME: there are issues with rendering items into a box and only moving that box
+      ;; don't know why yet but scrolling slowly with mousewheel causes visible flicker
 
       (ap/update! box-root
         (if key-fn

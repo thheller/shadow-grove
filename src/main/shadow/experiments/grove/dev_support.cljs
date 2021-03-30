@@ -38,8 +38,13 @@
      :root (.-root this)
      :current-idx (.-current-idx this)
      :hooks (vec (.-hooks this))
-     :hook-values (into [] (map (fn [idx] (gp/hook-value (aget (.-hooks this) idx))))
-                    (range (.-current-idx this)))
+     :hook-values
+     (->> (array-seq (.-hooks this))
+          (map (fn [hook]
+                 (if-not hook
+                   :uninitialized
+                   (gp/hook-value hook))))
+          (vec))
      :dirty-from-args (.-dirty-from-args this)
      :dirty-hooks (.-dirty-hooks this)
      :updated-hooks (.-updated-hooks this)

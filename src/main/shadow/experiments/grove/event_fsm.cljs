@@ -29,6 +29,12 @@
 (defn on-init [machine handler]
   (assoc machine :init-fn handler))
 
+(defn next-state
+  ([env ns]
+   (assoc env ::next-state ns))
+  ([env ns timeout]
+   (assoc env ::next-state ns ::timeout timeout)))
+
 ;; FIXME: defrecord generates a bunch of code we don't need
 ;; consider writing deftype variant
 ;; the goal here is having something that implements the event protocol
