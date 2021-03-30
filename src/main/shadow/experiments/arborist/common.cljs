@@ -104,7 +104,7 @@
         (set! node el)
         ;; root was already inserted to dom but no node was available at the time
         (when-some [parent (.-parentElement marker)]
-          (p/dom-insert node parent marker)
+          (p/dom-insert node parent (.-nextSibling marker))
           ;; root might not be in document yet
           (when dom-entered?
             (p/dom-entered! node))))
