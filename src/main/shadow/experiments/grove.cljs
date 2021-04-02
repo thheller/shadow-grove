@@ -15,6 +15,7 @@
     [shadow.experiments.grove.ui.util :as util]
     [shadow.experiments.grove.ui.suspense :as suspense]
     [shadow.experiments.grove.ui.atoms :as atoms]
+    [shadow.experiments.grove.ui.portal :as portal]
     [shadow.experiments.arborist.attributes :as a]))
 
 (set! *warn-on-infer* false)
@@ -294,3 +295,10 @@
   "call (callback env) on mount once"
   [callback]
   (comp/EffectHook. :mount callback nil true nil nil))
+
+;; FIXME: does this ever need to take other options?
+(defn portal
+  ([body]
+   (portal/portal js/document.body body))
+  ([ref-node body]
+   (portal/portal ref-node body)))
