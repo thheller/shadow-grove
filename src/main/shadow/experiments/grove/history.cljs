@@ -9,7 +9,7 @@
 (defn init!
   [rt-ref
    {:keys [start-token path-prefix use-fragment]
-    :or {start-token "/dashboard"
+    :or {start-token "/"
          path-prefix ""
          use-fragment false}
     :as config}]
@@ -17,11 +17,12 @@
   {:pre [(or (= "" path-prefix)
              (and (string? path-prefix)
                   (str/starts-with? path-prefix "/")
-                  (not (str/ends-with? path-prefix "/")))
+                  (not (str/ends-with? path-prefix "/"))))
 
+         (or (= "/" start-token)
              (and (str/starts-with? start-token "/")
-                  (not (str/ends-with? start-token "/")))
-             )]}
+                  (not (str/ends-with? start-token "/"))))
+         ]}
 
   (let [get-token
         (fn []
