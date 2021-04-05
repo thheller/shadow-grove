@@ -10,6 +10,7 @@ public/js
 /.classpath
 /.project
 /.settings
+/.cpcache
 
 pom.xml
 pom.xml.asc
