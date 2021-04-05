@@ -73,6 +73,22 @@
     :else
     (.setAttribute node prop-name nval)))
 
+(defn wrap-stop! [^function target]
+  (fn [^js e]
+    (.stopPropagation e)
+    (.preventDefault e)
+    (target e)))
+
+(defn wrap-stop [^function target]
+  (fn [^js e]
+    (.stopPropagation e)
+    (target e)))
+
+(defn wrap-prevent-default [^function target]
+  (fn [^js e]
+    (.preventDefault e)
+    (target e)))
+
 (defn make-attr-handler [^Keyword key]
   (let [prop-name (.-name key)]
     (when ^boolean (.-namespace key)
@@ -125,7 +141,18 @@
                     ev-fn
                     (if-not m?
                       ev-fn
-                      (let [{:e/keys [debounce throttle rate-limit once passive capture signal]} nval]
+                      (let [{:e/keys
+                             [debounce
+                              throttle
+                              rate-limit
+                              once
+                              passive
+                              capture
+                              signal
+                              stop!
+                              stop
+                              prevent-default]}
+                            nval]
 
                         ;; FIXME: need to track if once already happened. otherwise may re-attach and actually fire more than once
                         ;; but it should be unlikely to have a changing val with :e/once?
@@ -151,6 +178,16 @@
 
                           rate-limit
                           (gfn/debounce rate-limit)
+
+                          ;; FIXME: would it be better to default these to true?
+                          prevent-default
+                          (wrap-prevent-default)
+
+                          stop
+                          (wrap-stop)
+
+                          stop!
+                          (wrap-stop!)
                           )))]
 
                 ;; FIXME: ev-opts are not supported by all browsers
