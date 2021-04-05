@@ -609,8 +609,11 @@
 (defn arg-triggers-render! [^ManagedComponent comp idx]
   (.set-render-required! comp))
 
-(defn get-env [^ManagedComponent comp]
-  (.-component-env comp))
+(defn get-env
+  ([^ManagedComponent comp]
+   (.-component-env comp))
+  ([^ManagedComponent comp key]
+   (get (.-component-env comp) key)))
 
 (defn get-scheduler [^ManagedComponent comp]
   (. comp -scheduler))
