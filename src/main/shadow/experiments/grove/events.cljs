@@ -1,5 +1,6 @@
 (ns shadow.experiments.grove.events
   "re-frame style event handling"
+  (:require-macros [shadow.experiments.grove.events])
   (:require
     [clojure.set :as set]
     [shadow.experiments.grove.components :as comp]
