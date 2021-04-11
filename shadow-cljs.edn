@@ -24,7 +24,8 @@
   3009 "examples/bench-fragment"
   3010 "out/browser-test"
   3011 "examples/app/public"
-  3012 "examples/fulcro"}
+  3012 "examples/fulcro"
+  3013 "examples/ui"}
 
  :build-defaults
  {:compiler-options
@@ -33,7 +34,12 @@
    :shadow-keywords true}}
 
  :builds
- {:examples-bootstrap
+ {:ui ;; FIXME: should at some point has some kind of workspaces like UI
+  {:target :browser
+   :output-dir "examples/ui/js"
+   :modules {:main {:init-fn dummy.ui/init}}}
+
+  :examples-bootstrap
   {:target :bootstrap
    :output-dir "examples/app/public/bootstrap"
    :exclude #{cljs.js}

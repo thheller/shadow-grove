@@ -91,7 +91,7 @@
 
 (defn make-attr-handler [^Keyword key]
   (let [prop-name (.-name key)]
-    (when ^boolean (.-namespace key)
+    (when ^boolean (.-ns key)
       (throw
         (ex-info
           (str "namespaced attribute without setter: " key)
