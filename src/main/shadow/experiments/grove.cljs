@@ -21,7 +21,6 @@
 (set! *warn-on-infer* false)
 
 ;; these are private - should not be accessed from the outside
-(defonce active-roots-ref (atom {}))
 (defonce active-apps-ref (atom {}))
 
 (defn run-now! [env callback]
@@ -145,12 +144,11 @@
   (handle-event! [this ev-map e origin]
     (tx* rt-ref ev-map origin)))
 
-(defn init-root
-  [rt-ref root-id root-el init-env]
-  {:pre [(rt/ref? rt-ref)
-         (some? root-id)
-         (map? init-env)]}
+(defn- make-root-env
+  [rt-ref root-el]
 
+  ;; FIXME: have a shared root scheduler rt-ref
+  ;; multiple roots should schedule in some way not indepdendently
   (let [scheduler
         (RootScheduler. false (js/Set.))
 
@@ -158,58 +156,48 @@
         (RootEventTarget. rt-ref)
 
         env-init
-        (::rt/env-init @rt-ref)
+        (::rt/env-init @rt-ref)]
 
-        env
-        (-> init-env
-            (assoc ::comp/scheduler scheduler
-                   ::comp/event-target event-target
-                   ::suspense-keys (atom {})
-                   ::rt/root-el root-el
-                   ::rt/root-id root-id
-                   ::rt/runtime-ref rt-ref)
-            (cond->
-              (not (contains? init-env ::comp/error-handler))
-              (assoc ::comp/error-handler default-error-handler)))
+    (reduce
+      (fn [env init-fn]
+        (init-fn env))
 
-        env
-        (reduce
-          (fn [env init-fn]
-            (init-fn env))
-          env
-          env-init)]
+      ;; base env, using init-fn to customize
+      {::comp/scheduler scheduler
+       ::comp/event-target event-target
+       ::suspense-keys (atom {})
+       ::rt/root-el root-el
+       ::rt/runtime-ref rt-ref
+       ;; FIXME: get this from rt-ref?
+       ::comp/error-handler default-error-handler}
 
-    ;; FIXME: throw if already initialized?
-    (swap! active-apps-ref assoc root-id env)
-    ;; never expose the env so people don't get ideas about using it
-    root-id))
+      env-init)))
 
-(defn start [app-id root-node]
-  (let [{::rt/keys [root-el] :as env} (get @active-apps-ref app-id)]
-    (if-not env
-      (throw (ex-info "app not initialized" {:app-id app-id}))
-      (let [active (get @active-roots-ref root-el)]
-        (if-not active
-          (let [root (sa/dom-root root-el env)]
-            (sa/update! root root-node)
-            (swap! active-roots-ref assoc root-el {:env env :root root :root-el root-el})
-            ::started)
+(defn render [rt-ref ^js root-el root-node]
+  {:pre [(rt/ref? rt-ref)]}
+  (if-let [active-root (.-sg$root root-el)]
+    (do (when ^boolean js/goog.DEBUG
+          (comp/mark-all-dirty!))
 
-          (let [{:keys [root]} active]
-            (assert (identical? env (:env active)) "can't change env between restarts")
-            (when ^boolean js/goog.DEBUG
-              (comp/mark-all-dirty!))
+        ;; FIXME: somehow verify that env hasn't changed since that cannot be changed
+        ;; without completely re-rendering everything
+        ;; but since env is constructed on first mount we don't know what might have changed
 
-            (sa/update! root root-node)
-            ::updated
-            ))))))
+        (sa/update! active-root root-node)
+        ::updated)
 
-;; FIXME: figure out if stop is ever needed?
-#_(defn stop [root-el]
-    (when-let [{::keys [app-root] :as env} (get @active-roots-ref root-el)]
-      (swap! active-roots-ref dissoc root-el)
-      (ap/destroy! app-root)
-      (dissoc env ::app-root ::root-el)))
+    (let [new-env (make-root-env rt-ref root-el)
+          new-root (sa/dom-root root-el new-env)]
+      (sa/update! new-root root-node)
+      (set! (.-sg$root root-el) new-root)
+      (set! (.-sg$env root-el) new-env)
+      ::started)))
+
+(defn unmount-root [^js root-el]
+  (when-let [root (.-sg$root root-el)]
+    (ap/destroy! root true)
+    (js-delete root-el "sg$root")
+    (js-delete root-el "sg$env")))
 
 (defn watch
   "hook that watches an atom and triggers an update on change

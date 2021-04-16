@@ -8,7 +8,7 @@
 
 (defn init!
   [rt-ref
-   {:keys [start-token path-prefix use-fragment]
+   {:keys [start-token path-prefix use-fragment root-el]
     :or {start-token "/"
          path-prefix ""
          use-fragment false}
@@ -73,8 +73,7 @@
         (-> rt
             (assoc ::config config)
             (update ::rt/env-init conj
-              (fn [{::rt/keys [root-el] :as env}]
-
+              (fn [env]
                 (let [trigger-route!
                       (fn []
                         ;; token must start with /, strip it to get tokens vector
@@ -88,7 +87,7 @@
 
                   ;; fragment uses hashchange event so we can skip checking clicks
                   (when-not use-fragment
-                    (.addEventListener root-el "click"
+                    (.addEventListener (or root-el js/document.body) "click"
                       (fn [^js e]
                         (when (and (zero? (.-button e))
                                    (not (or (.-shiftKey e) (.-metaKey e) (.-ctrlKey e) (.-altKey e))))

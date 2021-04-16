@@ -222,7 +222,7 @@
     (sg/app-tx ::app {:e ::m/load-gist! :gist-id gist-id})
     (sg/app-tx ::app {:e ::m/compile! :code example-code}))
 
-  (sg/start ::app dom-root (ui-root)))
+  (sg/render ::app dom-root (ui-root)))
 
 (defn init []
   (sg/init ::app
