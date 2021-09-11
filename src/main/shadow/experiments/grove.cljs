@@ -179,9 +179,10 @@
     (do (when ^boolean js/goog.DEBUG
           (comp/mark-all-dirty!))
 
-        ;; FIXME: somehow verify that env hasn't changed since that cannot be changed
-        ;; without completely re-rendering everything
+        ;; FIXME: somehow verify that env hasn't changed
+        ;; env is supposed to be immutable once mounted, but someone may still modify rt-ref
         ;; but since env is constructed on first mount we don't know what might have changed
+        ;; this is really only a concern for hot-reload, apps only call this once and never update
 
         (sa/update! active-root root-node)
         ::updated)

@@ -336,7 +336,7 @@
        (.entryAt data key)))
 
    :cljs
-   (deftype ObservedData [^:mutable keys-used data]
+   (deftype ObservedData [^:mutable keys-used ^not-native data]
      IObserved
      (observed-keys [_]
        (persistent! keys-used))
@@ -349,6 +349,12 @@
      IMap
      (-dissoc [coll k]
        (throw (ex-info "observed data is read-only" {})))
+
+     IAssociative
+     (-contains-key? [coll k]
+       (-contains-key? data k))
+     (-assoc [coll k v]
+       (throw (ex-info "observed data is read-only, assoc not allowed" {:k k :v v})))
 
      ILookup
      (-lookup [_ key]
@@ -462,6 +468,7 @@
                (TransactedData.
                  (.assoc data key value)
                  keys-new
+                 (conj! keys-updated key)
                  (conj! keys-updated key)
                  keys-removed
                  completed-ref)
@@ -642,6 +649,9 @@
            completed-ref)))
 
      IAssociative
+     (-contains-key? [coll k]
+       (-contains-key? data k))
+
      (-assoc [this key value]
        (.check-completed! this)
 

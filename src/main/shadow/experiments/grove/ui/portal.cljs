@@ -7,7 +7,7 @@
 
 (deftype PortalNode [env ref-node root]
   ap/IManaged
-  (supports? [this next]
+  (supports? [this ^PortalSeed next]
     (and (instance? PortalSeed next)
          (identical? ref-node (.-ref-node next))))
 
