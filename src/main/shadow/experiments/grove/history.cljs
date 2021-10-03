@@ -61,12 +61,19 @@
                      (subs nval 1))))))))
 
     (ev/reg-fx rt-ref :ui/redirect!
-      (fn [env {:keys [token title]}]
+      (fn [{:keys [transact!] :as env} {:keys [token title]}]
         {:pre [(str/starts-with? token "/")]}
+
         (js/window.history.pushState
           nil
           (or title js/document.title)
-          (str path-prefix token))))
+          (str path-prefix token))
+
+        (let [tokens (str/split (subs token 1) #"/")]
+          ;; FIXME: there needs to be cleaner way to start another tx from fx
+          ;; currently forcing them to be async so the initial tx can conclude
+          (js/setTimeout #(transact! {:e :ui/route! :token token :tokens tokens}) 0)
+          )))
 
     (swap! rt-ref
       (fn [rt]

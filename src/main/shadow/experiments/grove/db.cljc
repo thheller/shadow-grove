@@ -8,38 +8,49 @@
    (defn keyword-identical? [a b]
      (identical? a b)))
 
-(defn parse-entity-spec [entity-type {:keys [attrs] :as config}]
-  {:pre [(keyword? entity-type)
-         (map? attrs)]}
+(defn make-ident [type id]
+  [type id])
 
-  (let [[id-attr id-pred]
-        (reduce-kv
-          (fn [_ key val]
-            (when (and (vector? val) (= :primary-key (first val)))
-              (reduced [key (second val)])))
-          nil
-          attrs)
+(defn parse-joins [spec joins]
+  (reduce-kv
+    (fn [spec attr val]
+      (if-not (and (vector? val)
+                   (or (= :one (first val))
+                       (= :many (first val))))
+        (throw (ex-info "invalid join" joins))
 
-        joins
-        (reduce-kv
-          (fn [joins key val]
-            (if-not (and (vector? val)
-                         (or (= :one (first val))
-                             (= :many (first val))))
-              joins
-              (assoc joins key (second val))))
-          {}
-          attrs)]
+        ;; FIXME: actually make use of :one/:many, right now relying and user supplying propery value
+        (update spec :joins attr (second val))))
+    spec
+    joins))
 
-    (when-not id-attr
-      (throw (ex-info "must define primary-key" {:entity-type entity-type
-                                                 :attr-config attrs})))
+(defn parse-primary-key
+  [{:keys [entity-type] :as spec}
+   {:keys [primary-key] :as config}]
+  (cond
+    (and (not primary-key) (:ident-gen config))
+    spec
 
-    {:entity-type id-attr
-     :id-attr id-attr
-     :id-pred id-pred
-     :attrs attrs
-     :joins joins}))
+    (keyword? primary-key)
+    (assoc spec :ident-gen
+      #(make-ident entity-type (get % primary-key)))
+
+    (and (vector? primary-key) (every? keyword? primary-key))
+    (assoc spec :ident-gen
+      (fn [item]
+        (make-ident entity-type
+          (mapv #(get item %) primary-key))))
+
+    :else
+    (throw (ex-info "invalid :primary-key" config))))
+
+(defn parse-entity-spec [entity-type {:keys [joins] :as config}]
+  {:pre [(keyword? entity-type)]}
+
+  (-> (assoc config :entity-type entity-type :joins {})
+      (parse-primary-key config)
+      (parse-joins joins)
+      ))
 
 (defn parse-schema [spec]
   (reduce-kv
@@ -47,6 +58,8 @@
       (cond
         (= :entity type)
         (assoc-in schema [:entities key] (parse-entity-spec key config))
+
+        ;; only have entities for now, will need custom config later
         :else
         (throw (ex-info "unknown type" {:key key :config config}))
         ))
@@ -59,9 +72,6 @@
         m {::schema schema
            ::ident-types (set (keys (:entities schema)))}]
     (with-meta init-db m)))
-
-(defn make-ident [type id]
-  [type id])
 
 (defn ident? [thing]
   (and (vector? thing)
@@ -81,24 +91,14 @@
   (nth thing 1))
 
 (defn- normalize* [imports schema entity-type item]
-  (let [{:keys [id-attr id-pred joins] :as ent-config}
+  (let [{:keys [ident-gen id-pred joins] :as ent-config}
         (get-in schema [:entities entity-type])
 
         item-ident
         (get item :db/ident)
 
-        id-val
-        (get item id-attr)
-
-        _ (when-not id-val
-            (throw (ex-info "entity was supposed to have id-attr but didn't"
-                     {:item item
-                      :entity-type entity-type
-                      :id-attr id-attr})))
-
         ident
-        (make-ident entity-type id-val)
-        ;; [entity-type id-val]
+        (ident-gen item)
 
         _ (when (and item-ident (not= item-ident ident))
             (throw (ex-info "item contained ident but we generated a different one" {:item item :ident ident})))
@@ -130,9 +130,10 @@
                         (vector? curr-val)
                         (mapv #(normalize* imports schema join-type %) curr-val)
 
-                        ;; FIXME: assume all other vals are id-val?
-                        (id-pred curr-val)
-                        [join-type curr-val]
+                        ;; FIXME: add back predicate to check if curr-val is valid id-val to make ident
+                        ;; might be garbage leading to invalid ident stored in norm db
+                        (some? curr-val)
+                        (make-ident join-type curr-val)
 
                         :else
                         (throw (ex-info "unexpected value in join attr"
@@ -201,7 +202,7 @@
          _ (when-not schema
              (throw (ex-info "data missing schema" {:data data})))
 
-         {:keys [id-attr] :as entity-spec}
+         {:keys [ident-gen] :as entity-spec}
          (get-in schema [:entities entity-type])
 
          _ (when-not entity-spec
@@ -209,11 +210,7 @@
 
          idents
          (->> coll
-              (map (fn [item]
-                     (let [id (get item id-attr)]
-                       (when-not id
-                         (throw (ex-info "can't import item without an id" {:item item :id-attr id-attr})))
-                       (make-ident entity-type id))))
+              (map ident-gen)
               (into []))
 
          imports
@@ -236,16 +233,14 @@
          _ (when-not schema
              (throw (ex-info "data missing schema" {:data data})))
 
-         {:keys [id-attr] :as entity-spec}
+         {:keys [ident-gen] :as entity-spec}
          (get-in schema [:entities entity-type])
 
          _ (when-not entity-spec
              (throw (ex-info "entity not defined" {:entity-type entity-type})))
 
          ident
-         (let [id (get item id-attr)]
-           (assert id)
-           (make-ident entity-type id))
+         (ident-gen item)
 
          imports
          (normalize schema entity-type [item])]
@@ -447,7 +442,7 @@
              (if-not is-ident-update?
                ;; new non-ident key
                (TransactedData.
-                 (.assoc data key value)
+                 (assoc data key value)
                  (conj! keys-new key)
                  keys-updated
                  keys-removed
@@ -456,7 +451,7 @@
                ;; new ident
                (TransactedData.
                  (-> data
-                     (.assoc key value)
+                     (assoc key value)
                      (update (coll-key key) set-conj key))
                  (conj! keys-new key)
                  (conj! keys-updated (coll-key key))
@@ -466,8 +461,7 @@
              ;; update, non-ident key
              (if-not is-ident-update?
                (TransactedData.
-                 (.assoc data key value)
-                 keys-new
+                 (assoc data key value)
                  (conj! keys-updated key)
                  (conj! keys-updated key)
                  keys-removed
