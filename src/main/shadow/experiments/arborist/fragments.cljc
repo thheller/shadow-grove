@@ -27,21 +27,36 @@
        (subs spec (inc fhash) fdot)
        (str/replace (.substring spec (inc fdot)) #"\." " ")])))
 
-(defn const? [thing]
+
+(defn const? [env thing]
   (or (string? thing)
       (number? thing)
       (boolean? thing)
       (keyword? thing)
       (= thing 'nil)
-      (and (vector? thing) (every? const? thing))
+      (and (vector? thing) (every? #(const? env %) thing))
       (and (map? thing)
            (reduce-kv
              (fn [r k v]
-               (if-not (and (const? k) (const? v))
+               (if-not (and (const? env k) (const? env v))
                  (reduced false)
                  r))
              true
-             thing))))
+             thing))
+
+      ;; treat foo/bar symbols as constants as they are assumed to be def'd vars
+      ;; which shouldn't ever change during a lifecycle update
+      ;; treat non-local symbols as constants as well since they shouldn't change either
+
+      ;; (def some-class "foo bar")
+      ;; (<< [:div {:class some-class} ...])
+      ;; (<< [:div {:class styles/card} ...])
+      ;; don't ever need to update :class
+
+      (qualified-symbol? thing)
+      (and (simple-symbol? thing)
+           ;; FIXME: this should maybe resolve instead?
+           (not (get-in env [:macro-env :locals thing])))))
 
 (defn next-el-id [{:keys [el-seq-ref] :as env}]
   (swap! el-seq-ref inc))
@@ -115,7 +130,7 @@
         attr-ops
         (->> attrs
              (map (fn [[attr-key attr-value]]
-                    (if (const? attr-value)
+                    (if (const? env attr-value)
                       {:op :static-attr
                        :sym el-sym
                        :element-id id
@@ -383,6 +398,7 @@
   (let [env
         {:code-ref (atom {})
          :el-seq-ref (atom -1) ;; want 0 to be first id
+         :macro-env macro-env
          ;; :parent (gensym "root")
          ::svg (::svg macro-env)}
 
@@ -502,11 +518,11 @@
 
 (comment
   (require 'clojure.pprint)
-  (clojure.pprint/pprint
+  (tap>
     (make-fragment
-      {}
+      {:locals {'foox {}}}
       nil
-      '["before" [:div {:dyn (foo)} 1 [:div {:foo "bar"} 2]] (yo) [:div [:div 3]] "after"]))
+      '["before" [:div {:dyn foo} 1 [:div {:foo "bar"} 2]] (yo) [:div [:div 3]] "after"]))
 
 
   (clojure.pprint/pprint
