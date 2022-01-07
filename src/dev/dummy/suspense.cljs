@@ -1,7 +1,8 @@
 (ns dummy.suspense
   (:require
     [shadow.experiments.grove :as sg :refer (defc <<)]
-    [shadow.experiments.grove.ui.testing :as t]))
+    [shadow.experiments.grove.ui.testing :as t]
+    [shadow.experiments.grove.runtime :as rt]))
 
 (defonce root-el (js/document.getElementById "app"))
 
@@ -63,13 +64,21 @@
             [:div "without"]
             body]]))))
 
-(defn ^:dev/after-load start []
-  (sg/start ::ui root-el (ui-root)))
+;; grove runtime
+(defonce rt-ref
+  (rt/prepare {}
+    (atom {}) ;; grove state which we don't use here
+    ::ui))
 
+(defn ^:dev/after-load start []
+  (sg/render rt-ref root-el (ui-root)))
+
+;; adding this to the env under :data-ref, env makes it available to the component tree
+;; never using this directly otherwise to avoid global state
 (defonce data-ref (atom {:page :a}))
 
 (defn init []
-  (sg/init ::ui
-    {:data-ref data-ref}
-    [])
+  ;; functions in env-init are called once on first render for a new root
+  ;; we use this to provide data-ref access via component env
+  (swap! rt-ref update ::rt/env-init conj #(assoc % :data-ref data-ref))
   (start))
