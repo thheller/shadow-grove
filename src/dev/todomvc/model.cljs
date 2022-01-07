@@ -3,8 +3,9 @@
 
 ;; main and worker live in separate namespaces so :: doesn't work
 
-
 (def schema
   {::todo
    {:type :entity
-    :attrs {::todo-id [:primary-key number?]}}})
+    :primary-key ::todo-id
+    :attrs {}
+    }})
