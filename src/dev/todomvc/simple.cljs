@@ -1,5 +1,6 @@
 (ns todomvc.simple
   (:require
+    [shadow.experiments.grove.runtime :as rt]
     [shadow.experiments.grove :as sg :refer (defc <<)]
     [shadow.experiments.grove.css-transition :as cfx]
     ))
@@ -182,8 +183,14 @@
   (event ::delete! [{:keys [data-ref] :as env} {:keys [todo-id]}]
     (swap! data-ref update :todos dissoc todo-id)))
 
+;; grove runtime
+(defonce rt-ref
+  (rt/prepare {}
+    (atom {}) ;; grove state which we don't use here
+    ::ui))
+
 (defn ^:dev/after-load start []
-  (sg/start ::ui root-el (ui-root)))
+  (sg/render rt-ref root-el (ui-root)))
 
 ;; adding this to the env under :data-ref, env makes it available to the component tree
 ;; never using this directly otherwise to avoid global state
@@ -195,7 +202,7 @@
       (atom)))
 
 (defn init []
-  (sg/init ::ui
-    {:data-ref data-ref}
-    [])
+  ;; functions in env-init are called once on first render for a new root
+  ;; we use this to provide data-ref access via component env
+  (swap! rt-ref update ::rt/env-init conj #(assoc % :data-ref data-ref))
   (start))
