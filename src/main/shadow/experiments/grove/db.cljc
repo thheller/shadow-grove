@@ -20,7 +20,7 @@
         (throw (ex-info "invalid join" joins))
 
         ;; FIXME: actually make use of :one/:many, right now relying and user supplying propery value
-        (update spec :joins attr (second val))))
+        (update spec :joins assoc attr (second val))))
     spec
     joins))
 
