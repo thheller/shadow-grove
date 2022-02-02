@@ -3,8 +3,7 @@
     [cljs.env :as cljs-env]
     [shadow.experiments.grove.runtime :as gr]
     [shadow.experiments.grove.db :as db]
-    [shadow.experiments.grove.examples.model :as m]
-    [shadow.experiments.grove.transit :as transit]))
+    [shadow.experiments.grove.examples.model :as m]))
 
 (defonce data-ref
   (-> {::m/example-tab :result
@@ -14,5 +13,4 @@
 
 (defonce rt-ref
   (-> {::m/compile-state-ref (cljs-env/default-compiler-env)}
-      (transit/init)
       (gr/prepare data-ref ::app)))

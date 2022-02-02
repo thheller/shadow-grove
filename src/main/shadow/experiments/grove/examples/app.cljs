@@ -14,6 +14,7 @@
     [shadow.experiments.arborist.fragments :as frag]
     [shadow.experiments.grove :as sg :refer (<< defc)]
     [shadow.experiments.grove.events :as ev]
+    [shadow.experiments.grove.transit :as transit]
     [shadow.experiments.grove.http-fx :as http-fx]
     [shadow.experiments.grove.local :as local-eng]
     [shadow.experiments.grove.examples.env :as env]
@@ -219,15 +220,15 @@
 
 (defn ^:dev/after-load start []
   (if-let [[_ gist-id] (re-find #"\?id=(\w+)" js/document.location.search)]
-    (sg/app-tx ::app {:e ::m/load-gist! :gist-id gist-id})
-    (sg/app-tx ::app {:e ::m/compile! :code example-code}))
+    (sg/run-tx! env/rt-ref {:e ::m/load-gist! :gist-id gist-id})
+    (sg/run-tx! env/rt-ref {:e ::m/compile! :code example-code}))
 
-  (sg/render ::app dom-root (ui-root)))
+  (sg/render env/rt-ref dom-root (ui-root)))
 
 (defn init []
-  (sg/init ::app
-    {}
-    [(local-eng/init env/rt-ref)])
+  (transit/init! env/rt-ref)
+
+  (local-eng/init! env/rt-ref)
 
   (ev/reg-fx env/rt-ref :gist-api
     (http-fx/make-handler
