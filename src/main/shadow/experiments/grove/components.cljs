@@ -138,7 +138,7 @@
 
   gp/IHookDomEffect
   (hook-did-update! [this ^boolean did-render?]
-    (when (or did-render? should-call?)
+    (when (and did-render? should-call?)
       (when (fn? callback-result)
         (callback-result))
 
