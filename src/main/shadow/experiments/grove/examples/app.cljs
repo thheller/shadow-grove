@@ -24,7 +24,7 @@
     [shadow.experiments.grove.runtime :as gr]))
 
 (defonce dom-root
-  (js/document.getElementById "root"))
+  (js/document.getElementById "app"))
 
 (defc ui-root []
   (bind {::m/keys [example-tab example-code example-js example-ns] :as data}
@@ -44,13 +44,13 @@
     (sg/effect [example-ns]
       (fn [env]
         (when example-ns
-          (let [render-fn (js/goog.getObjectByName (comp/munge (str example-ns "/render")))
-                example-fn (js/goog.getObjectByName (comp/munge (str example-ns "/example")))]
+          (let [example-fn (js/goog.getObjectByName (comp/munge (str example-ns "/example")))
+                init-fn (js/goog.getObjectByName (comp/munge (str example-ns "/init")))]
 
             (cond
               ;; full custom render
-              (and render-fn (fn? render-fn))
-              (do (render-fn @example-div)
+              (and init-fn (fn? init-fn))
+              (do (init-fn) ;; expected to mount to #root el
                   (fn example-cleanup []
                     ;; FIXME: only expects sg/render to render into div
                     (sg/unmount-root @example-div)))
@@ -96,7 +96,8 @@
 
            ;; hiding/showing to avoid unmounting/mounting examples when switching tabs
            ;; they might use local state which would get lost
-           [:div {:class (str "p-2 flex-1 overflow-auto" (when (not= example-tab :result) " hidden"))
+           [:div {:id "root"
+                  :class (str "p-2 flex-1 overflow-auto" (when (not= example-tab :result) " hidden"))
                   :dom/ref example-div}]
 
            (when (= :code example-tab)

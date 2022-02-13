@@ -43,7 +43,13 @@
   {:target :bootstrap
    :output-dir "examples/app/public/bootstrap"
    :exclude #{cljs.js}
-   :entries [shadow.experiments.grove]
+   :entries [shadow.experiments.grove
+             shadow.experiments.grove.runtime
+             shadow.experiments.grove.db
+             shadow.experiments.grove.eql-query
+             shadow.experiments.grove.events
+             shadow.experiments.grove.local
+             shadow.experiments.grove.ui.testing]
    :compiler-options {:output-feature-set :es6}
    :macros []}
 
