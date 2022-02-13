@@ -21,20 +21,49 @@
     [shadow.experiments.grove.examples.model :as m]
     [shadow.experiments.grove.examples.js-editor :as ed-js]
     [shadow.experiments.grove.examples.cljs-editor :as ed-cljs]
-    ))
+    [shadow.experiments.grove.runtime :as gr]))
 
-(defonce dom-root (js/document.getElementById "root"))
+(defonce dom-root
+  (js/document.getElementById "root"))
 
 (defc ui-root []
-  (bind {::m/keys [example-tab example-code example-js example-result] :as data}
+  (bind {::m/keys [example-tab example-code example-js example-ns] :as data}
     (sg/query-root
       [::m/example-code
        ::m/example-tab
-       ::m/example-result
+       ::m/example-ns
        ::m/example-js]))
 
   (bind ed-cljs-ref
     (sg/ref))
+
+  (bind example-div
+    (sg/ref))
+
+  (hook
+    (sg/effect [example-ns]
+      (fn [env]
+        (when example-ns
+          (let [render-fn (js/goog.getObjectByName (comp/munge (str example-ns "/render")))
+                example-fn (js/goog.getObjectByName (comp/munge (str example-ns "/example")))]
+
+            (cond
+              ;; full custom render
+              (and render-fn (fn? render-fn))
+              (do (render-fn @example-div)
+                  (fn example-cleanup []
+                    ;; FIXME: only expects sg/render to render into div
+                    (sg/unmount-root @example-div)))
+
+              ;; simple example without any schema or custom env
+              (and example-fn (fn? example-fn))
+              (let [rt-ref (gr/prepare {} (atom {}) ::example)]
+                (sg/render rt-ref @example-div (example-fn))
+                (fn example-cleanup []
+                  (sg/unmount-root @example-div)))
+
+              :else
+              (js/console.log "TBD, no example or render?")))))))
 
   (render
     (<< [:div.inset-0.fixed.flex.flex-col
@@ -67,8 +96,8 @@
 
            ;; hiding/showing to avoid unmounting/mounting examples when switching tabs
            ;; they might use local state which would get lost
-           [:div {:class (str "p-2 flex-1 overflow-auto" (when (not= example-tab :result) " hidden"))}
-            example-result]
+           [:div {:class (str "p-2 flex-1 overflow-auto" (when (not= example-tab :result) " hidden"))
+                  :dom/ref example-div}]
 
            (when (= :code example-tab)
              (<< [:div {:class "flex-1 flex flex-col"}
@@ -93,58 +122,8 @@
     {:db (assoc db ::m/example-tab tab)}))
 
 (ev/reg-event env/rt-ref ::m/compile-result!
-  (fn [{:keys [db] :as env} {:keys [source result]}]
-    {:db (assoc db
-           ::m/example-js source
-           ;; FIXME: this isn't data strictly speaking, maybe put somewhere else?
-           ::m/example-result result)}))
-
-(defn handle-compile-result
-  [{:keys [transact!] :as env}
-   source-ref
-   {:keys [error ns value] :as result}]
-
-  ;; FIXME: handle error
-
-  ;; code that is not compiled by shadow-cljs directly relies on fragment registry
-  ;; so we need to reset this, otherwise fragments aren't replaceable
-  ;; only needed to filter out fragments compiled by self-hosted code
-  (frag/reset-known-fragments!)
-
-  (let [example-fqn
-        (str ns "/example")
-
-        example-fn-str
-        (comp/munge example-fqn)
-
-        example-fn
-        (js/goog.getObjectByName example-fn-str)]
-
-    (if-not (and example-fn (fn? example-fn))
-      (transact!
-        {:e ::m/compile-missing-example-fn!
-         :example-fqn example-fqn})
-
-      ;; calling this directly makes stacktraces unusable since its somewhere deep
-      ;; in compiler internals for some reason, just delaying with timeout fixes that
-      (js/setTimeout
-        (fn []
-          (let [formatted-source
-                (prettier/format
-                  @source-ref
-                  #js {:parser "babel"
-                       :plugins #js [prettier-babel]})
-
-                render-result
-                (example-fn)]
-
-            ;; (js/console.log "handle-compile-result" env result)
-            (transact!
-              {:e ::m/compile-result!
-               :example-fqn example-fqn
-               :source formatted-source
-               :result render-result})
-            ))))))
+  (fn [env {:keys [formatted-source ns]}]
+    (update env :db assoc ::m/example-ns ns ::m/example-js formatted-source)))
 
 (defn get-only-entry [obj]
   ;; FIXME: add least assert that there is actually only one entry
@@ -178,11 +157,11 @@
 (ev/reg-event env/rt-ref ::m/compile!
   (fn [{:keys [db] :as env} {:keys [code] :as e}]
     {:db (assoc db ::m/example-code code
-                   ::m/example-result "Compiling ...")
+                   ::m/example-ns nil)
      :cljs-compile code}))
 
 (ev/reg-fx env/rt-ref :cljs-compile
-  (fn [env code]
+  (fn [{:keys [transact!] :as env} code]
     (let [source-ref (atom "")
           compile-state-ref (::m/compile-state-ref env)]
 
@@ -206,7 +185,31 @@
          ;; looks even worse without static-fns
          :static-fns true}
 
-        #(handle-compile-result env source-ref %)))))
+        (fn handle-compile-result
+          [{:keys [error ns value] :as result}]
+
+          (js/console.log "compile-result" result)
+          ;; FIXME: handle error
+
+          ;; code that is not compiled by shadow-cljs directly relies on fragment registry
+          ;; so we need to reset this, otherwise fragments aren't replaceable
+          ;; only needed to filter out fragments compiled by self-hosted code
+
+          (frag/reset-known-fragments!)
+
+          (let [formatted-source
+                (prettier/format
+                  @source-ref
+                  #js {:parser "babel"
+                       :plugins #js [prettier-babel]})]
+
+            ;; compiler may have gone async or not
+            ;; transact! is only allowed if it has, so we just always go async
+            (js/setTimeout
+              (fn []
+                (transact! {:e ::m/compile-result! :formatted-source formatted-source :ns ns}))
+              0)
+            ))))))
 
 (def example-code
   (->> [";; The Playground will compile the code and call the example function"

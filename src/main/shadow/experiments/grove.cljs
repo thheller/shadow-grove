@@ -195,8 +195,8 @@
       ::started)))
 
 (defn unmount-root [^js root-el]
-  (when-let [root (.-sg$root root-el)]
-    (ap/destroy! root true)
+  (when-let [^sa/TreeRoot root (.-sg$root root-el)]
+    (.destroy! root true)
     (js-delete root-el "sg$root")
     (js-delete root-el "sg$env")))
 
