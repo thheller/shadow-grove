@@ -6,10 +6,10 @@
 
 ;; FIXME: make this actually useful, not just a dummy effect
 
-(deftype EffectHook [^:mutable dom-node component idx]
+(deftype EffectHook [^:mutable dom-node component-handle]
   gp/IBuildHook
-  (hook-build [this c i]
-    (EffectHook. dom-node c i))
+  (hook-build [this ch]
+    (EffectHook. dom-node ch))
 
   gp/IHook
   (hook-init! [this])
@@ -28,7 +28,7 @@
     (.trigger! this))
   (-invoke [this after]
     (.trigger! this)
-    (js/setTimeout #(gp/run-now! (comp/get-scheduler component) after) 200))
+    (js/setTimeout #(gp/run-now! (gp/get-scheduler component-handle) after) 200))
 
   Object
   (trigger! [this after]

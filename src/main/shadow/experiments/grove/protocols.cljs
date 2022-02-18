@@ -55,7 +55,16 @@
   (hook-did-update! [this did-render?]))
 
 (defprotocol IBuildHook
-  (hook-build [this component idx]))
+  (hook-build [this component-handle]))
+
+(defprotocol IComponentHookHandle
+  (hook-invalidate! [this] "called when a hook wants the component to refresh"))
+
+(defprotocol IEnvSource
+  (get-component-env [this]))
+
+(defprotocol ISchedulerSource
+  (get-scheduler [this]))
 
 ;; just here so that working on components file doesn't cause hot-reload issues
 ;; with already constructed components
@@ -73,7 +82,7 @@
   ;; websocket engine can only do async queries
   ;; local engine can do sync queries but might have async results
   ;; instead of trying to write a generic one they should be able to specialize
-  (query-hook-build [this env component idx ident query config])
+  (query-hook-build [this env component-handle ident query config])
 
   ;; hooks may use these but they may also interface with the engine directly
   (query-init [this key query config callback])

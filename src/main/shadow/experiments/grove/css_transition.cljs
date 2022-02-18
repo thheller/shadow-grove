@@ -25,10 +25,10 @@
   (trigger-out! [this callback])
   (set-node! [this node]))
 
-(deftype ClassTransition [class ^:mutable ^js element ^:mutable stage component idx]
+(deftype ClassTransition [class ^:mutable ^js element ^:mutable stage component-handle]
   gp/IBuildHook
-  (hook-build [this c i]
-    (ClassTransition. class element stage c i))
+  (hook-build [this ch]
+    (ClassTransition. class element stage ch))
 
   gp/IHook
   (hook-init! [this])

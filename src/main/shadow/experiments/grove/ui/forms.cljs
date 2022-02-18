@@ -4,7 +4,7 @@
             [shadow.experiments.grove.components :as comp]))
 
 (deftype FormInstance
-  [component idx config ^:mutable state]
+  [component-handle config ^:mutable state]
   gp/IHook
   (hook-init! [this]
     (js/console.log ::form-instance-init!))
@@ -45,14 +45,14 @@
     ;; eager-submit as in submit as soon as the form is valid
     (when (:eager-submit config)
       (let [submit-fn (:submit config)]
-        (submit-fn (comp/get-env component) state)))
+        (submit-fn (gp/get-component-env component-handle) state)))
 
     val))
 
 (deftype FormInit [config state]
   gp/IBuildHook
-  (hook-build [this comp idx]
-    (FormInstance. comp idx config state)))
+  (hook-build [this ch]
+    (FormInstance. ch config state)))
 
 (defn form-has-errors? [form]
   false)

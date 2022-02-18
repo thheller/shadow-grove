@@ -5,7 +5,7 @@
 
 (set! *warn-on-infer* false)
 
-(deftype DelayHook [component idx max ^:mutable timeout]
+(deftype DelayHook [component-handle max ^:mutable timeout]
   gp/IHook
   (hook-init! [this]
     (let [timeout-ms (rand-int max)]
@@ -24,12 +24,12 @@
   Object
   (on-timeout! [this]
     (set! timeout nil)
-    (comp/hook-ready! component idx)))
+    (gp/hook-invalidate! component-handle)))
 
 (deftype DelayInit [max]
   gp/IBuildHook
-  (hook-build [this component idx]
-    (DelayHook. component idx max nil)))
+  (hook-build [this ch]
+    (DelayHook. ch max nil)))
 
 (defn rand-delay [max]
   (DelayInit. max))

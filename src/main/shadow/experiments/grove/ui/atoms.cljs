@@ -6,13 +6,13 @@
 
 (util/assert-not-in-worker!)
 
-(deftype EnvWatch [key-to-atom path default the-atom ^:mutable val component idx]
+(deftype EnvWatch [key-to-atom path default the-atom ^:mutable val component-handle]
   gp/IBuildHook
-  (hook-build [this c i]
-    (let [atom (get (comp/get-env c) key-to-atom)]
+  (hook-build [this ch]
+    (let [atom (get (gp/get-component-env ch) key-to-atom)]
       (when-not atom
         (throw (ex-info "no atom found under key" {:key key-to-atom :path path})))
-      (EnvWatch. key-to-atom path default atom nil c i)))
+      (EnvWatch. key-to-atom path default atom nil ch)))
 
   gp/IHook
   (hook-init! [this]
@@ -24,7 +24,7 @@
         (let [next-val (get-in new-value path default)]
           (when (not= val next-val)
             (set! val next-val)
-            (comp/hook-invalidate! component idx))))))
+            (gp/hook-invalidate! component-handle))))))
 
   (hook-ready? [this] true) ;; born ready
   (hook-value [this] val)
@@ -37,10 +37,10 @@
   (hook-destroy! [this]
     (remove-watch the-atom this)))
 
-(deftype AtomWatch [the-atom access-fn ^:mutable val component idx]
+(deftype AtomWatch [the-atom access-fn ^:mutable val component-handle]
   gp/IBuildHook
-  (hook-build [this c i]
-    (AtomWatch. the-atom access-fn nil c i))
+  (hook-build [this ch]
+    (AtomWatch. the-atom access-fn nil ch))
 
   gp/IHook
   (hook-init! [this]
@@ -54,7 +54,7 @@
         (let [next-val (access-fn old new)]
           (when (not= val next-val)
             (set! val next-val)
-            (comp/hook-invalidate! component idx))))))
+            (gp/hook-invalidate! component-handle))))))
 
   (hook-ready? [this] true) ;; born ready
   (hook-value [this] val)

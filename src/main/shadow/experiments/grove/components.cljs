@@ -95,12 +95,11 @@
    ^function ^:mutable callback
    ^:mutable callback-result
    ^boolean ^:mutable should-call?
-   ^not-native ^:mutable component
-   idx]
+   ^not-native component-handle]
 
   gp/IBuildHook
-  (hook-build [this c i]
-    (EffectHook. deps callback callback-result should-call? c i))
+  (hook-build [this ch]
+    (EffectHook. deps callback callback-result should-call? ch))
 
   gp/IHook
   (hook-init! [this])
@@ -142,11 +141,27 @@
       (when (fn? callback-result)
         (callback-result))
 
-      (set! callback-result (callback (get-env component)))
+      (set! callback-result (callback (gp/get-component-env component-handle)))
 
       (when (not= deps :render)
         (set! should-call? false))
       )))
+
+(deftype ComponentHookHandle [^not-native component idx ^:mutable suspended?]
+  gp/IEnvSource
+  (get-component-env [this]
+    (.-component-env component))
+
+  gp/ISchedulerSource
+  (get-scheduler [this]
+    (.-scheduler component))
+
+  gp/IComponentHookHandle
+  (hook-invalidate! [this]
+    (if suspended?
+      (do (set! suspended? false)
+          (.ready-hook! component idx))
+      (.invalidate-hook! component idx))))
 
 (defclass ManagedComponent
   (field ^not-native scheduler)
@@ -386,7 +401,8 @@
           (not hook)
           (let [^function run-fn (-> (.-hooks config) (aget current-idx) (.-run))
                 val (run-fn this)
-                hook (gp/hook-build val this current-idx)]
+                handle (ComponentHookHandle. this current-idx false)
+                hook (gp/hook-build val handle)]
 
             ;; (js/console.log "Component:init-hook!" (:component-name config) current-idx val hook)
 
@@ -408,7 +424,8 @@
 
             (if (gp/hook-ready? hook)
               (set! current-idx (inc current-idx))
-              (.suspend! this current-idx)))
+              (do (set! handle -suspended? true)
+                  (.suspend! this current-idx))))
 
           ;; marked dirty, update it
           ;; make others dirty if actually updated
@@ -597,6 +614,9 @@
 
     cfg))
 
+;; these are called by defc macro, do not delete!
+;; cursive marks these as unused
+
 (defn get-arg ^not-native [^ManagedComponent comp idx]
   (-nth ^not-native (.-args comp) idx))
 
@@ -608,15 +628,6 @@
 
 (defn arg-triggers-render! [^ManagedComponent comp idx]
   (.set-render-required! comp))
-
-(defn get-env
-  ([^ManagedComponent comp]
-   (.-component-env comp))
-  ([^ManagedComponent comp key]
-   (get (.-component-env comp) key)))
-
-(defn get-scheduler [^ManagedComponent comp]
-  (. comp -scheduler))
 
 (defn get-hook-value [^ManagedComponent comp idx]
   (.get-hook-value comp idx))
@@ -631,11 +642,6 @@
 (defn get-component-name [^ManagedComponent comp]
   (. ^clj (. comp -config) -component-name))
 
-(defn hook-invalidate! [^ManagedComponent comp idx]
-  (.invalidate-hook! comp idx))
-
-(defn hook-ready! [^ManagedComponent comp idx]
-  (.ready-hook! comp idx))
 
 (deftype SimpleVal [^:mutable val]
   gp/IHook
@@ -651,6 +657,6 @@
 
 (extend-protocol gp/IBuildHook
   default
-  (hook-build [val component idx]
+  (hook-build [val component-handle]
     (SimpleVal. val)))
 

@@ -35,14 +35,14 @@
 
 (deftype QueryInit [ident query config]
   gp/IBuildHook
-  (hook-build [this component idx]
+  (hook-build [this component-handle]
     ;; support multiple query engines by allowing queries to supply which key to use
-    (let [{::rt/keys [runtime-ref] :as env} (comp/get-env component)
+    (let [{::rt/keys [runtime-ref] :as env} (gp/get-component-env component-handle)
           engine-key (:engine config ::gp/query-engine)
           query-engine (get @runtime-ref engine-key)]
 
       (assert query-engine (str "no query engine in runtime for key " engine-key))
-      (gp/query-hook-build query-engine env component idx ident query config))))
+      (gp/query-hook-build query-engine env component-handle ident query config))))
 
 (defn query-ident
   ;; shortcut for ident lookups that can skip EQL queries
@@ -210,8 +210,8 @@
    (watch the-atom (fn [old new] new)))
   ([the-atom path-or-fn]
    (if (vector? path-or-fn)
-     (atoms/AtomWatch. the-atom (fn [old new] (get-in new path-or-fn)) nil nil nil)
-     (atoms/AtomWatch. the-atom path-or-fn nil nil nil))))
+     (atoms/AtomWatch. the-atom (fn [old new] (get-in new path-or-fn)) nil nil)
+     (atoms/AtomWatch. the-atom path-or-fn nil nil))))
 
 (defn env-watch
   ([key-to-atom]
@@ -221,7 +221,7 @@
   ([key-to-atom path default]
    {:pre [(keyword? key-to-atom)
           (vector? path)]}
-   (atoms/EnvWatch. key-to-atom path default nil nil nil nil)))
+   (atoms/EnvWatch. key-to-atom path default nil nil nil)))
 
 (defn suspense [opts vnode]
   (suspense/SuspenseInit. opts vnode))
@@ -232,14 +232,18 @@
 (defn keyed-seq [coll key-fn render-fn]
   (sc/keyed-seq coll key-fn render-fn))
 
-(deftype TrackChange [^:mutable val ^:mutable trigger-fn ^:mutable result env component idx]
+(deftype TrackChange
+  [^:mutable val
+   ^:mutable trigger-fn
+   ^:mutable result
+   ^not-native component-handle]
   gp/IBuildHook
-  (hook-build [this c i]
-    (TrackChange. val trigger-fn nil (comp/get-env c) c i))
+  (hook-build [this ch]
+    (TrackChange. val trigger-fn nil ch))
 
   gp/IHook
   (hook-init! [this]
-    (set! result (trigger-fn env nil val)))
+    (set! result (trigger-fn (gp/get-component-env component-handle) nil val)))
 
   (hook-ready? [this] true)
   (hook-value [this] result)
@@ -252,7 +256,7 @@
           prev-result result]
 
       (set! trigger-fn (.-trigger-fn new-track))
-      (set! result (trigger-fn env val next-val))
+      (set! result (trigger-fn (gp/get-component-env component-handle) val next-val))
       (set! val next-val)
 
       (not= result prev-result)))
@@ -261,7 +265,7 @@
     ))
 
 (defn track-change [val trigger-fn]
-  (TrackChange. val trigger-fn nil nil nil nil))
+  (TrackChange. val trigger-fn nil nil))
 
 ;; using volatile so nobody gets any ideas about add-watch
 ;; pretty sure that would cause havoc on the entire rendering
@@ -273,17 +277,17 @@
   "calls (callback env) after render when provided deps argument changes
    callback can return a function which will be called if cleanup is required"
   [deps callback]
-  (comp/EffectHook. deps callback nil true nil nil))
+  (comp/EffectHook. deps callback nil true nil))
 
 (defn render-effect
   "call (callback env) after every render"
   [callback]
-  (comp/EffectHook. :render callback nil true nil nil))
+  (comp/EffectHook. :render callback nil true nil))
 
 (defn mount-effect
   "call (callback env) on mount once"
   [callback]
-  (comp/EffectHook. :mount callback nil true nil nil))
+  (comp/EffectHook. :mount callback nil true nil))
 
 ;; FIXME: does this ever need to take other options?
 (defn portal

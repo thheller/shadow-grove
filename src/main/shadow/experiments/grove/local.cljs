@@ -134,8 +134,7 @@
   [^:mutable ident
    ^:mutable query
    ^:mutable config
-   component
-   idx
+   ^not-native component-handle
    rt-ref
    active-queries-map
    query-id
@@ -179,9 +178,7 @@
 
   ev/IQuery
   (query-refresh! [this]
-    (if-not ready?
-      (comp/hook-ready! component idx)
-      (comp/hook-invalidate! component idx)))
+    (gp/hook-invalidate! component-handle))
 
   Object
   (do-read! [this]
@@ -227,14 +224,13 @@
 
 (deftype LocalEngine [rt-ref active-queries-map]
   gp/IQueryEngine
-  (query-hook-build [this env component idx ident query config]
+  (query-hook-build [this env component-handle ident query config]
     (let [query-id (util/next-id)
           hook (QueryHook.
                  ident
                  query
                  config
-                 component
-                 idx
+                 component-handle
                  rt-ref
                  active-queries-map
                  query-id
