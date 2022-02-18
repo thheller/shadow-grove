@@ -24,7 +24,6 @@
   3009 "examples/bench-fragment"
   3010 "out/browser-test"
   3011 "examples/app/public"
-  3012 "examples/fulcro"
   3013 "examples/ui"}
 
  :build-defaults
@@ -109,15 +108,6 @@
     {:init-fn todomvc.split.worker/init
      :web-worker true
      :depends-on #{:shared}}}}
-
-  :fulcro
-  {:target :browser
-   :output-dir "examples/fulcro/js"
-   :modules {:main {:init-fn dummy.fulcro/init}}
-   :js-options
-   {:resolvex
-    {"react" false
-     "react-dom" false}}}
 
   :bench-db
   {:target :node-script

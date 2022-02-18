@@ -1,6 +1,7 @@
 (ns shadow.experiments.grove.local
   "runtime meant to run in the main browser thread"
   (:require
+    [shadow.experiments.grove :as-alias sg]
     [shadow.experiments.grove.runtime :as rt]
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.events :as ev]
@@ -8,8 +9,6 @@
     [shadow.experiments.grove.eql-query :as eql]
     [shadow.experiments.grove.components :as comp]
     [shadow.experiments.grove.ui.util :as util]))
-
-(defonce query-queue (js/Promise.resolve))
 
 (set! *warn-on-infer* false)
 
@@ -198,7 +197,7 @@
             (index-query query-env query-id nil new-keys))
 
           (if (keyword-identical? result :db/loading)
-            (set! read-result (assoc (:default config {}) :shadow.experiments.grove/loading-state :loading))
+            (set! read-result (assoc (:default config {}) ::sg/loading-state :loading))
             (do (set! read-result result)
                 (set! ready? true))))
 
@@ -213,11 +212,11 @@
           (set! read-keys new-keys)
 
           (if (keyword-identical? result :db/loading)
-            (set! read-result (assoc (:default config {}) :shadow.experiments.grove/loading-state :loading))
+            (set! read-result (assoc (:default config {}) ::sg/loading-state :loading))
 
             (do (set! read-result
                   (-> (if ident (get result ident) result)
-                      (assoc :shadow.experiments.grove/loading-state :ready)))
+                      (assoc ::sg/loading-state :ready)))
                 (set! ready? true))))))
 
     (set! read-count (inc read-count))))
