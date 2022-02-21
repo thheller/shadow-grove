@@ -62,7 +62,9 @@
   ;; there are too many different url encoding schemes to cover all
   (reduce-kv
     (fn [s key val]
-      (str (js/encodeURIComponent (name key)) "=" (js/encodeURIComponent (str val))))
+      (str s
+           (when-not (str/blank? s) "&")
+           (js/encodeURIComponent (name key)) "=" (js/encodeURIComponent (str val))))
     ""
     m))
 
