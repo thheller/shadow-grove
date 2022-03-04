@@ -147,7 +147,7 @@
         (set! should-call? false))
       )))
 
-(deftype ComponentHookHandle [^not-native component idx ^:mutable suspended?]
+(deftype ComponentHookHandle [^not-native component idx]
   gp/IEnvSource
   (get-component-env [this]
     (.-component-env component))
@@ -158,10 +158,7 @@
 
   gp/IComponentHookHandle
   (hook-invalidate! [this]
-    (if suspended?
-      (do (set! suspended? false)
-          (.ready-hook! component idx))
-      (.invalidate-hook! component idx))))
+    (.invalidate-hook! component idx)))
 
 (defclass ManagedComponent
   (field ^not-native scheduler)
@@ -353,26 +350,20 @@
     (gp/hook-value (aget hooks idx)))
 
   (invalidate-hook! [this idx]
-    ;; (js/console.log "invalidate-hook!" idx (.-component-name config) this)
+    ;; (js/console.log "invalidate-hook!" idx current-idx (.-component-name config) this)
 
     (set! dirty-hooks (bit-set dirty-hooks idx))
-    (when (< idx current-idx)
-      (set! current-idx idx))
 
-    (.schedule! this))
+    (when (<= idx current-idx)
+      ;; a hook that
+      ;; - either caused a suspension
+      ;; - or is at a lower index
+      ;; invalidated. so the component needs to unsuspend to process this work
+      ;; may suspend again if any hook is not ready
+      (set! current-idx idx)
+      ;; could check if actually suspended but no need
+      (set! suspended? false))
 
-  (ready-hook! [this idx]
-    ;; (js/console.log "ready-hook!" idx (.-component-name config) this)
-
-    ;; not actually an issue, happens if parent decides to re-render component while suspended
-    #_(when (not= current-idx idx)
-        (js/console.warn "hook become ready while not being the current?" current-idx idx this))
-
-    (set! dirty-hooks (bit-set dirty-hooks idx))
-    (when (< idx current-idx)
-      (set! current-idx idx))
-
-    (set! suspended? false)
     (.schedule! this))
 
   (mark-hooks-dirty! [this dirty-bits]
@@ -408,7 +399,7 @@
           (not hook)
           (let [^function run-fn (-> (.-hooks config) (aget current-idx) (.-run))
                 val (run-fn this)
-                handle (ComponentHookHandle. this current-idx false)
+                handle (ComponentHookHandle. this current-idx)
                 hook (gp/hook-build val handle)]
 
             ;; (js/console.log "Component:init-hook!" (:component-name config) current-idx val hook)
@@ -431,8 +422,7 @@
 
             (if (gp/hook-ready? hook)
               (set! current-idx (inc current-idx))
-              (do (set! handle -suspended? true)
-                  (.suspend! this current-idx))))
+              (.suspend! this current-idx)))
 
           ;; marked dirty, update it
           ;; make others dirty if actually updated
