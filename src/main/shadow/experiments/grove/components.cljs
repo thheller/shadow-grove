@@ -239,6 +239,13 @@
     (and (component-init? next)
          (let [other (.-component ^ComponentInit next)]
            (identical? config other))
+         ;; (defc ui-thing [^:stable ident] ...)
+         ;; should cause unmount on changing ident
+         (let [stable-args (-> config .-opts (get ::stable-args))]
+           (or (nil? stable-args)
+               (let [old-args args
+                     new-args (.-args next)]
+                 (every? #(= (nth old-args %) (nth new-args %)) stable-args))))
          (let [custom-check (-> config .-opts (get :supports?))]
            (or (nil? custom-check)
                (custom-check args (.-args next))))))

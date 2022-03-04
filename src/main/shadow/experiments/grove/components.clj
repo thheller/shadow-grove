@@ -207,14 +207,19 @@
   (cond
     (symbol? binding)
     (-> state
-        (assoc-in [:args idx] {:name binding :idx idx})
+        (assoc-in [:args idx] {:name binding :idx idx :stable (:stable (meta binding))})
         (assoc-in [:bindings binding] {:type :arg :name binding :idx idx}))
 
     (map? binding)
     (let [{:keys [as]} binding
-          arg-name (or as (gensym (str "arg_" idx "_")))]
+          arg-name (or as (gensym (str "arg_" idx "_")))
+          ;; allow both?
+          ;; ^:stable {:keys [foo bar] :as x}
+          ;; {:keys [foo bar] :as ^:stable x}
+          stable (or (:stable (meta binding))
+                     (:stable (meta as)))]
       (-> state
-          (assoc-in [:args idx] {:name arg-name :idx idx})
+          (assoc-in [:args idx] {:name arg-name :idx idx :stable stable})
           (assoc-in [:bindings arg-name] {:type :arg :name arg-name :idx idx})
           (hook-destructure-map arg-name binding)))
 
@@ -409,6 +414,18 @@
             (rkv-> analyze-arg args)
             (r-> analyze-hook hooks))
 
+        opts
+        (let [stable-args
+              (reduce-kv
+                (fn [acc idx {:keys [stable]}]
+                  (if-not stable
+                    acc
+                    (conj acc idx)))
+                []
+                (:args state))]
+          (when (seq stable-args)
+            (assoc opts ::stable-args stable-args)))
+
         render-deps
         (bindings-indexes-of-type state render-used :hook)
 
@@ -466,7 +483,7 @@
   (clojure.pprint/pprint
     (macroexpand
       '(defc hello
-         [{x :foo :keys [y] ::keys [z z2 z3] :as p}
+         [^:stable {x :foo :keys [y] ::keys [z z2 z3] :as p}
           {sx :sx ::keys [sy sz] :as s}
           unused-arg]
 
