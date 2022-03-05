@@ -98,9 +98,8 @@
                 (ap/as-managed vnode offscreen-env)]
 
             (if-not (.did-suspend? scheduler)
-              (do (set! offscreen nil)
-                  (set! offscreen-scheduler nil)
-                  (.maybe-swap! this))
+              (do (set! offscreen next-managed)
+                  (.tree-did-finish! this))
               (do (set! offscreen next-managed)
                   (set! offscreen-scheduler scheduler)
                   (.set-should-trigger! scheduler)
