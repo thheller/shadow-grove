@@ -194,7 +194,7 @@
 (defn merge-seq
   ([data entity-type coll]
    (merge-seq data entity-type coll nil))
-  ([data entity-type coll target-path]
+  ([data entity-type coll target-path-or-fn]
    {:pre [(sequential? coll)]}
    (let [{::keys [schema]}
          (meta data)
@@ -219,8 +219,12 @@
      (-> data
          (merge-imports imports)
          (cond->
-           target-path
-           (assoc-in target-path idents))))))
+           (vector? target-path-or-fn)
+           (assoc-in target-path-or-fn idents)
+
+           (fn? target-path-or-fn)
+           (target-path-or-fn idents))
+         ))))
 
 (defn add
   ([data entity-type item]
