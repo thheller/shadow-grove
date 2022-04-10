@@ -30,6 +30,10 @@
        (= 2 (count thing))
        (keyword (nth thing 0))))
 
+(defn lazy-seq? [thing]
+  (and (instance? #?(:clj clojure.lang.LazySeq :cljs cljs.core/LazySeq) thing)
+       (not (realized? thing))))
+
 (declare
   ^{:arglists '([env db query-data] [env db current query-data])}
   query)
@@ -59,7 +63,12 @@
 
       :else
       ;; FIXME: alias support
-      (assoc! result kw calced))))
+      (do (when ^boolean js/goog.DEBUG
+            (when (lazy-seq? calced)
+              (throw (ex-info (str "the lookup of attribute " kw " returned a lazy sequence. Attributes must not return lazy sequences. Realize the result before returning (eg. doall).")
+                       {:kw kw
+                        :result calced}))))
+          (assoc! result kw calced)))))
 
 ;; FIXME: this tracking of :db/loading is really annoying, should probably just throw instead?
 (defn- process-query-part
