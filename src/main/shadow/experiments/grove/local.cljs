@@ -201,11 +201,11 @@
         (let [result (get db ident)
               new-keys #{ident}]
 
-          (set! read-keys new-keys)
-
           ;; only need to index once
           (when (zero? read-count)
-            (index-query query-env query-id nil new-keys))
+            (index-query query-env query-id read-keys new-keys))
+
+          (set! read-keys new-keys)
 
           (if (keyword-identical? result :db/loading)
             (set! read-result (assoc (:default config {}) ::sg/loading-state :loading))
