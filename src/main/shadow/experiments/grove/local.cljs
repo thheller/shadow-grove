@@ -153,17 +153,28 @@
 
   ;; node deps changed, check if query changed
   (hook-deps-update! [this ^QueryHook val]
-    (if (and (= ident (.-ident val))
-             (= query (.-query val))
-             (= config (.-config val)))
-      false
-      ;; query changed, perform read immediately
-      (do (set! ident (.-ident val))
-          (set! query (.-query val))
-          (set! config (.-config val))
-          (let [old-result read-result]
-            (.do-read! this)
-            (not= old-result read-result)))))
+    (let [new-ident (.-ident val)
+          ident-equal? (= ident new-ident)]
+
+      (if (and ident-equal?
+               (= query (.-query val))
+               (= config (.-config val)))
+        false
+        ;; query changed, perform read immediately
+        (do (when-not ident-equal?
+              ;; need to reset this to 0 since do-read! uses this to track
+              ;; whether it needs to index the query or not
+              ;; thus a query with changing ident is not properly re-indexed if this is not reset
+              ;; I intended read-count as a debug utility to find overly active queries
+              ;; so this somehow needs to be addressed properly somewhere so this doesn't have multiple uses
+              (set! read-count 0))
+
+            (set! ident new-ident)
+            (set! query (.-query val))
+            (set! config (.-config val))
+            (let [old-result read-result]
+              (.do-read! this)
+              (not= old-result read-result))))))
 
   ;; node was invalidated and needs update
   (hook-update! [this]
