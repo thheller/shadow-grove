@@ -23,9 +23,6 @@
 ;; these are private - should not be accessed from the outside
 (defonce active-apps-ref (atom {}))
 
-(defn run-now! [env callback]
-  (gp/run-now! (::comp/scheduler env) callback))
-
 (defn dispatch-up! [{::comp/keys [^not-native parent] :as env} ev-map]
   {:pre [(map? env)
          (map? ev-map)
@@ -91,44 +88,8 @@
   (tx* runtime-ref tx env))
 
 (defn run-tx! [runtime-ref tx]
-  (tx* runtime-ref tx nil))
-
-(deftype RootScheduler [^:mutable update-pending? work-set]
-  gp/IScheduleUpdates
-  (schedule-update! [this work-task]
-    (.add work-set work-task)
-
-    (when-not update-pending?
-      (set! update-pending? true)
-      (util/next-tick #(.process-work! this))))
-
-  (unschedule! [this work-task]
-    (.delete work-set work-task))
-
-  (did-suspend! [this target])
-  (did-finish! [this target])
-
-  (run-now! [this action]
-    (set! update-pending? true)
-    (action)
-    ;; work must happen immediately since (action) may need the DOM event that triggered it
-    ;; any delaying the work here may result in additional paint calls (making things slower overall)
-    ;; if things could have been async the work should have been queued as such and not ended up here
-    (.process-work! this))
-
-  Object
-  (process-work! [this]
-    (let [iter (.values work-set)]
-      (loop []
-        (let [current (.next iter)]
-          (when (not ^boolean (.-done current))
-            (gp/work! ^not-native (.-value current))
-
-            ;; should time slice later and only continue work
-            ;; until a given time budget is consumed
-            (recur)))))
-
-    (set! update-pending? false)))
+  (let [{::rt/keys [scheduler]} @runtime-ref]
+    (rt/run-now! scheduler #(tx* runtime-ref tx nil) ::run-tx!)))
 
 (defn default-error-handler [component ex]
   ;; FIXME: this would be the only place there component-name is accessed
@@ -149,10 +110,7 @@
 
   ;; FIXME: have a shared root scheduler rt-ref
   ;; multiple roots should schedule in some way not indepdendently
-  (let [scheduler
-        (RootScheduler. false (js/Set.))
-
-        event-target
+  (let [event-target
         (RootEventTarget. rt-ref)
 
         env-init
@@ -163,7 +121,7 @@
         (init-fn env))
 
       ;; base env, using init-fn to customize
-      {::comp/scheduler scheduler
+      {::comp/scheduler (::rt/scheduler @rt-ref)
        ::comp/event-target event-target
        ::suspense-keys (atom {})
        ::rt/root-el root-el
@@ -173,7 +131,7 @@
 
       env-init)))
 
-(defn render [rt-ref ^js root-el root-node]
+(defn render* [rt-ref ^js root-el root-node]
   {:pre [(rt/ref? rt-ref)]}
   (if-let [active-root (.-sg$root root-el)]
     (do (when ^boolean js/goog.DEBUG
@@ -193,6 +151,10 @@
       (set! (.-sg$root root-el) new-root)
       (set! (.-sg$env root-el) new-env)
       ::started)))
+
+(defn render [rt-ref ^js root-el root-node]
+  {:pre [(rt/ref? rt-ref)]}
+  (rt/run-now! ^not-native (::rt/scheduler @rt-ref) #(render* rt-ref root-el root-node) ::render))
 
 (defn unmount-root [^js root-el]
   (when-let [^sa/TreeRoot root (.-sg$root root-el)]

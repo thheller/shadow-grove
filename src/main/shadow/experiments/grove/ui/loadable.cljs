@@ -4,7 +4,7 @@
     [shadow.lazy :as lazy]
     [shadow.experiments.arborist.protocols :as ap]
     [shadow.experiments.arborist.common :as common]
-    [shadow.experiments.grove.protocols :as gp]
+    [shadow.experiments.grove.runtime :as rt]
     [shadow.experiments.grove.components :as comp]
     ))
 
@@ -69,7 +69,7 @@
     ;; (js/console.log ::init! (lazy/ready? loadable))
     (if (lazy/ready? loadable)
       (.render! this)
-      (do (gp/did-suspend! scheduler this)
+      (do (rt/did-suspend! scheduler this)
           ;; (js/console.log ::did-suspend! this)
           (lazy/load loadable
             (fn []
@@ -82,7 +82,7 @@
                 (when dom-entered?
                   (ap/dom-entered! managed)))
 
-              (gp/did-finish! scheduler this))
+              (rt/did-finish! scheduler this))
             (fn [err]
               (js/console.warn "lazy loading failed" this err)
               )))))

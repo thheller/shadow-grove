@@ -28,7 +28,7 @@
     (.trigger! this))
   (-invoke [this after]
     (.trigger! this)
-    (js/setTimeout #(gp/run-now! (gp/get-scheduler component-handle) after) 200))
+    (js/setTimeout #(gp/run-now! (gp/get-scheduler component-handle) after ::effect-hook) 200))
 
   Object
   (trigger! [this after]

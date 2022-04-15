@@ -2,6 +2,7 @@
   (:require
     [shadow.experiments.arborist.common :as common]
     [shadow.experiments.arborist.protocols :as ap]
+    [shadow.experiments.grove.runtime :as rt]
     [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.components :as comp]
     [shadow.experiments.grove.ui.util :as util]))
@@ -18,15 +19,15 @@
    ^:mutable should-trigger?
    ^:mutable suspend-set]
 
-  gp/IScheduleUpdates
-  (schedule-update! [this target]
-    (gp/schedule-update! parent-scheduler target))
+  rt/IScheduleWork
+  (schedule-work! [this target trigger]
+    (rt/schedule-work! parent-scheduler target trigger))
 
   (unschedule! [this target]
-    (gp/unschedule! parent-scheduler target))
+    (rt/unschedule! parent-scheduler target))
 
-  (run-now! [this action]
-    (gp/run-now! parent-scheduler action))
+  (run-now! [this action trigger]
+    (rt/run-now! parent-scheduler action trigger))
 
   (did-suspend! [this target]
     ;; (js/console.log "did-suspend!" suspend-set target)

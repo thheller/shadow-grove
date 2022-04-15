@@ -43,7 +43,18 @@
               ;; is "" when url doesn't have a hash, otherwise #foo
               (if (= hash "")
                 "/"
-                (subs js/window.location.hash (+ 1 (count path-prefix)))))))]
+                (subs js/window.location.hash (+ 1 (count path-prefix)))))))
+
+        trigger-route!
+        (fn []
+          ;; token must start with /, strip it to get tokens vector
+          (let [token (get-token)
+                tokens (str/split (subs token 1) #"/")]
+
+            (sg/run-tx! rt-ref {:e :ui/route! :token token :tokens tokens})))
+
+        first-token
+        (get-token)]
 
     (attr/add-attr :ui/href
       (fn [env node oval nval]
@@ -75,57 +86,48 @@
           (js/setTimeout #(transact! {:e :ui/route! :token token :tokens tokens}) 0)
           )))
 
+    ;; immediately trigger initial route when this is initialized
+    ;; don't wait for first env-init, thats problematic with multiple roots
+    (trigger-route!)
+
     (swap! rt-ref
       (fn [rt]
         (-> rt
             (assoc ::config config)
             (update ::rt/env-init conj
               (fn [env]
-                (let [trigger-route!
-                      (fn []
-                        ;; token must start with /, strip it to get tokens vector
-                        (let [token (get-token)
-                              tokens (str/split (subs token 1) #"/")]
+                ;; fragment uses hashchange event so we can skip checking clicks
+                (when-not use-fragment
+                  (.addEventListener (or root-el js/document.body) "click"
+                    (fn [^js e]
+                      (when (and (zero? (.-button e))
+                                 (not (or (.-shiftKey e) (.-metaKey e) (.-ctrlKey e) (.-altKey e))))
+                        (when-let [a (some-> e .-target (.closest "a"))]
 
-                          (sg/run-now! env #(sg/run-tx env {:e :ui/route! :token token :tokens tokens}))))
+                          (let [href (.getAttribute a "href")
+                                a-target (.getAttribute a "target")]
 
-                      first-token
-                      (get-token)]
+                            (when (and href (seq href) (str/starts-with? href path-prefix) (nil? a-target))
+                              (.preventDefault e)
 
-                  ;; fragment uses hashchange event so we can skip checking clicks
-                  (when-not use-fragment
-                    (.addEventListener (or root-el js/document.body) "click"
-                      (fn [^js e]
-                        (when (and (zero? (.-button e))
-                                   (not (or (.-shiftKey e) (.-metaKey e) (.-ctrlKey e) (.-altKey e))))
-                          (when-let [a (some-> e .-target (.closest "a"))]
+                              (js/window.history.pushState nil js/document.title href)
 
-                            (let [href (.getAttribute a "href")
-                                  a-target (.getAttribute a "target")]
+                              (trigger-route!)
+                              )))))))
 
-                              (when (and href (seq href) (str/starts-with? href path-prefix) (nil? a-target))
-                                (.preventDefault e)
+                (when (and (= "/" first-token) (seq start-token))
+                  (js/window.history.replaceState
+                    nil
+                    js/document.title
+                    (str (when use-fragment "#") path-prefix start-token)))
 
-                                (js/window.history.pushState nil js/document.title href)
+                (js/window.addEventListener "popstate"
+                  (fn [e]
+                    (trigger-route!)))
 
-                                (trigger-route!)
-                                )))))))
-
-                  (when (and (= "/" first-token) (seq start-token))
-                    (js/window.history.replaceState
-                      nil
-                      js/document.title
-                      (str (when use-fragment "#") path-prefix start-token)))
-
-                  (trigger-route!)
-
-                  (js/window.addEventListener "popstate"
+                (when use-fragment
+                  (js/window.addEventListener "hashchange"
                     (fn [e]
-                      (trigger-route!)))
-
-                  (when use-fragment
-                    (js/window.addEventListener "hashchange"
-                      (fn [e]
-                        (trigger-route!)))))
+                      (trigger-route!))))
 
                 env)))))))

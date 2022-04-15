@@ -5,6 +5,7 @@
     [clojure.set :as set]
     [shadow.experiments.grove.components :as comp]
     [shadow.experiments.grove.runtime :as rt]
+    [shadow.experiments.grove.protocols :as gp]
     [shadow.experiments.grove.db :as db]))
 
 (defprotocol IQuery
@@ -261,22 +262,28 @@
           ;; FIXME: re-frame allows fx to edit db but we already committed it
           ;; currently not checking fx-fn return value at all since they supposed to run side effects only
           ;; and may still edit stuff in env, just not db?
-          (let [fx-env
-                (assoc result
-                  ;; FIXME: is this really needed?
-                  ;; meant for fx that want to trigger async events later
-                  :transact!
-                  (fn [fx-tx]
-                    (when-not @tx-done-ref
-                      (throw (ex-info "cannot start another tx yet, current one is still running. transact! is meant for async events" {})))
-                    (tx* env fx-tx origin)))]
+          (doseq [[fx-key value] (::fx result)]
+            (let [fx-fn (get fx-config fx-key)
 
-            (doseq [[fx-key value] (::fx result)]
-              (let [fx-fn (get fx-config fx-key)]
-                (if-not fx-fn
-                  (throw (ex-info (str "unknown fx " fx-key) {:fx-key fx-key :fx-value value}))
+                  fx-env
+                  (assoc result
+                    ;; creating this here so we can easily track which fx caused further work
+                    ;; technically all fx could run-now! directly given they have the scheduler from the env
+                    ;; but here we can easily track tx-done-ref to ensure fx doesn't actually immediately trigger
+                    ;; other events when they shouldn't because this is still in run-now! itself
+                    ;; FIXME: remove this once this is handled directly in the scheduler
+                    ;; run-now! inside run-now! should be a hard error
+                    :transact!
+                    (fn [fx-tx]
+                      (when-not @tx-done-ref
+                        (throw (ex-info "cannot start another tx yet, current one is still running. transact! is meant for async events" {})))
 
-                  (fx-fn fx-env value)))))
+                      (rt/run-now! ^not-native (::rt/scheduler env) #(tx* env fx-tx origin) [::fx-transact! fx-key])))]
+
+              (if-not fx-fn
+                (throw (ex-info (str "unknown fx " fx-key) {:fx-key fx-key :fx-value value}))
+
+                (fx-fn fx-env value))))
 
           (reset! tx-done-ref true)
 

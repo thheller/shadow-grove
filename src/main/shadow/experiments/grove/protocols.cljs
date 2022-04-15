@@ -31,16 +31,6 @@
   ;; e and origin can be considered optional and will be ignored by most actual handlers
   (handle-event! [this ev-map e origin]))
 
-(defprotocol IScheduleUpdates
-  (schedule-update! [this target])
-  (unschedule! [this target])
-  (run-now! [this action])
-
-  (did-suspend! [this target])
-  (did-finish! [this target])
-
-  (run-asap! [this action])
-  (run-whenever! [this action]))
 
 (defprotocol IHook
   (hook-init! [this])

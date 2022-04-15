@@ -7,6 +7,7 @@
     [shadow.experiments.arborist.common :as common]
     [shadow.experiments.arborist.protocols :as ap]
     [shadow.experiments.arborist.attributes :as a]
+    [shadow.experiments.grove.runtime :as rt]
     [shadow.experiments.grove.protocols :as gp]))
 
 (def ^{:tag boolean
@@ -246,7 +247,7 @@
     (. config (check-args-fn this args (.-args next)))
     (set! args (.-args next))
     (when (.work-pending? this)
-      (.schedule! this)))
+      (.schedule! this ::dom-sync!)))
 
   (destroy! [this ^boolean dom-remove?]
     (.unschedule! this)
@@ -286,16 +287,16 @@
           (gp/handle-event! parent ev-map e origin)
           (js/console.warn "event not handled" ev-id ev-map)))))
 
-  gp/IScheduleUpdates
+  rt/IScheduleWork
   (did-suspend! [this work-task]
-    (gp/did-suspend! scheduler work-task))
+    (rt/did-suspend! scheduler work-task))
 
   (did-finish! [this work-task]
-    (gp/did-finish! scheduler work-task))
+    (rt/did-finish! scheduler work-task))
 
-  (schedule-update! [this work-task]
+  (schedule-work! [this work-task trigger]
     (when (zero? (.-size work-set))
-      (gp/schedule-update! scheduler this))
+      (rt/schedule-work! scheduler this trigger))
 
     (.add work-set work-task))
 
@@ -303,10 +304,10 @@
     (.delete work-set work-task)
 
     (when (zero? (.-size work-set))
-      (gp/unschedule! scheduler this)))
+      (rt/unschedule! scheduler this)))
 
-  (run-now! [this callback]
-    (gp/run-now! scheduler callback))
+  (run-now! [this callback trigger]
+    (rt/run-now! scheduler callback trigger))
 
   ;; parent tells us to work
   gp/IWork
@@ -359,7 +360,7 @@
       ;; could check if actually suspended but no need
       (set! suspended? false))
 
-    (.schedule! this))
+    (.schedule! this ::hook-invalidate!))
 
   (mark-hooks-dirty! [this dirty-bits]
     (set! dirty-hooks (bit-or dirty-hooks dirty-bits))
@@ -473,15 +474,15 @@
 
     ;; just in case we were already scheduled. should really track this more efficiently
     (.unschedule! this)
-    (gp/did-suspend! scheduler this)
+    (rt/did-suspend! scheduler this)
     (set! suspended? true))
 
-  (schedule! [this]
+  (schedule! [this trigger]
     (when-not destroyed?
-      (gp/schedule-update! scheduler this)))
+      (rt/schedule-work! scheduler this trigger)))
 
   (unschedule! [this]
-    (gp/unschedule! scheduler this))
+    (rt/unschedule! scheduler this))
 
   (component-render! [^ManagedComponent this]
     (assert (zero? dirty-hooks) "Got to render while hooks are dirty")
@@ -505,7 +506,7 @@
     ;; must keep this for work scheduling so it knows its done
     (set! current-idx (inc current-idx))
 
-    (gp/did-finish! scheduler this)
+    (rt/did-finish! scheduler this)
     (.unschedule! this))
 
   (did-update! [this did-render?]
@@ -534,8 +535,9 @@
             {:e ev-value})]
 
       ;; (js/console.log "dom-event" this event-env event ev-map dom-event)
-      (gp/run-now! (.-scheduler this)
-        #(gp/handle-event! this ev-map dom-event event-env)))))
+      (rt/run-now! (.-scheduler this)
+        #(gp/handle-event! this ev-map dom-event event-env)
+        ::handle-dom-event!))))
 
 (set! *warn-on-infer* true)
 
