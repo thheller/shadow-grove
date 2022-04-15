@@ -97,6 +97,7 @@
   (-pr-writer [this writer opts]
     (-pr-writer
       [::sg/QueryHook
+       (.-query-id this)
        (.-ident this)
        (.-query this)]
       writer
@@ -115,6 +116,26 @@
     {:container (.-container this)
      :env (.-env this)
      :root (.-root this)}))
+
+(extend-type js/Map
+  cp/Datafiable
+  (datafy [this]
+    (persistent!
+      (reduce
+        (fn [m k]
+          (assoc! m k (.get this k)))
+        (transient {})
+        (.keys this)))))
+
+(extend-type js/Set
+  cp/Datafiable
+  (datafy [this]
+    (persistent!
+      (reduce
+        (fn [s v]
+          (conj! s v))
+        (transient #{})
+        (.values this)))))
 
 (comment
   (extend-type sp/Ident
