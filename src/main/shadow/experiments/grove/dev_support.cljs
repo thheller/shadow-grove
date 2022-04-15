@@ -11,7 +11,8 @@
     [shadow.experiments.grove :as sg]
     [shadow.experiments.grove.protocols :as sp]
     [shadow.experiments.arborist :as sa]
-    [shadow.experiments.grove.protocols :as gp]))
+    [shadow.experiments.grove.protocols :as gp]
+    [shadow.experiments.grove.local :as local]))
 
 ;; sketch of some of the development support might work
 
@@ -56,8 +57,7 @@
   (-pr-writer [component writer opts]
     (-pr-writer
       [::comp/ManageComponent
-       (symbol (-> component .-config .-component-name))
-       (-> component .-component-env ::comp/component-id)]
+       (symbol (-> component .-config .-component-name))]
       writer
       opts)))
 
@@ -80,26 +80,27 @@
   (datafy [this]
     {:val (.-val this)}))
 
-#_(extend-type sg/QueryHook
-    cp/Datafiable
-    (datafy [this]
-      {:ident (.-ident this)
-       :query (.-query this)
-       :component (.-component this)
-       :idx (.-idx this)
-       :env (.-env this)
-       :read-keys (.-read-keys this)
-       :read-result (.-read-result this)}
-      )
+(extend-type local/QueryHook
+  cp/Datafiable
+  (datafy [this]
+    {:ident (.-ident this)
+     :query (.-query this)
+     :config (.-config this)
+     :query-id (.-query-id this)
+     :ready? (.-ready? this)
+     :read-count (.-read-count this)
+     :read-keys (.-read-keys this)
+     :read-result (.-read-result this)}
+    )
 
-    IPrintWithWriter
-    (-pr-writer [this writer opts]
-      (-pr-writer
-        [::sg/QueryHook
-         (.-ident this)
-         (.-query this)]
-        writer
-        opts)))
+  IPrintWithWriter
+  (-pr-writer [this writer opts]
+    (-pr-writer
+      [::sg/QueryHook
+       (.-ident this)
+       (.-query this)]
+      writer
+      opts)))
 
 #_(extend-type sa/TreeScheduler
     cp/Datafiable

@@ -66,11 +66,6 @@
     0
     (inc x)))
 
-(defonce component-id-seq (atom 0))
-
-(defn next-component-id []
-  (swap! component-id-seq inc))
-
 (set! *warn-on-infer* false)
 
 (defn sort-fn [^ManagedComponent a ^ManagedComponent b]
