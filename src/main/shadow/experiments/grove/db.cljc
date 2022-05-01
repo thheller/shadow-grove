@@ -115,11 +115,11 @@
         (reduce-kv
           (fn [item key join-type]
             (let [curr-val
-                  (get item key)
+                  (get item key ::skip)
 
                   norm-val
                   (cond
-                    (= ::skip curr-val)
+                    (keyword-identical? ::skip curr-val)
                     curr-val
 
                     ;; already normalized, no nothing
@@ -178,7 +178,8 @@
         {:foo
          {:type :entity
           :primary-key :foo-id
-          :joins {:bar [:one :bar]}}
+          :joins {:bar [:one :bar]
+                  :baz [:one :baz]}}
          :bar
          {:type :entity
           :primary-key :bar-id}}
