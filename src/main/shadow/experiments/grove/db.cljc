@@ -19,7 +19,7 @@
                        (= :many (first val))))
         (throw (ex-info "invalid join" joins))
 
-        ;; FIXME: actually make use of :one/:many, right now relying and user supplying propery value
+        ;; FIXME: actually make use of :one/:many, right now relying and user supplying proper value
         (update spec :joins assoc attr (second val))))
     spec
     joins))
@@ -32,11 +32,13 @@
     spec
 
     (keyword? primary-key)
-    (assoc spec :ident-gen
+    (assoc spec
+      :ident-gen
       #(make-ident entity-type (get % primary-key)))
 
     (and (vector? primary-key) (every? keyword? primary-key))
-    (assoc spec :ident-gen
+    (assoc spec
+      :ident-gen
       (fn [item]
         (make-ident entity-type
           (mapv #(get item %) primary-key))))
@@ -111,42 +113,42 @@
 
         item
         (reduce-kv
-          (fn [item key curr-val]
-            (let [join-type (get joins key)]
-              (if-not join-type
+          (fn [item key join-type]
+            (let [curr-val
+                  (get item key)
+
+                  norm-val
+                  (cond
+                    (= ::skip curr-val)
+                    curr-val
+
+                    ;; already normalized, no nothing
+                    (ident? curr-val)
+                    ::skip
+
+                    (map? curr-val)
+                    (normalize* imports schema join-type curr-val)
+
+                    (vector? curr-val)
+                    (mapv #(normalize* imports schema join-type %) curr-val)
+
+                    ;; FIXME: add back predicate to check if curr-val is valid id-val to make ident
+                    ;; might be garbage leading to invalid ident stored in norm db
+                    (some? curr-val)
+                    (make-ident join-type curr-val)
+
+                    :else
+                    (throw (ex-info "unexpected value in join attr"
+                             {:item item
+                              :key key
+                              :val curr-val
+                              :type type})))]
+
+              (if (keyword-identical? norm-val ::skip)
                 item
-                (let [norm-val
-                      (cond
-                        (= ::skip curr-val)
-                        curr-val
-
-                        ;; already normalized, no nothing
-                        (ident? curr-val)
-                        ::skip
-
-                        (map? curr-val)
-                        (normalize* imports schema join-type curr-val)
-
-                        (vector? curr-val)
-                        (mapv #(normalize* imports schema join-type %) curr-val)
-
-                        ;; FIXME: add back predicate to check if curr-val is valid id-val to make ident
-                        ;; might be garbage leading to invalid ident stored in norm db
-                        (some? curr-val)
-                        (make-ident join-type curr-val)
-
-                        :else
-                        (throw (ex-info "unexpected value in join attr"
-                                 {:item item
-                                  :key key
-                                  :val curr-val
-                                  :type type})))]
-
-                  (if (= norm-val ::skip)
-                    item
-                    (assoc item key norm-val))))))
+                (assoc item key norm-val))))
           item
-          item)]
+          joins)]
 
     (swap! imports conj [ident item])
 
@@ -171,6 +173,24 @@
     @imports
     ))
 
+(comment
+  (let [schema
+        {:foo
+         {:type :entity
+          :primary-key :foo-id
+          :joins {:bar [:one :bar]}}
+         :bar
+         {:type :entity
+          :primary-key :bar-id}}
+
+        db
+        (configure {} schema)]
+
+    (-> (transacted db)
+        (add :foo {:foo-id 1 :foo "foo" :bar {:bar-id 1 :bar "bar"}})
+        (commit!)
+        (get :data))))
+
 (defn- set-conj [x y]
   (if (nil? x)
     #{y}
@@ -184,10 +204,7 @@
 (defn- merge-imports [data imports]
   (reduce
     (fn [data [ident item]]
-      (-> data
-          ;; build a :foo #{ident ident ...} set because of the flat structure
-          (update (coll-key ident) set-conj ident)
-          (update ident merge-or-replace item)))
+      (update data ident merge-or-replace item))
     data
     imports))
 
