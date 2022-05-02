@@ -88,6 +88,12 @@
       form)
 
     ;; attempt to at least filter out (fn [some thing] ...)
+    ;; so they don't appear as used when using the same name as a defc binding
+    ;; (defc ui-thing [a]
+    ;;   (render
+    ;;     (simple-seq ...
+    ;;       (fn [a]
+    ;;         (<< [:div a])))) <- this isn't the a from args
     (and (seq? form) (= 'fn (first form)))
     (let [[_ maybe-vec & more] form
 
@@ -96,13 +102,10 @@
             (find-fn-args (first more))
             (find-fn-args maybe-vec))
 
-          used
-          (reduce #(find-used-bindings %1 bindings %2) used form)
+          fn-bindings
+          (reduce dissoc bindings shadows)]
 
-          res
-          (set/difference used shadows)]
-
-      res)
+      (reduce #(find-used-bindings %1 fn-bindings %2) used form))
 
     (coll? form)
     (reduce #(find-used-bindings %1 bindings %2) used form)
