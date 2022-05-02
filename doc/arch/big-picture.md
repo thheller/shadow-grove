@@ -24,7 +24,7 @@ We follow the "props flow down, events bubble up" rendering model (similar to `r
 
 ## Normalizing the DB
 
-Since the core of all of this is the data we need to bring this into a somewhat reasonable shape. It can be argued that the above is already the best shape. In some way it is. From the library perspective this however has certain issues. Say we want to mark `:todo-id 3` as completed. We first need to somehow find its index in the `:todos` vector, then update it the todo item. In turn, we also update the `:todos` vector itself. When it is time to update the UI we need to find what changed again, essentially checking everything.
+Since the core of all of this is the data we need to bring this into a somewhat reasonable shape. It can be argued that the above is already the best shape. In some way it is. From the library perspective this however has certain issues. Say we want to mark `:todo-id 3` as completed. We first need to somehow find its index in the `:todos` vector, and then update the todo item. In turn, we also update the `:todos` vector itself. When it is time to update the UI we need to find what changed again, essentially checking everything.
 
 So we normalize this data first to remove depth and get everything as flat as reasonable but not flatter.
 
@@ -63,7 +63,7 @@ Components however provide a controlled way to inject data into the tree. They c
 
 Components themselves however don't actually manage any data. They only provide a generic abstraction for hooking into their lifecycle and handling data is left to more specializing implementations.
 
-The default abstraction here is based on EQL (popularized by fulcro, pathom, etc.). They provide good way for components to express their data needs while also making a reasonable remote interface.
+The default abstraction here is based on EQL (popularized by fulcro, pathom, etc.). It provides a good way for components to express their data needs while also making a reasonable remote interface.
 
 It also happens to provide a way to turn the normalized data back into something tree-like.
 
@@ -89,7 +89,7 @@ It also happens to provide a way to turn the normalized data back into something
 
 In this we provide no data via the `ui-root` at all. Instead, it queries the "root" of the database for the `:todos` attribute. They are then rendered as a collection using the `ui-todo` component. Each `ui-todo` will receive the ident of the todo it is supposed to render. It will use this to query the data again from the DB. It doesn't specify the EQL attributes it wants here, which is just short for `(get db ident)` but `(sg/query-ident ident [:text])` would be valid and only provide the `{:text ...}` map instead of the complete one.
 
-What we end up with 4 mounted queries. The first read the `:todos` key and nothing else. It will only update if `:todos` changes. The other three each just read their ident. So updating `[:todo 3]` will not cause `[:todo 2]` to update.
+What we end up with is 4 mounted queries. The first read the `:todos` key and nothing else. It will only update if `:todos` changes. The other three  just read their ident. So updating `[:todo 3]` will not cause `[:todo 2]` to update.
 
 Queries manage their data needs and signal components when they need to update.
 
@@ -97,7 +97,7 @@ Queries manage their data needs and signal components when they need to update.
 
 The above all handles data flowing down the component tree. Everything can access the part of the data they need when they need it. Queries maintain who accessed what and can surgically trigger updates.
 
-Those updates can come from many places but most often they will the triggered by something the user does in the UI. Could be something simple as clicking a button.
+Those updates can come from many places but most often they will be triggered by something the user does in the UI -- clicking a button.
 
 Events are expressed as data. Keeping with "props flow down, events bubble up" each component in the path is given a chance to handle it.
 
@@ -190,7 +190,7 @@ So a simple event handle could just assoc what we need into the database.
   (assoc-in tx-env [:db ident :completed?] checked))
 ```
 
-Once the event completes the transaction sees that only `ident` was updated. It'll then check which queries used that `ident` earlier when rendering and signal that they need to update.
+Once the event completes, the transaction sees that `ident` was updated. It'll then check which queries used that ident, when rendering, and signal that they need to be updated.
 
 The scheduler coordinates that everything updates in the proper order and any potential changes are propagated to the actual live DOM.
 
