@@ -128,29 +128,32 @@
 
 (goog-define TRACE false)
 
-(defn prepare [init data-ref runtime-id]
-  (let [root-scheduler
-        (if ^boolean TRACE
-          (TracingRootScheduler. false (js/Set.))
-          (RootScheduler. false (js/Set.)))
+(defn prepare
+  ([data-ref runtime-id]
+   (prepare {} data-ref runtime-id))
+  ([init data-ref runtime-id]
+   (let [root-scheduler
+         (if ^boolean TRACE
+           (TracingRootScheduler. false (js/Set.))
+           (RootScheduler. false (js/Set.)))
 
-        rt-ref
-        (-> init
-            (assoc ::rt true
-                   ::scheduler root-scheduler
-                   ::runtime-id runtime-id
-                   ::data-ref data-ref
-                   ::event-config {}
-                   ::fx-config {}
-                   ::active-queries-map (js/Map.)
-                   ::key-index-seq (atom 0)
-                   ::key-index-ref (atom {})
-                   ::query-index-map (js/Map.)
-                   ::query-index-ref (atom {})
-                   ::env-init [])
-            (atom))]
+         rt-ref
+         (-> init
+             (assoc ::rt true
+                    ::scheduler root-scheduler
+                    ::runtime-id runtime-id
+                    ::data-ref data-ref
+                    ::event-config {}
+                    ::fx-config {}
+                    ::active-queries-map (js/Map.)
+                    ::key-index-seq (atom 0)
+                    ::key-index-ref (atom {})
+                    ::query-index-map (js/Map.)
+                    ::query-index-ref (atom {})
+                    ::env-init [])
+             (atom))]
 
-    (when ^boolean js/goog.DEBUG
-      (swap! known-runtimes-ref assoc runtime-id rt-ref))
+     (when ^boolean js/goog.DEBUG
+       (swap! known-runtimes-ref assoc runtime-id rt-ref))
 
-    rt-ref))
+     rt-ref)))
