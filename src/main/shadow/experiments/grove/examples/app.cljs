@@ -112,9 +112,7 @@
 
   ;; FIXME: code is already present when using keyboard submit
   (event ::m/compile! [env e _]
-    (sg/run-tx env (assoc e :code (.getValue @ed-cljs-ref))))
-
-  (event ::m/select-tab! sg/tx))
+    (sg/run-tx env (assoc e :code (.getValue @ed-cljs-ref)))))
 
 (def source-ref (atom ""))
 

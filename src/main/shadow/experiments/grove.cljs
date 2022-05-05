@@ -72,18 +72,10 @@
 
   (let [{::gp/keys [query-engine]} @runtime-ref]
     (assert query-engine "missing query-engine in env")
-    (assert (map? tx) "expected transaction to be a map")
 
     (gp/transact! query-engine tx origin)))
 
-(defn tx [{::rt/keys [runtime-ref] :as env} ev-map e origin]
-  (tx* runtime-ref ev-map origin))
-
 (defn run-tx
-  [{::rt/keys [runtime-ref] :as env} tx]
-  (tx* runtime-ref tx env))
-
-(defn run-tx-with-return
   [{::rt/keys [runtime-ref] :as env} tx]
   (tx* runtime-ref tx env))
 

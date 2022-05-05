@@ -16,10 +16,6 @@
   (event ::m/edit-complete! [env {:keys [todo]} e]
     (sg/run-tx env {:e ::m/edit-save! :todo todo :text (.. e -target -value)}))
 
-  (event ::m/toggle-completed! sg/tx)
-  (event ::m/edit-start! sg/tx)
-  (event ::m/delete! sg/tx)
-
   (bind {::m/keys [completed? editing? todo-text] :as data}
     (sg/query-ident todo
       [::m/todo-text
@@ -72,7 +68,6 @@
     (<< [:ul.todo-list (sg/keyed-seq filtered-todos identity todo-item)])))
 
 (defc ui-root []
-  (event ::m/set-filter! sg/tx)
   (event ::m/create-new! [env _ ^js e]
     (when (= 13 (.-keyCode e))
       (let [input (.-target e)
@@ -81,9 +76,6 @@
         (when (seq text)
           (set! input -value "") ;; FIXME: this triggers a paint so should probably be delayed?
           (sg/run-tx env {:e ::m/create-new! ::m/todo-text text})))))
-
-  (event ::m/clear-completed! sg/tx)
-  (event ::m/shuffle! sg/tx)
 
   (event ::m/toggle-all! [env _ e]
     (sg/run-tx env {:e ::m/toggle-all! :completed? (-> e .-target .-checked)}))
