@@ -68,17 +68,40 @@
     {:entities {}}
     spec))
 
-(defn configure [init-db spec]
-  ;; FIXME: should this use a special key instead of meta?
-  (let [schema (parse-schema spec)
-        m {::schema schema
-           ::ident-types (set (keys (:entities schema)))}]
-    (with-meta init-db m)))
-
 (defn ident? [thing]
   (and (vector? thing)
        (= (count thing) 2)
        (keyword? (first thing))))
+
+(defn nav-fn [db key val]
+  (cond
+    (ident? val)
+    (get db val)
+
+    (coll? val)
+    (vary-meta val assoc
+      'clojure.core.protocols/datafy
+      (fn [m]
+        (vary-meta m assoc
+          'clojure.core.protocols/nav
+          (fn [m key val]
+            (if (ident? val)
+              (get db val)
+              val)))))
+
+    :else
+    val))
+
+(defn configure [init-db spec]
+  ;; FIXME: should this use a special key instead of meta?
+  (let [schema (parse-schema spec)
+        m {::schema schema
+           ::ident-types (set (keys (:entities schema)))
+           ;; FIXME: conditionalize this, not necessary in release builds
+           ;; convenient for when tapping the db for inspect
+           'clojure.core.protocols/nav nav-fn}]
+
+    (with-meta init-db m)))
 
 (defn ident-key [thing]
   {:pre [(ident? thing)]}

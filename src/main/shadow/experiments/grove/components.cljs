@@ -21,6 +21,19 @@
 (defonce components-ref (atom {}))
 (defonce instances-ref (atom #{}))
 
+(set! *warn-on-infer* false)
+
+(defn debug-find-roots []
+  (reduce
+    (fn [all instance]
+      (if (::parent (.-component-env instance))
+        all
+        (conj all instance)))
+    []
+    @instances-ref))
+
+(set! *warn-on-infer* true)
+
 (defn get-component [env]
   (::component env))
 
@@ -182,6 +195,13 @@
     (set! config c)
     (set! args a)
     (set! scheduler (::scheduler parent-env))
+    (when DEBUG
+      ;; only keeping this info for debugging purposes currently, don't think its needed otherwise
+      ;; use js/Set since it always maintains insertion order which makes debugging easier
+      (set! this -child-components (js/Set.))
+      (when-some [parent (::component parent-env)]
+        (.. parent -child-components (add this))))
+
     (set! component-env
       (-> parent-env
           (update ::depth safe-inc)
@@ -253,6 +273,10 @@
     (.unschedule! this)
     (when DEBUG
       (swap! instances-ref disj this)
+
+      (when-some [parent (::parent component-env)]
+        (.. parent -child-components (delete this)))
+
       (when dom-remove?
         (.remove (.-marker-before this))
         (.remove (.-marker-after this))))
