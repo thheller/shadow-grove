@@ -1,9 +1,9 @@
-(ns shadow.experiments.grove.others.react
-  (:require [shadow.experiments.grove.builder :as build])
+(ns shadow.grove.others.react
+  (:require [shadow.grove.builder :as build])
   (:import [cljs.tagged_literals JSValue]))
 
 (defmacro << [& body]
-  `(build/with (shadow.experiments.grove.react/ElementBuilder. nil ~(not= 1 (count body)))
+  `(build/with (shadow.grove.react/ElementBuilder. nil ~(not= 1 (count body)))
      ~(build/compile {:skip-check true} &env body)))
 
 ;; only a macro to optimize the props handling (avoid allocating clojure maps)
@@ -21,11 +21,11 @@
    (when (vector? child-expr)
      (throw (ex-info "invalid child-expr, elements need to be wrapped in $" {:child-expr child-expr})))
 
-   `(shadow.experiments.grove.react/js-el*
+   `(shadow.grove.react/js-el*
       ~type
       ~(-> attrs
            (dissoc :key :ref)
-           (assoc :children `(shadow.experiments.grove.react/unwrap-fragment ~child-expr))
+           (assoc :children `(shadow.grove.react/unwrap-fragment ~child-expr))
            (JSValue.))
       ~key
       ~ref)))

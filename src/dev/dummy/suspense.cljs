@@ -1,8 +1,8 @@
 (ns dummy.suspense
   (:require
-    [shadow.experiments.grove :as sg :refer (defc <<)]
-    [shadow.experiments.grove.ui.testing :as t]
-    [shadow.experiments.grove.runtime :as rt]))
+    [shadow.grove :as sg :refer (defc <<)]
+    [shadow.grove.ui.testing :as t]
+    [shadow.grove.runtime :as rt]))
 
 (defonce root-el (js/document.getElementById "app"))
 

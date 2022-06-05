@@ -1,10 +1,10 @@
-(ns shadow.experiments.grove.others.react
-  (:require-macros [shadow.experiments.grove.react])
+(ns shadow.grove.others.react
+  (:require-macros [shadow.grove.react])
   (:require
     ["react" :as react]
     [goog.object :as gobj]
-    [shadow.experiments.grove.protocols :as p]
-    [shadow.experiments.grove.builder :as b]
+    [shadow.grove.protocols :as p]
+    [shadow.grove.builder :as b]
     [clojure.string :as str]))
 
 (def react-element-type

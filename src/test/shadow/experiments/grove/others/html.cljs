@@ -1,9 +1,9 @@
-(ns shadow.experiments.grove.others.html
-  (:require-macros [shadow.experiments.grove.html])
+(ns shadow.grove.others.html
+  (:require-macros [shadow.grove.html])
   (:refer-clojure :exclude (str))
   (:require
-    [shadow.experiments.grove.builder :as build]
-    [shadow.experiments.grove.protocols :as p]
+    [shadow.grove.builder :as build]
+    [shadow.grove.protocols :as p]
     [goog.string :as gstr]))
 
 (defrecord Element [tag parent])

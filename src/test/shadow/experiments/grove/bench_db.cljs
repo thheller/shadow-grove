@@ -1,4 +1,4 @@
-(ns shadow.experiments.grove.bench-db
+(ns shadow.grove.bench-db
   (:require
     ["benchmark" :as b]
     ))

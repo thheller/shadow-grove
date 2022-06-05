@@ -1,4 +1,4 @@
-(ns shadow.experiments.grove.collections-test
+(ns shadow.grove.collections-test
   (:require [clojure.test :as ct :refer (deftest is)]))
 
 ;; original collection vector of items

@@ -1,8 +1,8 @@
-(ns shadow.experiments.grove.builder-test
+(ns shadow.grove.builder-test
   (:require
     [clojure.test :as t :refer (deftest is)]
     [clojure.pprint :refer (pprint)]
-    [shadow.experiments.grove.builder :as b]))
+    [shadow.grove.builder :as b]))
 
 (def test-body
   '[[:foo {:i/key :key :bar 1 :foo foo :x nil :bool true}]

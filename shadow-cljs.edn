@@ -42,13 +42,13 @@
   {:target :bootstrap
    :output-dir "examples/app/public/bootstrap"
    :exclude #{cljs.js}
-   :entries [shadow.experiments.grove
-             shadow.experiments.grove.runtime
-             shadow.experiments.grove.db
-             shadow.experiments.grove.eql-query
-             shadow.experiments.grove.events
-             shadow.experiments.grove.local
-             shadow.experiments.grove.ui.testing]
+   :entries [shadow.grove
+             shadow.grove.runtime
+             shadow.grove.db
+             shadow.grove.eql-query
+             shadow.grove.events
+             shadow.grove.local
+             shadow.grove.ui.testing]
    :compiler-options {:output-feature-set :es6}
    :macros []}
 
@@ -57,7 +57,7 @@
    :asset-path "js"
    :output-dir "examples/app/public/js"
 
-   :modules {:main {:init-fn shadow.experiments.grove.examples.app/init}}
+   :modules {:main {:init-fn shadow.grove.examples.app/init}}
 
    :compiler-options
    {:optimizations :simple
@@ -69,7 +69,7 @@
 
   :test-dom
   {:target :browser
-   :modules {:main {:init-fn shadow.experiments.grove.test-app.dom/init}}}
+   :modules {:main {:init-fn shadow.grove.test-app.dom/init}}}
 
   :test
   {:target :browser-test
@@ -80,19 +80,19 @@
   {:target :browser
    :output-dir "examples/todomvc/js"
    :modules {:main {:init-fn todomvc.simple/init
-                    :preloads [shadow.experiments.grove.dev-support]}}}
+                    :preloads [shadow.grove.dev-support]}}}
 
   :todomvc-single
   {:target :browser
    :output-dir "examples/todomvc/js"
    :modules {:main {:init-fn todomvc.split.single/init
-                    :preloads [shadow.experiments.grove.dev-support]}}}
+                    :preloads [shadow.grove.dev-support]}}}
 
   :suspense
   {:target :browser
    :output-dir "examples/suspense/js"
    :modules {:main {:init-fn dummy.suspense/init
-                    :preloads [shadow.experiments.grove.dev-support]}}}
+                    :preloads [shadow.grove.dev-support]}}}
 
   :todomvc-split
   {:target :browser
@@ -102,7 +102,7 @@
     {:entries []}
     :main
     {:init-fn todomvc.split.main/init
-     :preloads [shadow.experiments.grove.dev-support]
+     :preloads [shadow.grove.dev-support]
      :depends-on #{:shared}}
     :worker
     {:init-fn todomvc.split.worker/init
@@ -112,19 +112,19 @@
   :bench-db
   {:target :node-script
    :output-to "out/bench-db.js"
-   :main shadow.experiments.grove.bench-db/main
+   :main shadow.grove.bench-db/main
    :devtools {:enabled false}}
 
   :bench-fragment
   {:target :node-script
    :compiler-options {:optimizations :simple}
    :output-to "out/bench-fragment.js"
-   :main shadow.experiments.grove.bench-fragment/main
+   :main shadow.grove.bench-fragment/main
    :devtools {:enabled false}}
 
   :bench-fragment-browser
   {:target :browser
    :output-dir "examples/bench-fragment/js"
-   :modules {:main {:init-fn shadow.experiments.grove.bench-fragment/init}}
+   :modules {:main {:init-fn shadow.grove.bench-fragment/init}}
    :devtools {:enabled false}}
   }}

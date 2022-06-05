@@ -4,9 +4,9 @@
     ["react" :as react :rename {createElement el}]
     [reagent.core :as reagent]
     [re-com.core :as rc]
-    [shadow.experiments.arborist :as sa]
-    [shadow.experiments.grove :as sg :refer (<<)]
-    [shadow.experiments.arborist.interpreted]))
+    [shadow.arborist :as sa]
+    [shadow.grove :as sg :refer (<<)]
+    [shadow.arborist.interpreted]))
 
 (def dom-root
   (js/document.getElementById "root"))

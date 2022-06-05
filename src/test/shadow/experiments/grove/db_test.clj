@@ -1,6 +1,6 @@
-(ns shadow.experiments.grove.db-test
+(ns shadow.grove.db-test
   (:require
-    [shadow.experiments.grove.db :as db]
+    [shadow.grove.db :as db]
     [clojure.pprint :refer (pprint)]
     [clojure.test :as t :refer (deftest is)]))
 

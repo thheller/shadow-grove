@@ -143,7 +143,7 @@ Admittedly this doesn't look very appealing, but it does perform a decent bit be
 
 Allocating those vectors and translating them to react elements is not free and that is why there are so many CLJS macro based libraries that try to do this at macro time (eg. uix, helix, sablono, fulcro, etc). This gets you close to the above performance, but you are trading in some convenience and power. It is however also still about 10x slower than raw HTML generation which seems to be about the `react` tax. This is well worth it but I'm convinced we can do better.
 
-In fact when I run this basic example through `shadow.experiments.grove` I get
+In fact when I run this basic example through `shadow.grove` I get
 
 ```clojure
 (defn example-grove []

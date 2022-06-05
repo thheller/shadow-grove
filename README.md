@@ -28,13 +28,13 @@ I'm mostly writing some of this down for my own notes and some people have expre
 
 ## Ongoing Experiments
 
-### shadow.experiments.arborist
+### shadow.arborist
 
 > Arborists generally focus on the health and safety of individual plants and trees.
 
 The underlying API abstraction for DOM interop. This is fairly stable by now but might undergo a few API simplifications and renames. It works on top of a few simple protocols and therefore is pretty easily extensible. It doesn't even have its own component API since that can be built on top of those protocols.
 
-### shadow.experiments.grove
+### shadow.grove
 
 > grove - a small wood or forested area (ie. trees)
 
@@ -44,7 +44,7 @@ It includes basic support for "Suspense" type "offscreen" rendering to avoid dis
 
 The "framework" also provides a basic EQL query and transaction layer. The intent is to keep all UI related things separate from all data/backend things. Components can get their data in a declarative way without being coupled to where that data is actually coming from.
 
-### shadow.experiments.grove.worker
+### shadow.grove.worker
 
 The first provided "data" layer. This experiment of this is to move all data processing to an actual WebWorker and thus moving as much work off the main thread as possible. The "frontend" can query data and the worker can push updates to the frontend whenever needed.
 
@@ -54,7 +54,7 @@ It is still an open research question of how practical this actually is. We are 
 
 So far it looks promising though.
 
-### shadow.experiments.grove.db
+### shadow.grove.db
 
 A very basic db normalizer and query engine. It supports basic EQL queries. I might switch the query processing to Pathom at some point since that already covers so many more very useful features.
 
@@ -76,18 +76,18 @@ It does however look very promising overall. It is never necessary to diff all t
 
 Since query engines are pluggable this could be replaced by an entirely different implementation without touching the UI at all.
 
-### shadow.experiments.grove.main.vlist
+### shadow.grove.main.vlist
 
 A virtual list component that can render a large amount of elements efficiently by only actually rendering what is visible on the screen. So for 10000 elements it would only ever render the 50 or so that fit on the screen. The backend keeps all the data and the frontend only receives the chunks needed to display.
 
 The implementation is naive but works fine for now. It currently only supports fixed heights since using variable heights makes the implementation much more complex.
 
-### shadow.experiments.grove.main.stream
+### shadow.grove.main.stream
 
 A stream is intended to be used to optimize some common UI operations where an element is only ever added at the top or bottom and "streaming" in from another event source. A common example would be a chat-type application where the chat-log is rarely re-ordered.
 
 Not sure about this one. Seems to make sense in some areas. Needs more testing.
 
-### shadow.experiments.grove.main.atoms
+### shadow.grove.main.atoms
 
 Basic support for regular `cljs.core/Atom` and updating UI when they change. This is pretty much final. 

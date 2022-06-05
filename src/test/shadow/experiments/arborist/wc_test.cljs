@@ -1,12 +1,12 @@
-(ns shadow.experiments.arborist.wc-test
+(ns shadow.arborist.wc-test
   (:require
     [goog.object :as gobj]
     [cljs.test :as ct :refer (deftest is)]
     [clojure.string :as str]
-    [shadow.experiments.grove :as sg :refer (<<)]
-    [shadow.experiments.arborist :as sa]
-    [shadow.experiments.arborist.protocols :as ap]
-    [shadow.experiments.arborist.attributes :as attr]
+    [shadow.grove :as sg :refer (<<)]
+    [shadow.arborist :as sa]
+    [shadow.arborist.protocols :as ap]
+    [shadow.arborist.attributes :as attr]
     ["./components.js"]))
 
 ;; some tests to check web component compatibility, similar to

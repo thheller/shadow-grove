@@ -1,6 +1,6 @@
-(ns shadow.experiments.grove.react.dump
+(ns shadow.grove.react.dump
   (:require
-    [shadow.experiments.grove.react :as r :refer (<<)]))
+    [shadow.grove.react :as r :refer (<<)]))
 
 ;; FIXME: make these cool ...
 (def map-renderer

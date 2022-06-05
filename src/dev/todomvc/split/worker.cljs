@@ -1,6 +1,6 @@
 (ns todomvc.split.worker
   (:require
-    [shadow.experiments.grove.worker :as sw]
+    [shadow.grove.worker :as sw]
     [todomvc.split.env :as env]
     [todomvc.split.db]))
 

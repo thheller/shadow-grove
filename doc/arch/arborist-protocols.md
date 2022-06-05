@@ -1,4 +1,4 @@
- # shadow.experiments.arborist.protocols
+ # shadow.arborist.protocols
  
 This is a technical summary of what these low-level protocols are meant to achieve. For most this should be considered and implementation detail and **end users will not interact with these directly**. The shadow.arborist core functions will call these. Implementations of these protocols may call them. End users must not.
 

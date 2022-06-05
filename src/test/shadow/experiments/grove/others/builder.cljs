@@ -1,13 +1,13 @@
-(ns shadow.experiments.grove.others.builder
-  (:require-macros [shadow.experiments.grove.builder])
+(ns shadow.grove.others.builder
+  (:require-macros [shadow.grove.builder])
   (:require
-    [shadow.experiments.grove.protocols :as p]))
+    [shadow.grove.protocols :as p]))
 
 (def ^:dynamic ^not-native *instance* nil)
 
 (defn check-instance! []
   (when-not *instance*
-    (throw (ex-info "no shadow.experiments.grove.builder/*instance* set!" {}))))
+    (throw (ex-info "no shadow.grove.builder/*instance* set!" {}))))
 
 (defn fragment-start [fragment-id node-count]
   (p/fragment-start *instance* fragment-id node-count))

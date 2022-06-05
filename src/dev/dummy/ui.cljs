@@ -1,9 +1,9 @@
 (ns dummy.ui
   (:require
-    [shadow.experiments.grove.local :as local-eng]
-    [shadow.experiments.grove.ui.dnd-sortable :as dnd]
-    [shadow.experiments.grove.runtime :as rt]
-    [shadow.experiments.grove :as sg :refer (defc <<)]
+    [shadow.grove.local :as local-eng]
+    [shadow.grove.ui.dnd-sortable :as dnd]
+    [shadow.grove.runtime :as rt]
+    [shadow.grove :as sg :refer (defc <<)]
     ))
 
 (defc ui-dnd []

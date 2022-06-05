@@ -1,8 +1,8 @@
 (ns todomvc.split.db
   (:require
-    [shadow.experiments.grove.eql-query :as eql]
-    [shadow.experiments.grove.events :as ev]
-    [shadow.experiments.grove.db :as db]
+    [shadow.grove.eql-query :as eql]
+    [shadow.grove.events :as ev]
+    [shadow.grove.db :as db]
     [todomvc.model :as m]
     [todomvc.split.env :as env]))
 

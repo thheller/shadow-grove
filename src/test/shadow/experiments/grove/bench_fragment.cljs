@@ -1,13 +1,13 @@
-(ns shadow.experiments.grove.bench-fragment
+(ns shadow.grove.bench-fragment
   (:require
     ["benchmark" :as b]
     ["react" :as react :rename {createElement $}]
     ["react-dom" :as rdom]
     [reagent.core :as reagent]
     [goog.reflect :as gr]
-    [shadow.experiments.arborist :as sa]
-    [shadow.experiments.arborist.interpreted]
-    [shadow.experiments.arborist.protocols :as sap]))
+    [shadow.arborist :as sa]
+    [shadow.arborist.interpreted]
+    [shadow.arborist.protocols :as sap]))
 
 ;; browser version seems to rely on Benchmark global for some reason
 (set! js/Benchmark b)

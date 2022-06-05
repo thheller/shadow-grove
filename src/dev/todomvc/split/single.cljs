@@ -1,11 +1,11 @@
 (ns todomvc.split.single
   (:require
-    [shadow.experiments.grove :as sg]
-    [shadow.experiments.grove.local :as local]
+    [shadow.grove :as sg]
+    [shadow.grove.local :as local]
     [todomvc.split.env :as env]
     [todomvc.split.views :as views]
     [todomvc.split.db]
-    [shadow.experiments.grove.local :as local-eng]))
+    [shadow.grove.local :as local-eng]))
 
 ;; this is only using the main thread (no worker)
 ;; but the logic is still separated

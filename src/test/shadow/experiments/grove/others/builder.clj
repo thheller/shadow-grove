@@ -1,8 +1,8 @@
-(ns shadow.experiments.grove.others.builder
+(ns shadow.grove.others.builder
   (:refer-clojure :exclude (compile))
   (:require
     [clojure.string :as str]
-    [shadow.experiments.grove.protocols :as p]))
+    [shadow.grove.protocols :as p]))
 
 ;; I dislike .cljc too much to make this a .cljc file ...
 

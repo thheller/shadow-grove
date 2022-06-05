@@ -1,7 +1,7 @@
 (ns todomvc.split.main
   (:require
-    [shadow.experiments.grove :as sg]
-    [shadow.experiments.grove.worker-engine :as worker]
+    [shadow.grove :as sg]
+    [shadow.grove.worker-engine :as worker]
     [todomvc.split.views :as views]))
 
 ;; this is running in the main thread

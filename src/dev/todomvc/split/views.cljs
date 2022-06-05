@@ -1,6 +1,6 @@
 (ns todomvc.split.views
   (:require
-    [shadow.experiments.grove :as sg :refer (<< defc)]
+    [shadow.grove :as sg :refer (<< defc)]
     [todomvc.model :as m]))
 
 (defc todo-item [todo]

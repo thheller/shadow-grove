@@ -1,8 +1,8 @@
-(ns shadow.experiments.arborist.keyed-seq-test
+(ns shadow.arborist.keyed-seq-test
   (:require
     [cljs.test :as ct :refer (deftest is)]
-    [shadow.experiments.grove :as sg :refer (<<)]
-    [shadow.experiments.arborist :as sa]))
+    [shadow.grove :as sg :refer (<<)]
+    [shadow.arborist :as sa]))
 
 (defn ^:dev/before-load clear-console []
   (js/console.clear))

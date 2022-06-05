@@ -1,9 +1,9 @@
-(ns shadow.experiments.arborist-test
+(ns shadow.arborist-test
   (:require
     [clojure.test :as t :refer (deftest is)]
     [clojure.pprint :refer (pprint)]
     [clojure.string :as str]
-    [shadow.experiments.arborist.fragments :as frag]))
+    [shadow.arborist.fragments :as frag]))
 
 (def test-body
   '[[:foo {:i/key :key :bar 1 :foo foo :x nil :bool true}]

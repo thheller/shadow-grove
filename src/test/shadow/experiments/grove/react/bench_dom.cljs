@@ -1,11 +1,11 @@
-(ns shadow.experiments.grove.react.bench-dom
+(ns shadow.grove.react.bench-dom
   (:require
     ["benchmark" :as b]
     ["react" :as react :rename {createElement rce}]
     ["react-dom/server" :as rdom]
     [hx.react :as hx]
-    [shadow.experiments.grove.react :as shadow]
-    [shadow.experiments.grove.html :as html]
+    [shadow.grove.react :as shadow]
+    [shadow.grove.html :as html]
     [reagent.core :as reagent]
     [rum.core :as rum]
     [fulcro.client.dom :as fulcro-dom]

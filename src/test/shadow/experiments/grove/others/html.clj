@@ -1,8 +1,8 @@
-(ns shadow.experiments.grove.others.html
+(ns shadow.grove.others.html
   (:refer-clojure :exclude (str))
   (:require
-    [shadow.experiments.grove.builder :as build]
-    [shadow.experiments.grove.protocols :as p])
+    [shadow.grove.builder :as build]
+    [shadow.grove.protocols :as p])
   (:import [java.io Writer StringWriter]
            [clojure.lang IDeref]
            com.google.common.html.HtmlEscapers))

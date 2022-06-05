@@ -1,7 +1,7 @@
-(ns shadow.experiments.grove.forms-test
+(ns shadow.grove.forms-test
   (:require
     [cljs.test :as ct :refer (deftest is)]
-    [shadow.experiments.grove :as sg :refer (defc <<)]))
+    [shadow.grove :as sg :refer (defc <<)]))
 
 (comment
   (def form

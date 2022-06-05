@@ -1,8 +1,8 @@
-(ns shadow.experiments.grove.html-test
+(ns shadow.grove.html-test
   (:require
     [clojure.test :refer (deftest is)]
     [clojure.pprint :refer (pprint)]
-    [shadow.experiments.grove.html :as html :refer (<<)]))
+    [shadow.grove.html :as html :refer (<<)]))
 
 (defn dynamic-thing [thing] thing)
 

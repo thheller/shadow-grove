@@ -1,7 +1,7 @@
 (ns todomvc.split.env
   (:require
-    [shadow.experiments.grove.db :as db]
-    [shadow.experiments.grove.runtime :as rt]
+    [shadow.grove.db :as db]
+    [shadow.grove.runtime :as rt]
     [todomvc.model :as m]))
 
 (defonce data-ref

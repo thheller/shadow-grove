@@ -1,8 +1,8 @@
 (ns todomvc.simple
   (:require
-    [shadow.experiments.grove.runtime :as rt]
-    [shadow.experiments.grove :as sg :refer (defc <<)]
-    [shadow.experiments.grove.css-transition :as cfx]
+    [shadow.grove.runtime :as rt]
+    [shadow.grove :as sg :refer (defc <<)]
+    [shadow.grove.css-transition :as cfx]
     ))
 
 ;; simple single file todomvc impl
