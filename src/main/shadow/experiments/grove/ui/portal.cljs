@@ -12,7 +12,6 @@
          (identical? ref-node (.-ref-node next))))
 
   (dom-sync! [this ^PortalSeed next]
-    (js/console.log "portal sync" next this)
     (ap/update! root (.-body next)))
 
   (dom-insert [this parent anchor]
@@ -22,7 +21,6 @@
     (ap/dom-first root))
 
   (dom-entered! [this]
-    (js/console.log "portal enter" this)
     (ap/dom-entered! root))
 
   (destroy! [this ^boolean dom-remove?]
