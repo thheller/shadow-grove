@@ -1,4 +1,4 @@
-(defproject thheller/shadow-experiments "0.0.6"
+(defproject thheller/shadow-experiments "0.0.7"
   :description "WARNING: Experimental Code! Changing completely without notice! Do not use for anything but other experiments!"
   :url "http://github.com/thheller/shadow-experiments"
   :license {:name "Eclipse Public License"

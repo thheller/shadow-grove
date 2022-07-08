@@ -32,6 +32,22 @@
     []
     @instances-ref))
 
+(defn debug-component-seq
+  ([]
+   (debug-component-seq (first (debug-find-roots))))
+  ([root]
+   (tree-seq
+     (fn [component]
+       true)
+     (fn [component]
+       (.-child-components component))
+     root)))
+
+(defn debug-find-suspended []
+  (->> (debug-component-seq)
+       (filter #(.-suspended? %))
+       (vec)))
+
 (set! *warn-on-infer* true)
 
 (defn get-component [env]
@@ -374,15 +390,12 @@
 
     (set! dirty-hooks (bit-set dirty-hooks idx))
 
-    (when (<= idx current-idx)
-      ;; a hook that
-      ;; - either caused a suspension
-      ;; - or is at a lower index
-      ;; invalidated. so the component needs to unsuspend to process this work
-      ;; may suspend again if any hook is not ready
-      (set! current-idx idx)
-      ;; could check if actually suspended but no need
-      (set! suspended? false))
+    ;; don't set higher when currently at lower index, would otherwise skip work
+    (set! current-idx (js/Math.min idx current-idx))
+
+    ;; always need to resume so the invalidated hooks can do work
+    ;; could check if actually suspended but no need
+    (set! suspended? false)
 
     (.schedule! this ::hook-invalidate!))
 
