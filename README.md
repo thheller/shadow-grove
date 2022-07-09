@@ -21,15 +21,17 @@ However, all things here are written from scratch. Mostly since we are not using
 
 ### Current Status
 
-`shadow.grove` is far from finished but usable.
+`shadow.grove` is far from finished but usable. I have been using this for a few years now. Documentation is still in an terrible state though.
+
+The [shadow-cljs UI](https://github.com/thheller/shadow-cljs/tree/master/src/main/shadow/cljs/ui) is sort of a reference application for all of this. You can experience it live at http://localhost:9630 if you have shadow-cljs running locally. You can also use the [grove-todo](https://github.com/thheller/grove-todo) example.
 
 Other `react` based CLJS libraries have far more features that `shadow.grove` is still missing. If you are using a lot of 3rd party `react` components you probably shouldn't be looking at this.
 
 ## Quickstart
 
-Using the `shadow.grove` implementation of [TodoMVC](https://todomvc.com/) as an example for getting started. You can just clone the template repo or copy what you need. Explanations of the different parts will follow.
+Using the `shadow.grove` implementation of [TodoMVC](https://todomvc.com/) ([source here](https://github.com/thheller/grove-todo)) as an example for getting started. You can just clone the [template repo](https://github.com/thheller/grove-todo) or copy what you need. Explanations of the different parts will follow.
 
-The core structures in `shadow.grove` are modular so each piece needs to be setup separately. You only initialize what you need when you need it. The minimum we need to create is the database and the runtime holding out our other "state". I recommend creating this in a dedicated namespace.
+The core structures in `shadow.grove` are modular so each piece needs to be setup separately. You only initialize what you need when you need it. The minimum we need to create is the database and the runtime holding out our other "state". I recommend creating this in a [dedicated namespace](https://github.com/thheller/grove-todo/blob/main/src/main/todo/ui/env.cljs).
 
 ```clojure
 (ns todo.ui.env
@@ -98,12 +100,12 @@ In our main namespace we then initialize everything and render our views.
   (render))
 ```
 
-The views namespace contains all of our component code. Going over all of them here would get too long. Feel free to explore them though.
+The [views namespace](https://github.com/thheller/grove-todo/blob/main/src/main/todo/ui/views.cljs) contains all of our component code. Going over all of them here would get too long. Feel free to explore them though.
 
 The significant two pieces are the `defc` and `<<` macros.
 
-- `defc` creates components which manage data and events
 - `<<` creates arborist fragments, which represent one or more elements for our tree.
+- `defc` creates components which manage data and events
 
 ## Fragments
 
