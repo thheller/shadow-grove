@@ -1,5 +1,7 @@
 # shadow-grove
 
+[![Clojars Project](https://img.shields.io/clojars/v/com.thheller/shadow-grove.svg)](https://clojars.org/com.thheller/shadow-grove)
+
 `shadow-grove` is a combination of pieces required to build performant DOM-driven user interfaces, scaling from small to very large. The goal is to have something written in ClojureScript with no extra dependencies and excellent performance out of the box.
 
 The core pieces are
