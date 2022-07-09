@@ -1,4 +1,4 @@
-(defproject thheller/shadow-grove "0.1.0"
+(defproject com.thheller/shadow-grove "0.1.0"
   :description "WARNING: Experimental Code! Changing completely without notice! Do not use for anything but other experiments!"
   :url "http://github.com/thheller/shadow-experiments"
   :license {:name "Eclipse Public License"
@@ -25,11 +25,9 @@
   {:dev
    {:source-paths ["src/dev"]
     :dependencies
-    [[hiccup "1.0.5"]
-     [metosin/reitit-core "0.5.12"]
-     [thheller/shadow-undertow "0.1.0"]]}
-   :cljs-dev ;; using this in shadow-cljs so can't use dev profile (Cursive complains about circular dep)
+    []}
+   :cljs-dev
    {:dependencies
-    [[thheller/shadow-cljs "2.11.22"]
+    [[thheller/shadow-cljs "2.19.5"]
      ]}})
 

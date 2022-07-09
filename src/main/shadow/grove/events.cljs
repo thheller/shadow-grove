@@ -161,29 +161,13 @@
     (identical? (::tx-guard tx-env) (::tx-guard result))
     result
 
-    ;; naively merge result into tx-env overwriting values
-    ;; and using proper queue-fx for registered fx entries
-    ;; does not warn about unknown key/vals
-    ;; makes no attempt to deep merge values except ::fx
-    ;; FIXME: I'm not sure this is at all worth doing
-    ;; maybe just enforce handlers returning updated tx-env?
     :else
-    (let [fx-config (::rt/fx-config tx-env)]
-      (reduce-kv
-        (fn [env rkey rval]
-          (cond
-            (contains? fx-config rkey)
-            (queue-fx env rkey rval)
-
-            (= ::fx rkey)
-            (update env ::fx into rval)
-
-            ;; FIXME: should this just accept :db or ::fx and warn on all others?
-            ;; typo in fx name just disappear silently
-            :else
-            (assoc env rkey rval)))
-        tx-env
-        result))))
+    (throw
+      (ex-info
+        (str "tx handler returned invalid result for event" (:e ev) ", expected a modified env")
+        {:event ev
+         :env tx-env
+         :result result}))))
 
 (defn tx*
   [{::rt/keys [data-ref event-config fx-config]
@@ -238,52 +222,63 @@
             (invalidate-keys! env keys-new keys-removed keys-updated))
 
           (when-some [tx-reporter (::tx-reporter env)]
-            (let [report
-                  {:event ev
-                   :origin origin
-                   :keys-new keys-new
-                   :keys-removed keys-removed
-                   :keys-updated keys-updated
-                   :fx (::fx result)
-                   :db-before before
-                   :db-after data
-                   :env env
-                   :env-changes
-                   (reduce-kv
-                     (fn [report rkey rval]
-                       (if (identical? rval (get env rkey))
-                         report
-                         (assoc report rkey rval)))
-                     {}
-                     (dissoc result :db ::fx ::tx-guard :transact!))}]
+            ;; dispatch tx-reporter async so it doesn't hold up rendering
+            ;; the only purpose of this is debugging anyways
+            (js/setTimeout
+              (fn []
+                (let [report
+                      {:event ev
+                       :origin origin
+                       :keys-new keys-new
+                       :keys-removed keys-removed
+                       :keys-updated keys-updated
+                       :fx (::fx result)
+                       :db-before before
+                       :db-after data
+                       :env env
+                       :env-changes
+                       (reduce-kv
+                         (fn [report rkey rval]
+                           (if (identical? rval (get env rkey))
+                             report
+                             (assoc report rkey rval)))
+                         {}
+                         (dissoc result :db ::fx ::tx-guard :transact!))}]
 
-              (tx-reporter report)))
+                  (tx-reporter report))))
+            1)
 
           ;; FIXME: re-frame allows fx to edit db but we already committed it
           ;; currently not checking fx-fn return value at all since they supposed to run side effects only
           ;; and may still edit stuff in env, just not db?
-          (doseq [[fx-key value] (::fx result)]
-            (let [fx-fn (get fx-config fx-key)
 
-                  fx-env
-                  (assoc result
-                    ;; creating this here so we can easily track which fx caused further work
-                    ;; technically all fx could run-now! directly given they have the scheduler from the env
-                    ;; but here we can easily track tx-done-ref to ensure fx doesn't actually immediately trigger
-                    ;; other events when they shouldn't because this is still in run-now! itself
-                    ;; FIXME: remove this once this is handled directly in the scheduler
-                    ;; run-now! inside run-now! should be a hard error
-                    :transact!
-                    (fn [fx-tx]
-                      (when-not @tx-done-ref
-                        (throw (ex-info "cannot start another tx yet, current one is still running. transact! is meant for async events" {})))
+          ;; dispatching async so render can get to it sooner
+          ;; dispatching these async since they can never do anything that affects the current render right?
+          (js/setTimeout
+            (fn []
+              (doseq [[fx-key value] (::fx result)]
+                (let [fx-fn (get fx-config fx-key)
 
-                      (rt/run-now! ^not-native (::rt/scheduler env) #(tx* env fx-tx origin) [::fx-transact! fx-key])))]
+                      fx-env
+                      (assoc result
+                        ;; creating this here so we can easily track which fx caused further work
+                        ;; technically all fx could run-now! directly given they have the scheduler from the env
+                        ;; but here we can easily track tx-done-ref to ensure fx doesn't actually immediately trigger
+                        ;; other events when they shouldn't because this is still in run-now! itself
+                        ;; FIXME: remove this once this is handled directly in the scheduler
+                        ;; run-now! inside run-now! should be a hard error
+                        :transact!
+                        (fn [fx-tx]
+                          (when-not @tx-done-ref
+                            (throw (ex-info "cannot start another tx yet, current one is still running. transact! is meant for async events" {})))
 
-              (if-not fx-fn
-                (throw (ex-info (str "unknown fx " fx-key) {:fx-key fx-key :fx-value value}))
+                          (rt/run-now! ^not-native (::rt/scheduler env) #(tx* env fx-tx origin) [::fx-transact! fx-key])))]
 
-                (fx-fn fx-env value))))
+                  (if-not fx-fn
+                    (throw (ex-info (str "unknown fx " fx-key) {:fx-key fx-key :fx-value value}))
+
+                    (fx-fn fx-env value)))))
+            0)
 
           (reset! tx-done-ref true)
 

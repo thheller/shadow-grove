@@ -7,19 +7,13 @@
  :jvm-opts
  ["-XX:-OmitStackTraceInFastThrow"]
 
- :version
- "2.18.0"
-
  :dependencies
- [[metosin/reitit-core "0.5.12"]
-  [com.wsscode/pathom "2.2.28"]
-  ;; for benchmark purposes, not actually a dependency
-  [reagent "0.9.0-rc3"]]
+ ;; for benchmark purposes, not actually a dependency
+ [[reagent "0.9.0-rc3"]]
 
  :dev-http
  {3005 "public"
   3006 "examples/todomvc"
-  3007 "examples/todomvc-split"
   3008 "examples/suspense"
   3009 "examples/bench-fragment"
   3010 "out/browser-test"
@@ -76,38 +70,11 @@
    :test-dir "out/browser-test"
    :compiler-options {:output-feature-set :es-next}}
 
-  :todomvc-simple
-  {:target :browser
-   :output-dir "examples/todomvc/js"
-   :modules {:main {:init-fn todomvc.simple/init
-                    :preloads [shadow.grove.dev-support]}}}
-
-  :todomvc-single
-  {:target :browser
-   :output-dir "examples/todomvc/js"
-   :modules {:main {:init-fn todomvc.split.single/init
-                    :preloads [shadow.grove.dev-support]}}}
-
   :suspense
   {:target :browser
    :output-dir "examples/suspense/js"
    :modules {:main {:init-fn dummy.suspense/init
                     :preloads [shadow.grove.dev-support]}}}
-
-  :todomvc-split
-  {:target :browser
-   :output-dir "examples/todomvc-split/js"
-   :modules
-   {:shared
-    {:entries []}
-    :main
-    {:init-fn todomvc.split.main/init
-     :preloads [shadow.grove.dev-support]
-     :depends-on #{:shared}}
-    :worker
-    {:init-fn todomvc.split.worker/init
-     :web-worker true
-     :depends-on #{:shared}}}}
 
   :bench-db
   {:target :node-script
