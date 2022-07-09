@@ -1,6 +1,6 @@
 (defproject com.thheller/shadow-grove "0.1.0"
-  :description "WARNING: Experimental Code! Changing completely without notice! Do not use for anything but other experiments!"
-  :url "http://github.com/thheller/shadow-experiments"
+  :description "A ClojureScript system to build browser based frontends"
+  :url "http://github.com/thheller/shadow-grove"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
 
