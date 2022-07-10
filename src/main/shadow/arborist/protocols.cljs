@@ -1,5 +1,4 @@
-(ns shadow.arborist.protocols
-  (:refer-clojure :exclude #{swap!}))
+(ns shadow.arborist.protocols)
 
 (defprotocol IManaged
   (^boolean supports? [this next])
