@@ -63,11 +63,12 @@
 
       :else
       ;; FIXME: alias support
-      (do (when ^boolean js/goog.DEBUG
-            (when (lazy-seq? calced)
-              (throw (ex-info (str "the lookup of attribute " kw " returned a lazy sequence. Attributes must not return lazy sequences. Realize the result before returning (eg. doall).")
-                       {:kw kw
-                        :result calced}))))
+      (do #?(:cljs
+             (when ^boolean js/goog.DEBUG
+               (when (lazy-seq? calced)
+                 (throw (ex-info (str "the lookup of attribute " kw " returned a lazy sequence. Attributes must not return lazy sequences. Realize the result before returning (eg. doall).")
+                          {:kw kw
+                           :result calced})))))
           (assoc! result kw calced)))))
 
 ;; FIXME: this tracking of :db/loading is really annoying, should probably just throw instead?
