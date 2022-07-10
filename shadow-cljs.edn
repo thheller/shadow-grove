@@ -2,7 +2,9 @@
 {:source-paths
  ["src/dev"
   "src/main"
-  "src/test"]
+  "src/test"
+  ;; for easier testing with the example app
+  "../grove-todo/src/main"]
 
  :jvm-opts
  ["-XX:-OmitStackTraceInFastThrow"]
@@ -13,7 +15,7 @@
 
  :dev-http
  {3005 "public"
-  3006 "examples/todomvc"
+  3006 "../grove-todo/public"
   3008 "examples/suspense"
   3009 "examples/bench-fragment"
   3010 "out/browser-test"
@@ -69,6 +71,12 @@
   {:target :browser-test
    :test-dir "out/browser-test"
    :compiler-options {:output-feature-set :es-next}}
+
+  :todo
+  {:target :browser
+   :output-dir "../grove-todo/public/js"
+   :modules {:main {:init-fn todo.ui/init
+                    :preloads [shadow.grove.dev-support]}}}
 
   :suspense
   {:target :browser

@@ -221,40 +221,13 @@
           (when-not (identical? before data)
             (invalidate-keys! env keys-new keys-removed keys-updated))
 
-          (when-some [tx-reporter (::tx-reporter env)]
-            ;; dispatch tx-reporter async so it doesn't hold up rendering
-            ;; the only purpose of this is debugging anyways
-            (js/setTimeout
-              (fn []
-                (let [report
-                      {:event ev
-                       :origin origin
-                       :keys-new keys-new
-                       :keys-removed keys-removed
-                       :keys-updated keys-updated
-                       :fx (::fx result)
-                       :db-before before
-                       :db-after data
-                       :env env
-                       :env-changes
-                       (reduce-kv
-                         (fn [report rkey rval]
-                           (if (identical? rval (get env rkey))
-                             report
-                             (assoc report rkey rval)))
-                         {}
-                         (dissoc result :db ::fx ::tx-guard :transact!))}]
-
-                  (tx-reporter report))))
-            1)
-
           ;; FIXME: re-frame allows fx to edit db but we already committed it
           ;; currently not checking fx-fn return value at all since they supposed to run side effects only
           ;; and may still edit stuff in env, just not db?
 
           ;; dispatching async so render can get to it sooner
           ;; dispatching these async since they can never do anything that affects the current render right?
-          (js/setTimeout
+          (rt/next-tick
             (fn []
               (doseq [[fx-key value] (::fx result)]
                 (let [fx-fn (get fx-config fx-key)
@@ -277,8 +250,33 @@
                   (if-not fx-fn
                     (throw (ex-info (str "unknown fx " fx-key) {:fx-key fx-key :fx-value value}))
 
-                    (fx-fn fx-env value)))))
-            0)
+                    (fx-fn fx-env value))))))
+
+          (when-some [tx-reporter (::tx-reporter env)]
+            ;; dispatch tx-reporter async so it doesn't hold up rendering
+            ;; the only purpose of this is debugging anyways
+            (rt/next-tick
+              (fn []
+                (let [report
+                      {:event ev
+                       :origin origin
+                       :keys-new keys-new
+                       :keys-removed keys-removed
+                       :keys-updated keys-updated
+                       :fx (::fx result)
+                       :db-before before
+                       :db-after data
+                       :env env
+                       :env-changes
+                       (reduce-kv
+                         (fn [report rkey rval]
+                           (if (identical? rval (get env rkey))
+                             report
+                             (assoc report rkey rval)))
+                         {}
+                         (dissoc result :db ::fx ::tx-guard :transact!))}]
+
+                  (tx-reporter report)))))
 
           (reset! tx-done-ref true)
 
