@@ -200,25 +200,27 @@ Normalizing this db, we instead end up with
 
 ```clojure
 {:products
- [[:product 1]
-  [:product 2]]
+ [#gdb/ident [:product 1]
+  #gdb/ident [:product 2]]
  
- [:product 1]
+ #gdb/ident [:product 1]
  {:product-id 1
   :product-name "Foo"
-  :manufacturer [:manufacturer 1]}
+  :manufacturer #gdb/ident [:manufacturer 1]}
 
- [:product 2]
+ #gdb/ident [:product 2]
  {:product-id 2
   :product-name "Bar"
-  :manufacturer [:manufacturer 1]}
+  :manufacturer #gdb/ident [:manufacturer 1]}
  
- [:manufacturer 1]
+ #gdb/ident [:manufacturer 1]
  {:manufacturer-id 1
   :manufacturer-name "ACME"}}
 ```
 
-Each entity is represented by an ident, using a vector here. It is used as a reference and can be used to get the actual value from the DB. This is common in EQL like systems (eg. fulcro, om.next, pathom). Each ident is composed of `[entity-type id]`. You may also think of this as `[table-name id]` when using a SQL database in the backend. Note that having multiple entity types is entirely optional, but convenient depending on the shape of your actual data requirements.
+Each entity is represented by an ident (using the `#gdb/ident` tag here). It is used as a reference and can be used to get the actual value from the DB.
+
+Similar to other EQL like systems (eg. fulcro, om.next, pathom), idents are a combination of `entity-type` and `id`. You may also think of this as `table-name` and `id` when using a SQL database in the backend. Just like in SQL if you just have `id=1` you don't know which table you need to get it from. Note that having multiple entity types is entirely optional, but convenient depending on the shape of your actual data requirements.
 
 More on the database here (TBD).
 
