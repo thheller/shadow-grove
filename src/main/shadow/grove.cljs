@@ -52,8 +52,7 @@
   ([ident query]
    (query-ident ident query {}))
   ([ident query config]
-   {:pre [;; (db/ident? ident) FIXME: can't access db namespace in main, move to protocols?
-          (db/ident? ident)
+   {:pre [(db/ident? ident)
           (vector? query)
           (map? config)]}
    (QueryInit. ident query config)))
