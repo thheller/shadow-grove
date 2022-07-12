@@ -1,5 +1,6 @@
 (ns shadow.grove.db
-  (:refer-clojure :exclude #{ident? remove}))
+  (:refer-clojure :exclude (ident? remove))
+  (:require [shadow.grove.db.ident :as ident]))
 
 #?(:cljs
    (set! *warn-on-infer* false))
@@ -9,7 +10,30 @@
      (identical? a b)))
 
 (defn make-ident [type id]
-  [type id])
+  (ident/Ident. type id nil)
+  ;; [type id]
+  )
+
+
+(defn ident? [thing]
+  (instance? ident/Ident thing)
+  #_(and (vector? thing)
+         (= (count thing) 2)
+         (keyword? (first thing))))
+
+(defn ident-key [^Ident thing]
+  {:pre [(ident? thing)]}
+  ;; (nth thing 0)
+  (.-entity-type thing))
+
+(defn ident-val [^Ident thing]
+  {:pre [(ident? thing)]}
+  ;;(nth thing 1)
+  (.-id thing))
+
+(defn ident-as-vec [ident]
+  [(ident-key ident)
+   (ident-val ident)])
 
 (defn parse-joins [spec joins]
   (reduce-kv
@@ -68,11 +92,6 @@
     {:entities {}}
     spec))
 
-(defn ident? [thing]
-  (and (vector? thing)
-       (= (count thing) 2)
-       (keyword? (first thing))))
-
 (defn nav-fn [db key val]
   (cond
     (ident? val)
@@ -103,17 +122,11 @@
 
     (with-meta init-db m)))
 
-(defn ident-key [thing]
-  {:pre [(ident? thing)]}
-  (nth thing 0))
 
 (defn coll-key [thing]
   {:pre [(ident? thing)]}
   [::all (ident-key thing)])
 
-(defn ident-val [thing]
-  {:pre [(ident? thing)]}
-  (nth thing 1))
 
 (defn- normalize* [imports schema entity-type item]
   (let [{:keys [ident-gen id-pred joins] :as ent-config}

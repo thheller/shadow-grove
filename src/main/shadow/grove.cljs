@@ -16,7 +16,8 @@
     [shadow.grove.ui.suspense :as suspense]
     [shadow.grove.ui.atoms :as atoms]
     [shadow.grove.ui.portal :as portal]
-    [shadow.arborist.attributes :as a]))
+    [shadow.arborist.attributes :as a]
+    [shadow.grove.db :as db]))
 
 (set! *warn-on-infer* false)
 
@@ -44,7 +45,7 @@
 (defn query-ident
   ;; shortcut for ident lookups that can skip EQL queries
   ([ident]
-   {:pre [(vector? ident)]}
+   {:pre [(db/ident? ident)]}
    (QueryInit. ident nil {}))
 
   ;; EQL queries
@@ -52,8 +53,7 @@
    (query-ident ident query {}))
   ([ident query config]
    {:pre [;; (db/ident? ident) FIXME: can't access db namespace in main, move to protocols?
-          (vector? ident)
-          (keyword? (first ident))
+          (db/ident? ident)
           (vector? query)
           (map? config)]}
    (QueryInit. ident query config)))

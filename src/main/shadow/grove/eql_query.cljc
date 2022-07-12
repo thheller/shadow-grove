@@ -1,5 +1,6 @@
 (ns shadow.grove.eql-query
-  "minimal EQL query engine")
+  "minimal EQL query engine"
+  (:require [shadow.grove.db :as db]))
 
 ;; ideally would like to use pathom but currently that carries too much overhead
 ;; and is over 10x slower for small simple queries. assuming that a page
@@ -24,11 +25,6 @@
 #?(:clj
    (defn keyword-identical? [x y]
      (identical? x y)))
-
-(defn eql-ident? [thing]
-  (and (vector? thing)
-       (= 2 (count thing))
-       (keyword (nth thing 0))))
 
 (defn lazy-seq? [thing]
   (and (instance? #?(:clj clojure.lang.LazySeq :cljs cljs.core/LazySeq) thing)
@@ -124,7 +120,7 @@
                 ;; {:some-prop [:some-other-ident 123]}
                 ;; FIXME: buggy if val is [:foo :bar] (just a vector of two keywords, no ident)
                 ;; but then the user shouldn't be trying to join so should be fine
-                (eql-ident? join-val)
+                (db/ident? join-val)
                 (let [val (get db join-val ::missing)]
                   (cond
                     (keyword-identical? ::missing val)
@@ -160,7 +156,7 @@
                   (mapv
                     (fn [join-item]
                       (cond
-                        (eql-ident? join-item)
+                        (db/ident? join-item)
                         (let [joined (get db join-item)]
                           (if (map? joined)
                             (query env db joined join-attrs)
@@ -183,7 +179,7 @@
                 (throw (ex-info "don't know how to join" {:query-part query-part :join-val join-val :join-key join-key}))))
 
             ;; from root
-            (eql-ident? join-key)
+            (db/ident? join-key)
             (let [join-val (get db join-key)]
               (cond
                 (keyword-identical? :db/loading join-val)

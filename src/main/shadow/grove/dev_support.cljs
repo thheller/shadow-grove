@@ -11,6 +11,8 @@
     [shadow.grove :as sg]
     [shadow.grove.protocols :as sp]
     [shadow.arborist :as sa]
+    [shadow.grove.db :as db]
+    [shadow.grove.db.ident :as db-ident]
     [shadow.grove.protocols :as gp]
     [shadow.grove.local :as local]))
 
@@ -137,21 +139,31 @@
         (transient #{})
         (.values this)))))
 
-(comment
-  (extend-type sp/Ident
-    cp/Datafiable
-    (datafy [this]
-      [(.-entity-type this)
-       (.-id this)])
+(extend-type db-ident/Ident
+  cp/Datafiable
+  (datafy [this]
+    [(db/ident-key this)
+     (db/ident-val this)]))
 
-    IPrintWithWriter
-    (-pr-writer [this writer opts]
-      (-write writer "#db-ident ")
-      (-pr-writer
-        [(.-entity-type this)
-         (.-id this)]
-        writer
-        opts))))
+(deftype IdentFormatter []
+  Object
+  (header [this obj]
+    (when (db/ident? obj)
+      #js ["span" "#gbd/ident ["
+           #js ["object" #js {:object (db/ident-key obj)}]
+           " "
+           #js ["object" #js {:object (db/ident-val obj)}]
+           "]"]))
+
+  (hasBody [this obj]
+    false)
+  (body [this m]
+    nil))
+
+(when-let [^js f js/goog.global.devtoolsFormatters]
+  (doto f
+    (.push (IdentFormatter.))
+    ))
 
 (defn find-owning-component [e]
   (loop [current (.. e -target)]
