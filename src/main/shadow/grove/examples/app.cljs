@@ -117,8 +117,8 @@
 (def source-ref (atom ""))
 
 (ev/reg-event env/rt-ref ::m/select-tab!
-  (fn [{:keys [db] :as env} {:keys [tab] :as e}]
-    {:db (assoc db ::m/example-tab tab)}))
+  (fn [env {:keys [tab] :as e}]
+    (assoc-in env [:db ::m/example-tab] tab)))
 
 (ev/reg-event env/rt-ref ::m/compile-result!
   (fn [env {:keys [formatted-source ns]}]
@@ -137,27 +137,32 @@
               (get-only-entry)
               (gobj/get "content"))]
 
-      {:db (assoc db ::m/example-code code
-                     ::m/example-result "Compiling ...")
-       :cljs-compile code})))
+      (-> env
+          (update :db assoc
+            ::m/example-code code
+            ::m/example-result "Compiling ...")
+          (ev/queue-fx :cljs-compile code)))))
 
 (ev/reg-event env/rt-ref ::m/load-gist!
   (fn [{:keys [db] :as env} {:keys [gist-id] :as e}]
-    {:db
-     (assoc db ::m/gist-id gist-id ::m/example-code ";; Loading Gist ...")
+    (-> env
+        (update :db assoc
+          ::m/gist-id gist-id
+          ::m/example-code ";; Loading Gist ...")
+        (ev/queue-fx :gist-api
+          {:request
+           {:uri gist-id}
 
-     :gist-api
-     {:request
-      {:uri gist-id}
-
-      :on-success
-      {:e ::m/gist-loaded! :gist-id gist-id}}}))
+           :on-success
+           {:e ::m/gist-loaded! :gist-id gist-id}}))))
 
 (ev/reg-event env/rt-ref ::m/compile!
   (fn [{:keys [db] :as env} {:keys [code] :as e}]
-    {:db (assoc db ::m/example-code code
-                   ::m/example-ns nil)
-     :cljs-compile code}))
+    (-> env
+        (update :db assoc
+          ::m/example-code code
+          ::m/example-ns nil)
+        (ev/queue-fx :cljs-compile code))))
 
 (ev/reg-fx env/rt-ref :cljs-compile
   (fn [{:keys [transact!] :as env} code]
