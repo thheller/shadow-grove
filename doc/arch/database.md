@@ -69,7 +69,7 @@ They are usually constructed by the normalizing functions which use the supplied
 
 ## Read Tracking
 
-It is not sufficient to just have a map that we can read from. Often we will also need to keep track of what was read.
+To efficiently update "places" (UI) that read an information, it is not sufficient to have a map that we can read from. We will also need to track what was read.
 
 This is done via the `db/observed` implementation. It wraps ClojureScript persistent map and acts as just a map would. It's read-only; it cannot be modified.
 
@@ -80,7 +80,7 @@ This is done via the `db/observed` implementation. It wraps ClojureScript persis
 
 (def observed (db/observed data))
 
-(:x observed)
+(:x observed) ;; or (get observed :x), get-in also fine
 
 (assoc observed :z 1) ;; throws
 
