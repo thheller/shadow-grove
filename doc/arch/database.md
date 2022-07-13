@@ -1,16 +1,16 @@
 # shadow.grove.db
 
-Probably the most essential piece of the entire system is the database implementation. It must fulfill these basic requirements
+Probably the most essential piece of the entire system is the database implementation. It must fulfil these basic requirements
 
 - fast to read
 - fast to update
 - easy to work with
 
-Because of these requirements the database is just a ClojureScript persistent map, with some metadata (schema) attached. It'll usually live in an `atom`, constructed once per app.
+Because of these requirements the database is a ClojureScript persistent map, with some metadata (schema) attached. It'll usually live in an `atom`, constructed once per app.
 
-Using some helper functions, and the attached metadata, this data is normalized to keep the structure flat and avoid repeating data all over the place.
+Using some helper functions, and the attached metadata, this data is normalized; keeping the structure flat and avoiding repetition.
 
-A few things are required so that we can actually fulfill our requirements.
+A few things are required to fulfil our requirements.
 
 ## Data Normalization
 
@@ -28,7 +28,7 @@ Suppose the following example:
                   :manufacturer-name "ACME"}}]}
 ```
 
-Storing this shape in our database would end up with duplicated data since both products are from the same manufacturer. This becomes messy and hard to work with over time. We also want more efficient access to data without having to traverse deeply into some nested structure.
+Storing this shape in our database would end up with duplicated data since both products are from the same manufacturer. This becomes messy and it's hard to work with. Additionally want efficient access to data without traversing a nested structure.
 
 Normalizing this db, we instead end up with
 
@@ -52,18 +52,18 @@ Normalizing this db, we instead end up with
   :manufacturer-name "ACME"}}
 ```
 
-All entities are pulled to the top and are assigned an "ident", The duplication is also removed. We can now access the manufacturer directly and quickly update it (eg. `(update db manufacturer-ident assoc :manufacturer-name "Foo Inc.")`) without having to find all the places it was stored first.
+All entities are pulled to the top leve (flat) and are assigned an "ident", The duplication is removed. We can now access the manufacturer directly and quickly update it (eg. `(update db manufacturer-ident assoc :manufacturer-name "Foo Inc.")`) without having to find all the places it was stored first.
 
 ## Idents
 
 Idents represent the combination of an `entity-type` and a generic `id`.
 
 - `entity-type` must be a keyword (ideally namespaced)
-- `id` can be anything. Often they'll be UUIDs or just numbers, strings
+- `id` can be anything. Often they'll be UUIDs, numbers, or strings
 
-This combination is often necessary since many DB system (eg. SQL) store data in different tables. `entity-type` would represent the `table` and `id` would identify a specific row in that table. If your data model requirements don't need "tables" it is fine to just use the same `entity-type` everywhere.
+This combination is necessary since many DB system (eg. SQL) store data in different tables. `entity-type` would represent the `table` and `id` would identify a specific row in that table. If your data model requirements don't need "tables" it's fine to use the same `entity-type` everywhere.
 
-Idents are their own `deftype` so they are easily identifiable by the normalization and query mechanism, also for humans of course.
+Idents are their own `deftype` so they are easily identifiable by the normalization, query mechanism, and humans of course.
 
 They are usually constructed by the normalizing functions which use the supplied schema to extract a `:primary-key` and use that as the `id`. They can be constructed easily via `(db/make-ident entity-type id)`.
 
@@ -71,7 +71,7 @@ They are usually constructed by the normalizing functions which use the supplied
 
 It is not sufficient to just have a map that we can read from. Often we will also need to keep track of what was read.
 
-This is done via the `db/observed` implementation. It just wraps our regular map but still acts as just a map, which however is read-only. It cannot be modified.
+This is done via the `db/observed` implementation. It wraps ClojureScript persistent map and acts as just a map would. It's read-only; it cannot be modified.
 
 ```clojure
 (require '[shadow.grove.db :as db])
@@ -87,7 +87,7 @@ This is done via the `db/observed` implementation. It just wraps our regular map
 (db/observed-keys observed)
 ```
 
-This will give use `#{:x}`. This is very cheap to collect and essential later.
+This will give us `#{:x}`. This is very cheap to collect and essential later.
 
 The relevant implementations that actually read from the database (eg. `sg/query-ident` and `sg/query-root`) will keep track of this info, so they can be notified when they need to update.
 
@@ -116,9 +116,9 @@ This will yield the following
 
 The "transaction" collected which keys where added, removed or updated. This lets us notify the things that read from the db very efficiently.
 
-The user will just work with the transacted instance, which acts just like a map and should be treated as such. The event system will take care of providing the `transacted` instance of properly managing the `commit!` results.
+The user will  work with the transacted instance, which acts like a map and should be treated as such. The event system will take care of providing the `transacted` instance of properly managing the `commit!` results.
 
-Note here that this is only tracking the top level keys. It does not look at nested structures at all. Since we normalized the data to begin with this is not a problem. Tracking nested data is certainly possible but also much more expensive.
+Note here that this is only tracking the top level keys. It does not look at nested structures at all. Since we normalized the data this is not a problem. Tracking nested data is certainly possible but also much more expensive.
 
 ## Schema
 
@@ -191,9 +191,9 @@ Here we imported the regular products vector and normalized it using the `schema
  :keys-removed ...}
 ```
 
-Note that the `transacted` helper also maintains a few extra collections, so we can easily traverse all `:product` or `:manufacturer` instances later without having to traverse the entire db.
+Note that the `transacted` helper maintains a few extra collections, therefore we can easily traverse all `:product` or `:manufacturer` instances later without having to traverse the entire db.
 
-The `db/merge-seq` call also just stored the products it imported under the `:products` key, that part is optional and can be omitted.
+The `db/merge-seq` call stored the products it imported under the `:products` key, that part is optional and can be omitted.
 
 `db/add` would add a single item.
 
@@ -244,7 +244,7 @@ Depending on the query complexity and frequency of affected updates it may be mo
 
 # API Considerations
 
-Systems such as Fulcro actually keep the data in nested collections, so you'd have `{:product {1 ... 2 ...} :manufacturer {1 ...}}` instead. This also sort of requires Idents to be vectors, which is of course why they are stored that way in the first place. This is of course perfectly viable, but makes the read/write tracking much more complicated.
+Systems such as Fulcro keep the data in nested collections, so you'd have `{:product {1 ... 2 ...} :manufacturer {1 ...}}` instead. This also sort of requires Idents to be vectors, which is of course why they are stored that way in the first place. This is of course perfectly viable, but makes the read/write tracking much more complicated.
 
 I also happen to prefer `(assoc-in db [product-ident :stock] new-stock)` over `(assoc-in db (conj product-ident :stock) new-stock)`. Of course Fulcro has many more utility functions for this, so this ident modification is hidden. I prefer to skip the nesting.
 
