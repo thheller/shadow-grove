@@ -767,6 +767,21 @@
                  completed-ref))
              ))))
 
+     ICollection
+     (-conj [coll ^not-native entry]
+       (if (vector? entry)
+         (-assoc coll (-nth entry 0) (-nth entry 1))
+         (loop [^not-native ret coll
+                es (seq entry)]
+           (if (nil? es)
+             ret
+             (let [^not-native e (first es)]
+               (if (vector? e)
+                 (recur
+                   (-assoc ret (-nth e 0) (-nth e 1))
+                   (next es))
+                 (throw (js/Error. "conj on a map takes map entries or seqables of map entries"))))))))
+
      ITxCommit
      (commit! [_]
        (vreset! completed-ref true)
