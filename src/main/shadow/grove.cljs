@@ -17,7 +17,8 @@
     [shadow.grove.ui.atoms :as atoms]
     [shadow.grove.ui.portal :as portal]
     [shadow.arborist.attributes :as a]
-    [shadow.grove.db :as db]))
+    [shadow.grove.db :as db]
+    [shadow.grove.css]))
 
 (set! *warn-on-infer* false)
 

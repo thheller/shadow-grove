@@ -20,7 +20,8 @@
   3009 "examples/bench-fragment"
   3010 "out/browser-test"
   3011 "examples/app/public"
-  3013 "examples/ui"}
+  3013 "examples/ui"
+  3014 "examples/dummy"}
 
  :build-defaults
  {:compiler-options
@@ -33,6 +34,13 @@
   {:target :browser
    :output-dir "examples/ui/js"
    :modules {:main {:init-fn dummy.ui/init}}}
+
+  :dummy
+  {:target :browser
+   :output-dir "examples/dummy/assets"
+   :asset-path "/assets"
+   :build-hooks [(shadow.grove.css.build/hook)]
+   :modules {:main {:init-fn dummy.app/init}}}
 
   :examples-bootstrap
   {:target :bootstrap
