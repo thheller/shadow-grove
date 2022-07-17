@@ -43,7 +43,7 @@
           :sel (str "." class-id))]
 
 
-    (if false ;; -not (:ns &env)
+    (if-not (:ns &env)
       ;; expanding CLJ, just store in atom
       (do (swap! class-defs assoc class-id class-def)
           `(get-class ~class-id))
