@@ -50,11 +50,11 @@
                        :js
                        (str "goog.provide(\"shadow.grove.css.defs\");\n"
                             (->> all
-                                 (map (fn [{:keys [class-id]}]
+                                 (map (fn [{:keys [css-id]}]
                                         ;; for development we just use the selector classname
                                         ;; for production it should collapse rules and may end up using
                                         ;; multiple classes to represent one css call
-                                        (str "shadow.grove.css.defs." class-id " = \"" class-id "\";")))
+                                        (str "shadow.grove.css.defs." css-id " = \"" css-id "\";")))
                                  (str/join "\n"))
                             )))))
         ;; tell client to reload the output we generated

@@ -1,23 +1,12 @@
 (ns shadow.grove.css.generate
   (:require [shadow.grove.css.specs :as s]
             [clojure.string :as str]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [clojure.edn :as edn])
   (:import [java.io StringWriter Writer]))
 
 (defn lookup-alias [index alias-kw]
-  (case alias-kw
-    :px-4
-    {:padding-bottom "4px"
-     :padding-top "4px"}
-
-    :px-8
-    {:padding-bottom "8px"
-     :padding-top "8px"}
-
-    :flex
-    {:flex "1"}
-
-    nil))
+  (get-in index [:aliases alias-kw]))
 
 (defn lookup-var [index var-kw]
   (case var-kw
@@ -33,14 +22,25 @@
     "@media (min-width: 1536px)"
     nil))
 
+(def plain-numeric-props
+  #{:flex :order :flex-shrink :flex-grow})
+
 (defn convert-num-val [index prop num]
-  ;; FIXME: use tailwind number schema instead an emit rem
-  (str num "px"))
+  (if (contains? plain-numeric-props prop)
+    (str num)
+    (or (get-in index [:svc :spacing num])
+        (throw
+          (ex-info
+            (str "invalid numeric value for prop " prop)
+            {:prop prop :num num})))))
 
 (defn add-warning [{:keys [current] :as index} warning-type warning-vals]
   (update index :warnings conj (assoc warning-vals :warning warning-type :current current)))
 
+(declare add-part)
+
 (defn add-alias [index alias-kw]
+  ;; FIXME: aliases should be allowed to be any other part, and act accordingly
   (let [alias-val (lookup-alias index alias-kw)]
     (if-not alias-val
       (add-warning index ::missing-alias {:alias alias-kw})
@@ -92,8 +92,6 @@
 
     index
     defs))
-
-(declare add-part)
 
 (defn current-to-defs [{:keys [current] :as index}]
   (-> index
@@ -151,13 +149,13 @@
     :group
     (add-group index part-val)))
 
-(defn generate-1 [index current]
+(defn generate-1 [index {:keys [css-id] :as current}]
   (-> (reduce add-part
         (assoc index
           :current
           (-> current
               (dissoc :parts)
-              (assoc :rules {} :at-rules [])))
+              (assoc :rules {} :at-rules [] :sel (str "." css-id))))
         (:parts current))
       (current-to-defs)))
 
@@ -200,8 +198,8 @@
       (emitln w rule " {"))
 
     (emitln w prefix sel " {")
-    (doseq [[prop val] rules]
-      (emitln w "  " prefix (name prop) ": " val ";"))
+    (doseq [prop (sort (keys rules))]
+      (emitln w "  " prefix (name prop) ": " (get rules prop) ";"))
 
     (emits w "}")
 
@@ -230,11 +228,92 @@
       {:css css
        :warnings warnings})))
 
+;; same naming patterns tailwind uses
+(def spacing-alias-groups
+  {"px-" [:padding-left :padding-right]
+   "py-" [:padding-top :padding-bottom]
+   "p-" [:padding]
+   "mx-" [:margin-left :margin-right]
+   "my-" [:margin-top :margin-bottom]
+   "w-" [:width]
+   "max-w-" [:max-width]
+   "h-" [:height]
+   "max-h-" [:max-height]
+   "basis-" [:flex-basis]
+   "gap-" [:gap]
+   "gap-x-" [:column-gap]
+   "gap-y-" [:row-gap]})
+
+(defn generate-default-aliases [{:keys [spacing] :as svc}]
+  (update svc :aliases
+    (fn [aliases]
+      (reduce-kv
+        (fn [aliases space-num space-val]
+          (reduce-kv
+            (fn [aliases prefix props]
+              (assoc aliases
+                (keyword (str prefix space-num))
+                (reduce #(assoc %1 %2 space-val) {} props)))
+            aliases
+            spacing-alias-groups))
+        aliases
+        spacing))))
+
+(defn load-default-aliases []
+  (edn/read-string (slurp (io/resource "shadow/grove/css/aliases.edn"))))
+
 (defn start []
-  {::svc true
-   :normalize-src (slurp (io/resource "shadow/grove/css/modern-normalize.css"))})
+  (-> {::svc true
+       :aliases
+       (load-default-aliases)
+
+       ;; https://tailwindcss.com/docs/customizing-spacing#default-spacing-scale
+       :spacing
+       {0 "0"
+        0.5 "0.125rem"
+        1 "0.25rem"
+        1.5 "0.375rem"
+        2 "0.5rem"
+        2.5 "0.626rem"
+        3 "0.75rem"
+        3.5 "0.875rem"
+        4 "1rem"
+        5 "1.25rem"
+        6 "1.5rem"
+        7 "1.75rem"
+        8 "2rem"
+        9 "2.25rem"
+        10 "2.5rem"
+        11 "2.75rem"
+        12 "3rem"
+        13 "3.25rem"
+        14 "3.5rem"
+        15 "3.75rem"
+        16 "4rem"
+        17 "4.25rem"
+        18 "4.5rem"
+        19 "4.75rem"
+        20 "5rem"
+        24 "6rem"
+        28 "7rem"
+        32 "8rem"
+        36 "9rem"
+        40 "10rem"
+        44 "11rem"
+        48 "12rem"
+        52 "13rem"
+        56 "14rem"
+        60 "15rem"
+        64 "16rem"
+        96 "24rem"}
+
+       :normalize-src
+       (slurp (io/resource "shadow/grove/css/modern-normalize.css"))}
+      (generate-default-aliases)))
 
 (comment
+  (tap> (start))
+
   (require 'clojure.pprint)
   (println
     (generate-css
@@ -244,5 +323,5 @@
                ["@media (prefers-color-scheme: dark)"
                 [:ui/md :px-8
                  ["&:hover" {:color "green"}]]]])
-           (assoc :sel ".test" :ns "foo.bar" :line 3 :column 1))])))
+           (assoc :css-id "foo" :ns "foo.bar" :line 3 :column 1))])))
 

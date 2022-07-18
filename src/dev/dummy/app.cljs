@@ -5,7 +5,7 @@
     [shadow.grove.runtime :as rt]))
 
 (defn ui-test []
-  (<< [:div {:class (css {:color "green"})} "hello world"]))
+  (<< [:div {:class (css :px-4 {:color "green"})} "hello world"]))
 
 (defonce root-el
   (js/document.getElementById "root"))
