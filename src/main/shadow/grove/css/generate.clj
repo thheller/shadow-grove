@@ -1,6 +1,8 @@
 (ns shadow.grove.css.generate
   (:require [shadow.grove.css.specs :as s]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clojure.java.io :as io])
+  (:import [java.io StringWriter Writer]))
 
 (defn lookup-alias [index alias-kw]
   (case alias-kw
@@ -45,7 +47,7 @@
       (update-in index [:current :rules] merge alias-val))))
 
 (defn add-var [index var-kw]
-  index)
+  (throw (ex-info "tbd" {:var-kw var-kw})))
 
 (defn add-map [index defs]
   (reduce-kv
@@ -95,7 +97,9 @@
 
 (defn current-to-defs [{:keys [current] :as index}]
   (-> index
-      (update :defs conj current)
+      (cond->
+        (seq (:rules current))
+        (update :defs conj current))
       (dissoc :current)))
 
 (defn make-selector [{:keys [sel] :as item} sub-sel]
@@ -161,34 +165,52 @@
   (-> (reduce generate-1 {:svc svc :warnings [] :defs []} class-defs)
       (dissoc :svc)))
 
-(defn make-selectors
-  [item]
-  (loop [{:keys [sel parent] :as x} item
-         path []]
-    (if-not parent
-      (conj path sel)
-      (recur parent [sel])
-      )))
+;; helper methods for eventual data collection for source mapping
+(defn emits
+  ([^Writer w ^String s]
+   (.write w s))
+  ([w s & more]
+   (emits w s)
+   (doseq [s more]
+     (emits w s))))
 
+(defn emitln
+  ([^Writer w]
+   (.write w "\n"))
+  ([^Writer w & args]
+   (doseq [s args]
+     (emits w s))
+   (emitln w)))
 
-;; formatting could be better but good enough for now
-(defn generate-css* [{:keys [sel at-rules ns line column rules] :as item}]
+;; argument order in case this ever moves to some kind of ast or protocols dispatching on first arg
+(defn emit-def [{:keys [sel at-rules ns line column rules] :as def} w svc]
   (let [prefix (str/join "" (map (constantly " ") at-rules))]
-    (str
-      (when ns
-        (str "/* " ns " " line ":" column " */\n"))
-      (reduce
-        (fn [s rule]
-          (str rule " {\n"
-               s
-               "\n}"))
-        (str prefix sel " {\n"
-             (->> rules
-                  (map (fn [[prop val]]
-                         (str "  " prefix (name prop) ": " val ";")))
-                  (str/join "\n"))
-             "\n}")
-        at-rules))))
+    (when ns
+      (emitln w (str "/* " ns " " line ":" column " */")))
+
+    ;; could be smarter and combine at-rules if there are multiple
+    ;;   @media (prefers-color-scheme: dark) {
+    ;;   @media (min-width: 768px) {
+    ;; could be
+    ;;  @media (prefers-color-scheme: dark) and (min-width: 768px)
+
+    ;; could also me smarter about rules and group all defs
+    ;; so each rule only needs to be emitted once
+    (doseq [rule at-rules]
+      (emitln w rule " {"))
+
+    (emitln w prefix sel " {")
+    (doseq [[prop val] rules]
+      (emitln w "  " prefix (name prop) ": " val ";"))
+
+    (emits w "}")
+
+    (doseq [_ at-rules]
+      (emits w "}"))
+
+    (emitln w)
+    (emitln w)
+    ))
 
 ;; naive very verbose generator
 ;; classnames for everything. no sharing. no re-use.
@@ -196,16 +218,21 @@
 (defn generate-css [svc class-defs]
   (let [{:keys [warnings defs]} (generate-rules svc class-defs)]
 
-    (doseq [warning warnings]
-      (prn warning))
+    ;; FIXME: should accept writer arg
+    (let [css
+          (let [sw (StringWriter.)]
+            (.write sw (:normalize-src svc))
+            (.write sw "\n\n")
+            (doseq [def defs]
+              (emit-def def sw svc))
+            (.toString sw))]
 
-    (->> defs
-         (map generate-css*)
-         (str/join "\n\n")
-         )))
+      {:css css
+       :warnings warnings})))
 
 (defn start []
-  {::svc true})
+  {::svc true
+   :normalize-src (slurp (io/resource "shadow/grove/css/modern-normalize.css"))})
 
 (comment
   (require 'clojure.pprint)
@@ -213,9 +240,9 @@
     (generate-css
       (start)
       [(-> (s/conform!
-             '[:px-4 {:padding 2} :flex :some/var {:foo "yo" :bar ("url(" :ui/foo ")")}
+             '[:px-4 {:padding 2} :flex {:foo "yo" :bar ("url(" :ui/foo ")")}
                ["@media (prefers-color-scheme: dark)"
                 [:ui/md :px-8
                  ["&:hover" {:color "green"}]]]])
-           (assoc :sel "test" :ns "foo.bar" :line 3 :column 1))])))
+           (assoc :sel ".test" :ns "foo.bar" :line 3 :column 1))])))
 

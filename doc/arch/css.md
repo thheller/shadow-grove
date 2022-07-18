@@ -120,7 +120,7 @@ Truly dynamic things should be set via style attributes. Also, given that the on
  :style/color (if selected? "red" "green")}
 ```
 
-## Optimization to be done
+## Things to be done
 
 It is great for Development to have one classname for each `css`. They are easy to find and with source maps may even allow you to "click" directly to their definition. However, this can also get very verbose and may lead to larger than necessary CSS files.
 
@@ -137,7 +137,7 @@ Suppose you have `(css :px-4)` and `(css :px-4 :flex)`, instead of
   display: flex;
 }
 ```
-It can and should generate a utility class, similar to Tailwind.
+It can (and maybe should) generate utility classes, similar to Tailwind.
 ```
 .px-4 {
   padding-left: 1rem;
@@ -148,11 +148,14 @@ It can and should generate a utility class, similar to Tailwind.
 }
 ```
 
-It is just important to only emit classes that were actually used, similar to Tailwind JIT.
+Coupled with the generated JS changing to
+```
+shadow.grove.css.defs.my_app_views__L4_C3 = "px-4 flex";
+```
 
-Given that the macro generates a reference instead of the string directly changing the actual value is easy.
+The length of classnames doesn't really matter. GZIP takes care of that for the most part, but it may still be useful to shorten them in some way. Even just for obfuscation, sometimes it may be undesirable to leak the internal namespace structure.
 
-The length of classnames doesn't really matter though. GZIP takes care of that for the most part, but it may still be useful to shorten them in some way. Even just for obfuscation, sometimes it may be undesirable to leak the internal namespace structure.
+Maybe this optimization into utility classes isn't necessary, GZIP handles repetition very well after all. Will need a larger project to experiment with this.
 
 I expect that the end result will be a mix of utility classes and actual named classes.
 

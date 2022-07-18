@@ -25,14 +25,20 @@
         (into [] (for [ns namespaces
                        :let [ns-defs (get-in state [:compiler-env :cljs.analyzer/namespaces ns ::css/classes])]
                        class (vals ns-defs)]
-                   class))]
+                   class))
+
+        {:keys [warnings css]}
+        (gen/generate-css
+          (gen/start)
+          all)]
+
+    (doseq [w warnings]
+      (prn [:css-warning w]))
 
     (spit
       (doto (data/output-file state "grove.css")
         (io/make-parents))
-      (gen/generate-css
-        (gen/start)
-        all))
+      css)
 
     (-> state
         ;; we don't need to worry about modules here since closure is smart enough to move these around
