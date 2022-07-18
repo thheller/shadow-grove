@@ -4,8 +4,11 @@
     [shadow.grove.local :as local-eng]
     [shadow.grove.runtime :as rt]))
 
+(def a-def (css :green ["&:hover" :red {:foo "bar"}]))
+
 (defn ui-test []
-  (<< [:div {:class (css :px-4 {:color "green"})} "hello world"]))
+  (<< [:div {:class (css :px-4 {:color "green"})} "hello world"]
+      [:div {:class (css :text-lg)} "yo"]))
 
 (defonce root-el
   (js/document.getElementById "root"))
