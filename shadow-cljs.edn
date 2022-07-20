@@ -39,7 +39,6 @@
   {:target :browser
    :output-dir "examples/dummy/assets"
    :asset-path "/assets"
-   :build-hooks [(shadow.grove.css.build/hook)]
    :modules {:main {:init-fn dummy.app/init}}}
 
   :examples-bootstrap

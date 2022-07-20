@@ -22,5 +22,5 @@
 (defmacro svg [& body]
   (with-meta `(shadow.arborist.fragments/svg ~@body) (meta &form)))
 
-(defmacro css [& body]
-  (with-meta `(shadow.grove.css/css ~@body) (meta &form)))
+#_(defmacro css [& body]
+    (with-meta `(shadow.css/css ~@body) (meta &form)))

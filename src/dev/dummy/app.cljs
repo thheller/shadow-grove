@@ -1,13 +1,14 @@
 (ns dummy.app
   (:require
-    [shadow.grove :as sg :refer (<< defc css)]
+    [shadow.grove :as sg :refer (<< defc #_ css)]
     [shadow.grove.local :as local-eng]
     [shadow.grove.runtime :as rt]))
 
-(def a-def (css :green ["&:hover" :red {:foo "bar"}]))
+#_ (def a-def (css :green ["&:hover" :red {:foo "bar"}]))
 
 (defn ui-test []
-  (<< [:div {:class (css :px-4 {:color "green"})} "hello world"]
+  (<< [:div {:style/color "green"} "yo"])
+  #_ (<< [:div {:class (css :px-4 {:color "green"})} "hello world"]
       [:div {:class (css :text-lg)} "yo"]))
 
 (defonce root-el

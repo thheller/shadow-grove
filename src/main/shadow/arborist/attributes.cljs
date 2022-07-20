@@ -73,6 +73,11 @@
     :else
     (.setAttribute node prop-name nval)))
 
+(defn set-style-property [^js node prop-name nval]
+  (if (nil? nval)
+    (.. node -style (removeProperty prop-name))
+    (.. node -style (setProperty prop-name nval))))
+
 (defn wrap-stop! [^function target]
   (fn [^js e]
     (.stopPropagation e)
@@ -90,17 +95,23 @@
     (target e)))
 
 (defn make-attr-handler [^Keyword key]
-  (let [prop-name (.-name key)]
-    (when ^boolean (.-ns key)
-      (throw
-        (ex-info
-          (str "namespaced attribute without setter: " key)
-          {:attr key})))
+  (let [prop-name (.-name key)
+        prop-ns (.-ns key)]
 
     (cond
       (dom-attribute? prop-name)
       (fn [env node oval nval]
         (set-dom-attribute node prop-name nval))
+
+      (identical? "style" prop-ns)
+      (fn [env node oval nval]
+        (set-style-property node prop-name nval))
+
+      prop-ns
+      (throw
+        (ex-info
+          (str "namespaced attribute without setter: " key)
+          {:attr key}))
 
       ;; :on-* convention for events
       ;; only handled when there is an actual handler for it registered in the env
@@ -235,12 +246,11 @@
       :empty
 
       (map? nval)
-      (let [style (.-style node)]
-        (reduce-kv
-          (fn [_ ^not-native k v]
-            (gobj/set style (-name k) v))
-          nil
-          nval))
+      (reduce-kv
+        (fn [_ ^not-native k v]
+          (set-style-property node (-name k) v))
+        nil
+        nval)
 
       (string? nval)
       (set! (.. node -style -cssText) nval)
