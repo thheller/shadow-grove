@@ -70,6 +70,16 @@
                  (swap! code-ref assoc code next-id)
                  next-id))]
 
+    ;; FIXME: make this recognize shadow.css/css uses
+    ;; either just check (css ...)
+    ;; or the :tag shadow.css/css-id set by the shadow.css/css macro
+    ;; since these are constants and cannot change it can skip checking
+    ;; them in the update fn.
+    ;; they are not const? since they may be locals and not to be passed
+    ;; to the fragment functions somehow. this is fine, just update can skip
+    ;; some work. but given that it compares two string its probably not needed
+    ;; given how cheap it is?
+
     (merge
       extra
       {:op :code-ref

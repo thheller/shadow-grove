@@ -18,8 +18,7 @@
     [shadow.grove.ui.portal :as portal]
     [shadow.arborist.attributes :as a]
     [shadow.grove.db :as db]
-    ;; used in macro ns
-    ;; [shadow.css]
+    [shadow.css] ;; used in macro ns
     ))
 
 (set! *warn-on-infer* false)

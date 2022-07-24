@@ -4,7 +4,7 @@
   "src/test"]
 
  :deps
- {}
+ {com.thheller/shadow-css {:mvn/version "0.1.0"}}
 
  :aliases
  {:dev
