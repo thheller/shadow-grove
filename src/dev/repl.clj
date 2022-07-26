@@ -10,11 +10,22 @@
 (defn generate-css []
   (let [result
         (-> @css-ref
-            (cb/generate
-              '{:ui
-                {:include
-                 [shadow.grove.examples*]}})
+            (cb/generate '{:ui {:include [shadow.grove.examples*]}})
             (cb/write-outputs-to (io/file "examples" "app" "public" "css")))]
+
+    (prn :CSS-GENERATED)
+
+    (doseq [mod (:outputs result)
+            {:keys [warning-type] :as warning} (:warnings mod)]
+
+      (prn [:CSS (name warning-type) (dissoc warning :warning-type)]))
+
+    (println))
+
+  (let [result
+        (-> @css-ref
+            (cb/generate '{:ui {:include [dummy*]}})
+            (cb/write-outputs-to (io/file "examples" "dummy" "css")))]
 
     (prn :CSS-GENERATED)
 
@@ -34,6 +45,7 @@
   ;; until I can figure out a clean API for this
   (reset! css-ref
     (-> (cb/start)
+        (cb/index-path (io/file "src" "dev") {})
         (cb/index-path (io/file "src" "main") {})))
 
   (generate-css)
@@ -41,7 +53,8 @@
   (reset! css-watch-ref
     (fs-watch/start
       {}
-      [(io/file "src" "main")]
+      [(io/file "src" "main")
+       (io/file "src" "dev")]
       ["cljs" "cljc" "clj"]
       (fn [updates]
         (try
