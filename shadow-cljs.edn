@@ -4,14 +4,20 @@
   "src/main"
   "src/test"
   ;; for easier testing with the example app
-  "../grove-todo/src/main"]
+  "../grove-todo/src/main"
+  "../shadow-css/src/main"]
+
+ :version
+ "2.19.6"
 
  :jvm-opts
  ["-XX:-OmitStackTraceInFastThrow"]
 
  :dependencies
  ;; for benchmark purposes, not actually a dependency
- [[reagent "0.9.0-rc3"]]
+ [[reagent "0.9.0-rc3"]
+
+  [com.thheller/shadow-css "0.2.0"]]
 
  :dev-http
  {3005 "public"
@@ -45,14 +51,15 @@
   {:target :bootstrap
    :output-dir "examples/app/public/bootstrap"
    :exclude #{cljs.js}
-   :entries [shadow.grove
+   :entries [shadow.css
+             shadow.grove
              shadow.grove.runtime
              shadow.grove.db
              shadow.grove.eql-query
              shadow.grove.events
              shadow.grove.local
              shadow.grove.ui.testing]
-   :compiler-options {:output-feature-set :es6}
+   :compiler-options {:output-feature-set :es-next}
    :macros []}
 
   :examples-host

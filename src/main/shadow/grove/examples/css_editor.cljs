@@ -1,7 +1,7 @@
-(ns shadow.grove.examples.js-editor
+(ns shadow.grove.examples.css-editor
   (:require
     ["codemirror" :as cm]
-    ["codemirror/mode/javascript/javascript"]
+    ["codemirror/mode/css/css"]
     [shadow.arborist.protocols :as ap]
     [shadow.arborist.common :as common]
     [shadow.arborist.dom-scheduler :as ds]))
@@ -52,7 +52,7 @@
             (js/Object.assign
               #js {:lineNumbers true
                    :theme "github"
-                   :mode "javascript"
+                   :mode "css"
                    :matchBrackets true
                    :readOnly true
                    :autofocus false}

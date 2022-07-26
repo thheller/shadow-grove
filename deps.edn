@@ -1,18 +1,19 @@
 {:paths
- ["src/dev"
-  "src/main"
-  "src/test"]
+ ["src/main"]
 
  :deps
- {com.thheller/shadow-css {:mvn/version "0.1.0"}}
+ {com.thheller/shadow-css {:mvn/version "0.2.0"}}
 
  :aliases
  {:dev
-  {:extra-deps
+  {:extra-paths
+   ["src/dev"
+    "src/test"]
+   :extra-deps
    {org.clojure/clojure {:mvn/version "1.11.1"}
     org.clojure/clojurescript {:mvn/version "1.11.60"}}}
 
   :server
-  {:extra-deps {thheller/shadow-cljs {:mvn/version "2.17.8"}}
+  {:extra-deps {thheller/shadow-cljs {:mvn/version "2.19.6"}}
    :jvm-opts ["-Dfile.encoding=UTF-8"]
    :main-opts ["-m" "shadow.cljs.devtools.cli" "clj-repl"]}}}
