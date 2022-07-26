@@ -270,7 +270,7 @@
         "(ns hello.world"
         "  (:require [shadow.grove :as sg :refer (<< defc css)]))"
         ""
-        "(def $test"
+        "(def example-class"
         "  ;; define css via tailwind style aliases"
         "  (css :text-5xl :py-8 :font-bold :text-red-500"
         "    ;; or just CSS directly"
@@ -279,7 +279,7 @@
         "    [\"&:hover\" :text-green-700]))"
         ""
         "(defn example []"
-        "  (<< [:div {:class $test} \"Hello World\"]))"]
+        "  (<< [:div {:class example-class} \"Hello World\"]))"]
        (str/join "\n")))
 
 (defn ^:dev/after-load start []
