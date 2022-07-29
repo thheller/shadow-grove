@@ -4,8 +4,6 @@
     [shadow.grove.protocols :as gp]
     [shadow.grove.ui.util :as util]))
 
-(util/assert-not-in-worker!)
-
 (deftype EnvWatch [key-to-atom path default the-atom ^:mutable val component-handle]
   gp/IBuildHook
   (hook-build [this ch]

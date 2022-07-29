@@ -5,11 +5,8 @@
     [shadow.arborist.attributes :as sa]
     [shadow.grove.ui.util :as util]
     [shadow.grove.protocols :as gp]
-    [shadow.grove.components :as comp]
-    )
+    [shadow.grove.components :as comp])
   (:import [goog.events KeyHandler EventType]))
-
-(util/assert-not-in-worker!)
 
 ;; FIXME: this produces alt+alt, ctrl+ctrl for blank alt/control presses
 ;; not interested in those for now

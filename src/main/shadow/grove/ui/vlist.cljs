@@ -12,7 +12,8 @@
     [shadow.arborist.collections :as coll]
     [shadow.grove.keyboard :as keyboard]
     [shadow.grove.runtime :as rt]
-    [shadow.grove.components :as comp])
+    [shadow.grove.components :as comp]
+    [shadow.grove.impl :as impl])
   (:import [goog.events KeyHandler]))
 
 (defn ev-stop [^js e]
@@ -26,7 +27,6 @@
 (defclass VirtualList
   (field ^VirtualConfig config)
   (field env)
-  (field ^not-native query-engine)
   (field query-id)
   (field query)
   (field ident)
@@ -55,107 +55,100 @@
     (set! env e)
     (set! config c)
     (set! opts o)
-    (set! query-id (util/next-id))
+    (set! query-id (rt/next-id))
     (set! ident (:ident opts))
 
-    (let [rt (::rt/runtime-ref env)
-          qe (::gp/query-engine @rt)]
-      (when-not qe
-        (throw (ex-info "missing query engine" {:env env})))
+    ;; FIXME: this (.-config config) stuff sucks
+    ;; only have it because config is VirtualConfig class which we check identical? on
+    (let [{:keys [scroll-delay box-style box-class] :or {scroll-delay 16}} (.-config config)]
 
-      (set! query-engine qe)
+      (set! container-el (js/document.createElement "div"))
+      (gs/setStyle container-el
+        #js {"outline" "none"
+             "overflow-y" "auto"
+             "width" "100%"
+             "min-height" "100%"
+             "height" "100%"})
 
-      ;; FIXME: this (.-config config) stuff sucks
-      ;; only have it because config is VirtualConfig class which we check identical? on
-      (let [{:keys [scroll-delay box-style box-class] :or {scroll-delay 16}} (.-config config)]
+      (when-some [tabindex (:tab-index opts)]
+        (set! container-el -tabIndex tabindex))
 
-        (set! container-el (js/document.createElement "div"))
-        (gs/setStyle container-el
-          #js {"outline" "none"
-               "overflow-y" "auto"
-               "width" "100%"
-               "min-height" "100%"
-               "height" "100%"})
+      (set! key-handler (KeyHandler. container-el))
 
-        (when-some [tabindex (:tab-index opts)]
-          (set! container-el -tabIndex tabindex))
+      (.listen key-handler "key" #_js/goog.events.KeyHandler.EventType
+        (fn [^goog e]
+          (case (keyboard/str-key e)
+            "arrowup"
+            (do (.focus-move! this -1)
+                (ev-stop e))
 
-        (set! key-handler (KeyHandler. container-el))
+            "pageup"
+            (do (.focus-move! this -10)
+                (ev-stop e))
 
-        (.listen key-handler "key" #_js/goog.events.KeyHandler.EventType
-          (fn [^goog e]
-            (case (keyboard/str-key e)
-              "arrowup"
-              (do (.focus-move! this -1)
-                  (ev-stop e))
+            "arrowdown"
+            (do (.focus-move! this 1)
+                (ev-stop e))
 
-              "pageup"
-              (do (.focus-move! this -10)
-                  (ev-stop e))
+            "pagedown"
+            (do (.focus-move! this 10)
+                (ev-stop e))
 
-              "arrowdown"
-              (do (.focus-move! this 1)
-                  (ev-stop e))
+            "enter"
+            (when-some [select-event (:select-event opts)]
+              (let [{:keys [offset slice]}
+                    last-result
 
-              "pagedown"
-              (do (.focus-move! this 10)
-                  (ev-stop e))
+                    item-idx
+                    (- focus-idx offset)
 
-              "enter"
-              (when-some [select-event (:select-event opts)]
-                (let [{:keys [offset slice]}
-                      last-result
+                    item
+                    (nth slice item-idx)
 
-                      item-idx
-                      (- focus-idx offset)
+                    comp
+                    (comp/get-component env)]
 
-                      item
-                      (nth slice item-idx)
+                (gp/handle-event! comp (assoc select-event :idx focus-idx :item item) nil env)
+                ))
 
-                      comp
-                      (comp/get-component env)]
+            nil
+            )))
 
-                  (gp/handle-event! comp (assoc select-event :idx focus-idx :item item) nil env)
-                  ))
+      (.addEventListener container-el "focus"
+        (fn [e]
+          (set! focused? true)
+          (.render-slice! this)
+          ))
 
-              nil
-              )))
+      (.addEventListener container-el "blur"
+        (fn [e]
+          (set! focused? false)
+          (.render-slice! this)))
 
-        (.addEventListener container-el "focus"
-          (fn [e]
-            (set! focused? true)
-            (.render-slice! this)
-            ))
+      (set! inner-el (js/document.createElement "div"))
+      (gs/setStyle inner-el
+        #js {"width" "100%"
+             "position" "relative"
+             "height" "0"})
+      (.appendChild container-el inner-el)
 
-        (.addEventListener container-el "blur"
-          (fn [e]
-            (set! focused? false)
-            (.render-slice! this)))
+      (set! box-el (js/document.createElement "div"))
+      (let [box-style (merge box-style {:position "absolute" :top "0px" :width "100%"})]
+        (a/set-attr env box-el :style nil box-style))
 
-        (set! inner-el (js/document.createElement "div"))
-        (gs/setStyle inner-el
-          #js {"width" "100%"
-               "position" "relative"
-               "height" "0"})
-        (.appendChild container-el inner-el)
+      (when box-class
+        (a/set-attr env box-el :class nil box-class))
 
-        (set! box-el (js/document.createElement "div"))
-        (let [box-style (merge box-style {:position "absolute" :top "0px" :width "100%"})]
-          (a/set-attr env box-el :style nil box-style))
+      (.appendChild inner-el box-el)
 
-        (when box-class
-          (a/set-attr env box-el :class nil box-class))
+      (set! box-root (common/managed-root env))
 
-        (.appendChild inner-el box-el)
-
-        (set! box-root (common/managed-root env))
-
-        (.addEventListener container-el "scroll"
-          (gfn/debounce #(.handle-scroll! this %)
-            ;; there is a good balance between too much work and too long wait
-            ;; every scroll update will trigger a potentially complex DOM change
-            ;; so it shouldn't do too much
-            scroll-delay)))))
+      (.addEventListener container-el "scroll"
+        (gfn/debounce #(.handle-scroll! this %)
+          ;; there is a good balance between too much work and too long wait
+          ;; every scroll update will trigger a potentially complex DOM change
+          ;; so it shouldn't do too much
+          scroll-delay))))
 
   ap/IManaged
   (supports? [this ^VirtualInit next]
@@ -196,7 +189,7 @@
 
   (destroy! [this ^boolean dom-remove?]
     (when query
-      (gp/query-destroy query-engine query-id))
+      (impl/query-destroy (::rt/runtime-ref env) query-id))
 
     (when dom-remove?
       (.remove container-el))
@@ -223,14 +216,14 @@
   ;; a fresh query each time
   (update-query! [this]
     (when query
-      (gp/query-destroy query-engine query-id))
+      (impl/query-destroy (::rt/runtime-ref env) query-id))
 
     (let [attr-opts {:offset visible-offset
                      :num visible-count}
           attr-with-opts (list (.-attr config) attr-opts)]
       (set! query (if ident [{ident [attr-with-opts]}] [attr-with-opts])))
 
-    (gp/query-init query-engine query-id query {} #(.handle-query-result! this %)))
+    (impl/query-init (::rt/runtime-ref env) query-id query {} #(.handle-query-result! this %)))
 
   (render-slice! [this]
     (let [{:keys [offset slice]}

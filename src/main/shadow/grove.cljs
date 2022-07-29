@@ -18,13 +18,11 @@
     [shadow.grove.ui.portal :as portal]
     [shadow.arborist.attributes :as a]
     [shadow.grove.db :as db]
+    [shadow.grove.impl :as impl]
     [shadow.css] ;; used in macro ns
     ))
 
 (set! *warn-on-infer* false)
-
-;; these are private - should not be accessed from the outside
-(defonce active-apps-ref (atom {}))
 
 (defn dispatch-up! [{::comp/keys [^not-native parent] :as env} ev-map]
   {:pre [(map? env)
@@ -33,121 +31,30 @@
   ;; FIXME: should schedule properly when it isn't in event handler already
   (gp/handle-event! parent ev-map nil env))
 
-(deftype QueryInit [ident query config]
-  gp/IBuildHook
-  (hook-build [this component-handle]
-    ;; support multiple query engines by allowing queries to supply which key to use
-    (let [{::rt/keys [runtime-ref] :as env} (gp/get-component-env component-handle)
-          engine-key (:engine config ::gp/query-engine)
-          query-engine (get @runtime-ref engine-key)]
-
-      (assert query-engine (str "no query engine in runtime for key " engine-key))
-      (gp/query-hook-build query-engine env component-handle ident query config))))
-
 (defn query-ident
   ;; shortcut for ident lookups that can skip EQL queries
   ([ident]
-   {:pre [(db/ident? ident)]}
-   (QueryInit. ident nil {}))
-
+   (impl/hook-query ident nil {}))
   ;; EQL queries
   ([ident query]
-   (query-ident ident query {}))
+   (impl/hook-query ident query {}))
   ([ident query config]
-   {:pre [(db/ident? ident)
-          (vector? query)
-          (map? config)]}
-   (QueryInit. ident query config)))
+   (impl/hook-query ident query config)))
 
 (defn query-root
   ([query]
-   (query-root query {}))
+   (impl/hook-query nil query {}))
   ([query config]
-   {:pre [(vector? query)
-          (map? config)]}
-   (QueryInit. nil query config)))
-
-(defn tx*
-  [runtime-ref tx origin]
-  (assert (rt/ref? runtime-ref) "expected runtime ref?")
-
-  (let [{::gp/keys [query-engine]} @runtime-ref]
-    (assert query-engine "missing query-engine in env")
-
-    (gp/transact! query-engine tx origin)))
+   (impl/hook-query nil query config)))
 
 (defn run-tx
   [{::rt/keys [runtime-ref] :as env} tx]
-  (tx* runtime-ref tx env))
+  (impl/process-event runtime-ref tx env))
 
 (defn run-tx! [runtime-ref tx]
+  (assert (rt/ref? runtime-ref) "expected runtime ref?")
   (let [{::rt/keys [scheduler]} @runtime-ref]
-    (rt/run-now! scheduler #(tx* runtime-ref tx nil) ::run-tx!)))
-
-(defn default-error-handler [component ex]
-  ;; FIXME: this would be the only place there component-name is accessed
-  ;; without this access closure removes it completely in :advanced which is nice
-  ;; ok to access in debug builds though
-  (if ^boolean js/goog.DEBUG
-    (js/console.error (str "An Error occurred in " (.. component -config -component-name) ", it will not be rendered.") component)
-    (js/console.error "An Error occurred in Component, it will not be rendered." component))
-  (js/console.error ex))
-
-(deftype RootEventTarget [rt-ref]
-  gp/IHandleEvents
-  (handle-event! [this ev-map e origin]
-    (tx* rt-ref ev-map origin)))
-
-(defn- make-root-env
-  [rt-ref root-el]
-
-  ;; FIXME: have a shared root scheduler rt-ref
-  ;; multiple roots should schedule in some way not indepdendently
-  (let [event-target
-        (RootEventTarget. rt-ref)
-
-        env-init
-        (::rt/env-init @rt-ref)]
-
-    (reduce
-      (fn [env init-fn]
-        (init-fn env))
-
-      ;; base env, using init-fn to customize
-      {::comp/scheduler (::rt/scheduler @rt-ref)
-       ::comp/event-target event-target
-       ::suspense-keys (atom {})
-       ::rt/root-el root-el
-       ::rt/runtime-ref rt-ref
-       ;; FIXME: get this from rt-ref?
-       ::comp/error-handler default-error-handler}
-
-      env-init)))
-
-(defn render* [rt-ref ^js root-el root-node]
-  {:pre [(rt/ref? rt-ref)]}
-  (if-let [active-root (.-sg$root root-el)]
-    (do (when ^boolean js/goog.DEBUG
-          (comp/mark-all-dirty!))
-
-        ;; FIXME: somehow verify that env hasn't changed
-        ;; env is supposed to be immutable once mounted, but someone may still modify rt-ref
-        ;; but since env is constructed on first mount we don't know what might have changed
-        ;; this is really only a concern for hot-reload, apps only call this once and never update
-
-        (sa/update! active-root root-node)
-        ::updated)
-
-    (let [new-env (make-root-env rt-ref root-el)
-          new-root (sa/dom-root root-el new-env)]
-      (sa/update! new-root root-node)
-      (set! (.-sg$root root-el) new-root)
-      (set! (.-sg$env root-el) new-env)
-      ::started)))
-
-(defn render [rt-ref ^js root-el root-node]
-  {:pre [(rt/ref? rt-ref)]}
-  (rt/run-now! ^not-native (::rt/scheduler @rt-ref) #(render* rt-ref root-el root-node) ::render))
+    (gp/run-now! scheduler #(impl/process-event runtime-ref tx nil) ::run-tx!)))
 
 (defn unmount-root [^js root-el]
   (when-let [^sa/TreeRoot root (.-sg$root root-el)]
@@ -250,3 +157,216 @@
    (portal/portal js/document.body body))
   ([ref-node body]
    (portal/portal ref-node body)))
+
+(defn default-error-handler [component ex]
+  ;; FIXME: this would be the only place there component-name is accessed
+  ;; without this access closure removes it completely in :advanced which is nice
+  ;; ok to access in debug builds though
+  (if ^boolean js/goog.DEBUG
+    (js/console.error (str "An Error occurred in " (.. component -config -component-name) ", it will not be rendered.") component)
+    (js/console.error "An Error occurred in Component, it will not be rendered." component))
+  (js/console.error ex))
+
+(deftype RootEventTarget [rt-ref]
+  gp/IHandleEvents
+  (handle-event! [this ev-map e origin]
+    ;; dropping DOM event since that should have been handled elsewhere already
+    ;; or it wasn't relevant to begin with
+    (impl/process-event rt-ref ev-map origin)))
+
+(defn- make-root-env
+  [rt-ref root-el]
+
+  ;; FIXME: have a shared root scheduler rt-ref
+  ;; multiple roots should schedule in some way not indepdendently
+  (let [event-target
+        (RootEventTarget. rt-ref)
+
+        env-init
+        (::rt/env-init @rt-ref)]
+
+    (reduce
+      (fn [env init-fn]
+        (init-fn env))
+
+      ;; base env, using init-fn to customize
+      {::comp/scheduler (::rt/scheduler @rt-ref)
+       ::comp/event-target event-target
+       ::suspense-keys (atom {})
+       ::rt/root-el root-el
+       ::rt/runtime-ref rt-ref
+       ;; FIXME: get this from rt-ref?
+       ::comp/error-handler default-error-handler}
+
+      env-init)))
+
+(defn render* [rt-ref ^js root-el root-node]
+  {:pre [(rt/ref? rt-ref)]}
+  (if-let [active-root (.-sg$root root-el)]
+    (do (when ^boolean js/goog.DEBUG
+          (comp/mark-all-dirty!))
+
+        ;; FIXME: somehow verify that env hasn't changed
+        ;; env is supposed to be immutable once mounted, but someone may still modify rt-ref
+        ;; but since env is constructed on first mount we don't know what might have changed
+        ;; this is really only a concern for hot-reload, apps only call this once and never update
+
+        (sa/update! active-root root-node)
+        ::updated)
+
+    (let [new-env (make-root-env rt-ref root-el)
+          new-root (sa/dom-root root-el new-env)]
+      (sa/update! new-root root-node)
+      (set! (.-sg$root root-el) new-root)
+      (set! (.-sg$env root-el) new-env)
+      ::started)))
+
+(defn render [rt-ref ^js root-el root-node]
+  {:pre [(rt/ref? rt-ref)]}
+  (gp/run-now! ^not-native (::rt/scheduler @rt-ref) #(render* rt-ref root-el root-node) ::render))
+
+
+(deftype RootScheduler [^:mutable update-pending? work-set]
+  gp/IScheduleWork
+  (schedule-work! [this work-task trigger]
+    (.add work-set work-task)
+
+    (when-not update-pending?
+      (set! update-pending? true)
+      (rt/next-tick #(.process-work! this))))
+
+  (unschedule! [this work-task]
+    (.delete work-set work-task))
+
+  (did-suspend! [this target])
+  (did-finish! [this target])
+
+  (run-now! [this action trigger]
+    (set! update-pending? true)
+    (action)
+    ;; work must happen immediately since (action) may need the DOM event that triggered it
+    ;; any delaying the work here may result in additional paint calls (making things slower overall)
+    ;; if things could have been async the work should have been queued as such and not ended up here
+    (.process-work! this))
+
+  Object
+  (process-work! [this]
+    (try
+      (let [iter (.values work-set)]
+        (loop []
+          (let [current (.next iter)]
+            (when (not ^boolean (.-done current))
+              (gp/work! ^not-native (.-value current))
+
+              ;; should time slice later and only continue work
+              ;; until a given time budget is consumed
+              (recur)))))
+
+      (finally
+        (set! update-pending? false)))))
+
+;; FIXME: make this delegate to the above, don't duplicate the code
+(deftype TracingRootScheduler [^:mutable update-pending? work-set]
+  gp/IScheduleWork
+  (schedule-work! [this work-task trigger]
+    (.add work-set work-task)
+
+    (when-not update-pending?
+      (set! update-pending? true)
+      (rt/next-tick
+        (fn []
+          (js/console.group (str trigger))
+          (try
+            (.process-work! this)
+            (finally
+              (js/console.groupEnd)))
+          ))))
+
+  (unschedule! [this work-task]
+    (.delete work-set work-task))
+
+  (did-suspend! [this target])
+  (did-finish! [this target])
+
+  (run-now! [this action trigger]
+    (js/console.group (str trigger))
+    (try
+      (set! update-pending? true)
+      (action)
+      ;; work must happen immediately since (action) may need the DOM event that triggered it
+      ;; any delaying the work here may result in additional paint calls (making things slower overall)
+      ;; if things could have been async the work should have been queued as such and not ended up here
+      (.process-work! this)
+
+      (finally
+        (js/console.groupEnd))
+      ))
+
+  Object
+  (process-work! [this]
+    (try
+      (let [iter (.values work-set)]
+        (loop []
+          (let [current (.next iter)]
+            (when (not ^boolean (.-done current))
+              (gp/work! ^not-native (.-value current))
+
+              ;; should time slice later and only continue work
+              ;; until a given time budget is consumed
+              (recur)))))
+
+      (finally
+        (set! update-pending? false)))))
+
+(goog-define TRACE false)
+
+(defn prepare
+  ([data-ref runtime-id]
+   (prepare {} data-ref runtime-id))
+  ([init data-ref runtime-id]
+   (let [root-scheduler
+         (if ^boolean TRACE
+           (TracingRootScheduler. false (js/Set.))
+           (RootScheduler. false (js/Set.)))
+
+         rt-ref
+         (atom nil)
+
+         active-queries-map
+         (js/Map.)]
+
+     (reset! rt-ref
+       (assoc init
+         ::rt/rt true
+         ::rt/scheduler root-scheduler
+         ::rt/runtime-id runtime-id
+         ::rt/data-ref data-ref
+         ::rt/event-config {}
+         ::rt/fx-config {}
+         ::rt/active-queries-map active-queries-map
+         ::rt/key-index-seq (atom 0)
+         ::rt/key-index-ref (atom {})
+         ::rt/query-index-map (js/Map.)
+         ::rt/query-index-ref (atom {})
+         ::rt/env-init []))
+
+     (when ^boolean js/goog.DEBUG
+       (swap! rt/known-runtimes-ref assoc runtime-id rt-ref))
+
+     rt-ref)))
+
+(defn vec-conj [x y]
+  (if (nil? x) [y] (conj x y)))
+
+(defn queue-fx [env fx-id fx-val]
+  (update env ::rt/fx vec-conj [fx-id fx-val]))
+
+(defn reg-event [rt-ref ev-id handler-fn]
+  {:pre [(keyword? ev-id)
+         (ifn? handler-fn)]}
+  (swap! rt-ref assoc-in [::rt/event-config ev-id] handler-fn)
+  rt-ref)
+
+(defn reg-fx [rt-ref fx-id handler-fn]
+  (swap! rt-ref assoc-in [::rt/fx-config fx-id] handler-fn)
+  rt-ref)

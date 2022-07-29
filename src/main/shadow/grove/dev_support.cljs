@@ -14,7 +14,7 @@
     [shadow.grove.db :as db]
     [shadow.grove.db.ident :as db-ident]
     [shadow.grove.protocols :as gp]
-    [shadow.grove.local :as local]))
+    [shadow.grove.impl :as impl]))
 
 ;; sketch of some of the development support might work
 
@@ -82,7 +82,7 @@
   (datafy [this]
     {:val (.-val this)}))
 
-(extend-type local/QueryHook
+(extend-type impl/HookQuery
   cp/Datafiable
   (datafy [this]
     {:ident (.-ident this)

@@ -113,8 +113,6 @@
       idx
       (recur (bit-shift-right search 1) (inc idx)))))
 
-(declare get-env)
-
 (deftype EffectHook
   [^:mutable deps
    ^function ^:mutable callback
@@ -327,16 +325,16 @@
           (gp/handle-event! parent ev-map e origin)
           (js/console.warn "event not handled" ev-id ev-map)))))
 
-  rt/IScheduleWork
+  gp/IScheduleWork
   (did-suspend! [this work-task]
-    (rt/did-suspend! scheduler work-task))
+    (gp/did-suspend! scheduler work-task))
 
   (did-finish! [this work-task]
-    (rt/did-finish! scheduler work-task))
+    (gp/did-finish! scheduler work-task))
 
   (schedule-work! [this work-task trigger]
     (when (zero? (.-size work-set))
-      (rt/schedule-work! scheduler this trigger))
+      (gp/schedule-work! scheduler this trigger))
 
     (.add work-set work-task))
 
@@ -344,10 +342,10 @@
     (.delete work-set work-task)
 
     (when (zero? (.-size work-set))
-      (rt/unschedule! scheduler this)))
+      (gp/unschedule! scheduler this)))
 
   (run-now! [this callback trigger]
-    (rt/run-now! scheduler callback trigger))
+    (gp/run-now! scheduler callback trigger))
 
   ;; parent tells us to work
   gp/IWork
@@ -511,15 +509,15 @@
 
     ;; just in case we were already scheduled. should really track this more efficiently
     (.unschedule! this)
-    (rt/did-suspend! scheduler this)
+    (gp/did-suspend! scheduler this)
     (set! suspended? true))
 
   (schedule! [this trigger]
     (when-not destroyed?
-      (rt/schedule-work! scheduler this trigger)))
+      (gp/schedule-work! scheduler this trigger)))
 
   (unschedule! [this]
-    (rt/unschedule! scheduler this))
+    (gp/unschedule! scheduler this))
 
   (component-render! [^ManagedComponent this]
     (assert (zero? dirty-hooks) "Got to render while hooks are dirty")
@@ -543,7 +541,7 @@
     ;; must keep this for work scheduling so it knows its done
     (set! current-idx (inc current-idx))
 
-    (rt/did-finish! scheduler this)
+    (gp/did-finish! scheduler this)
     (.unschedule! this))
 
   (did-update! [this did-render?]
@@ -572,7 +570,7 @@
             {:e ev-value})]
 
       ;; (js/console.log "dom-event" this event-env event ev-map dom-event)
-      (rt/run-now! (.-scheduler this)
+      (gp/run-now! (.-scheduler this)
         #(gp/handle-event! this ev-map dom-event event-env)
         ::handle-dom-event!))))
 

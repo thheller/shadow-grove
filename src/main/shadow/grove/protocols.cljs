@@ -1,9 +1,23 @@
 (ns shadow.grove.protocols)
 
-
-
 (defprotocol IWork
   (work! [this]))
+
+(defprotocol IScheduleWork
+  (schedule-work! [this task trigger])
+  (unschedule! [this task])
+  (run-now! [this action trigger])
+
+  ;; FIXME: this is purely a UI concern, should most likely be a separate interface
+  ;; this ns is meant to be usable in a worker environment which is not concerned with suspense
+  ;; for now suspense is a hack anyways so need to sort that out more
+  (did-suspend! [this target])
+  (did-finish! [this target])
+
+  ;; need actual scheduler support in browser for these
+  ;; (run-asap! [this action])
+  ;; (run-whenever! [this action])
+  )
 
 (defprotocol IHandleEvents
   ;; e and origin can be considered optional and will be ignored by most actual handlers
@@ -45,23 +59,5 @@
    render-fn
    events])
 
-(defprotocol IQueryEngine
-  ;; each engine may have different requirements regarding interop with the components
-  ;; websocket engine can only do async queries
-  ;; local engine can do sync queries but might have async results
-  ;; instead of trying to write a generic one they should be able to specialize
-  (query-hook-build [this env component-handle ident query config])
-
-  ;; hooks may use these but they may also interface with the engine directly
-  (query-init [this key query config callback])
-  (query-destroy [this key])
-
-  ;; FIXME: one shot query that can't be updated later?
-  ;; can be done by helper method over init/destroy but engine
-  ;; would still do a bunch of needless work
-  ;; only had one case where this might have been useful, maybe it isn't worth adding?
-  ;; (query-once [this query config callback])
-
-  ;; returns a promise, tx might need to go async
-  (transact! [this tx origin]))
-
+(defprotocol IQuery
+  (query-refresh! [this]))

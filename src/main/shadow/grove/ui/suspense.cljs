@@ -7,8 +7,6 @@
     [shadow.grove.components :as comp]
     [shadow.grove.ui.util :as util]))
 
-(util/assert-not-in-worker!)
-
 (set! *warn-on-infer* false)
 
 (declare SuspenseInit)
@@ -19,15 +17,15 @@
    ^:mutable should-trigger?
    ^:mutable suspend-set]
 
-  rt/IScheduleWork
+  gp/IScheduleWork
   (schedule-work! [this target trigger]
-    (rt/schedule-work! parent-scheduler target trigger))
+    (gp/schedule-work! parent-scheduler target trigger))
 
   (unschedule! [this target]
-    (rt/unschedule! parent-scheduler target))
+    (gp/unschedule! parent-scheduler target))
 
   (run-now! [this action trigger]
-    (rt/run-now! parent-scheduler action trigger))
+    (gp/run-now! parent-scheduler action trigger))
 
   (did-suspend! [this target]
     ;; (js/console.log "did-suspend!" suspend-set target)
