@@ -69,7 +69,6 @@ In our main namespace we then initialize everything and render our views.
 (ns todo.ui
   (:require
     [shadow.grove :as sg]
-    [shadow.grove.local :as local]
     [shadow.grove.history :as history]
     [todo.ui.env :as env]
     [todo.ui.views :as views]
@@ -85,12 +84,10 @@ In our main namespace we then initialize everything and render our views.
 (defn init []
   ;; useful for debugging until there are actual tools for this
   (when ^boolean js/goog.DEBUG
-    (swap! env/rt-ref assoc :shadow.grove.events/tx-reporter
+    (swap! env/rt-ref assoc :shadow.grove.runtime/tx-reporter
       (fn [{:keys [event] :as report}]
         ;; alternatively use tap> and the shadow-cljs UI
         (js/console.log (:e event) event report))))
-
-  (local/init! env/rt-ref)
 
   (history/init! env/rt-ref
     {:use-fragment true
@@ -164,7 +161,7 @@ This isn't always necessary, so most of the time events will just bubble up to t
 You can register an event handler via the `shadow.grove.events/reg-event` function.
 
 ```clojure
-(ev/reg-event env/rt-ref ::foo!
+(sg/reg-event env/rt-ref ::foo!
   (fn [tx-env ev]
     (js/console.log ::foo! env ev)
     env))
