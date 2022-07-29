@@ -6,7 +6,7 @@
 (deftype FormInstance
   [component-handle config ^:mutable state]
   gp/IHook
-  (hook-init! [this]
+  (hook-init! [this ch]
     (js/console.log ::form-instance-init!))
   (hook-ready? [this] true)
   (hook-value [this]
@@ -49,10 +49,6 @@
 
     val))
 
-(deftype FormInit [config state]
-  gp/IBuildHook
-  (hook-build [this ch]
-    (FormInstance. ch config state)))
 
 (defn form-has-errors? [form]
   false)
@@ -68,8 +64,7 @@
   ;; FIXME: validate config?
   (fn form-config [state]
     ;; FIXME: validate state being passed in?
-    (FormInit. config state)))
-
+    (throw (ex-info "tbd" {}))))
 
 
 ;; =====================================================================

@@ -115,23 +115,20 @@
 
 (deftype EffectHook
   [^:mutable deps
-   ^function ^:mutable callback
+   ^:mutable ^function callback
    ^:mutable callback-result
-   ^boolean ^:mutable should-call?
-   ^not-native component-handle]
-
-  gp/IBuildHook
-  (hook-build [this ch]
-    (EffectHook. deps callback callback-result should-call? ch))
+   ^:mutable ^boolean should-call?
+   ^:mutable ^not-native component-handle]
 
   gp/IHook
-  (hook-init! [this])
+  (hook-init! [this ch]
+    (set! component-handle ch))
+
   (hook-ready? [this] true)
   (hook-value [this] ::effect-hook)
   (hook-update! [this] false)
 
   (hook-deps-update! [this ^EffectHook new]
-    (assert (instance? EffectHook new))
     ;; comp-did-update! will call it
     ;; FIXME: (sg/effect :mount (fn [] ...)) is only called once ever
     ;; should it be called in case it uses other hook data?
@@ -182,6 +179,24 @@
   gp/IComponentHookHandle
   (hook-invalidate! [this]
     (.invalidate-hook! component idx)))
+
+(deftype SimpleVal [^:mutable val]
+  gp/IHook
+  (hook-init! [this ch])
+  (hook-ready? [this] true)
+  (hook-value [this] val)
+  (hook-update! [this])
+  (hook-deps-update! [this ^SimpleVal next]
+    (let [new-val (.-val next)
+          updated? (not= new-val val)]
+      (set! val new-val)
+      updated?))
+  (hook-destroy! [this]))
+
+(defn maybe-wrap-val [val]
+  (if (implements? gp/IHook val)
+    val
+    (SimpleVal. val)))
 
 (defclass ManagedComponent
   (field ^not-native scheduler)
@@ -429,15 +444,15 @@
           ;; doesn't exist, create it
           (not hook)
           (let [^function run-fn (-> (.-hooks config) (aget current-idx) (.-run))
-                val (run-fn this)
                 handle (ComponentHookHandle. this current-idx)
-                hook (gp/hook-build val handle)]
+                val (run-fn this)
+                hook (maybe-wrap-val val)]
 
             ;; (js/console.log "Component:init-hook!" (:component-name config) current-idx val hook)
 
             (aset hooks current-idx hook)
 
-            (gp/hook-init! hook)
+            (gp/hook-init! hook handle)
 
             ;; previous hook may have marked hook as dirty since it used data
             ;; but hook may have not been constructed yet, constructing must clear dirty bit
@@ -468,9 +483,15 @@
 
                 ^function run (.-run hook-config)
 
+                next-hook
+                (maybe-wrap-val (run this))
+
+                _ (when-not (identical? (type hook) (type next-hook))
+                    (throw (ex-info "illegal hook value, type cannot change" {:old hook :new next-hook})))
+
                 did-update? ;; checks if hook deps changed as well, calling init again
                 (if deps-updated?
-                  (gp/hook-deps-update! hook (run this))
+                  (gp/hook-deps-update! hook next-hook)
                   (gp/hook-update! hook))]
 
             #_(js/console.log "Component:hook-update!"
@@ -670,22 +691,4 @@
 
 (defn get-component-name [^ManagedComponent comp]
   (. ^clj (. comp -config) -component-name))
-
-
-(deftype SimpleVal [^:mutable val]
-  gp/IHook
-  (hook-init! [this])
-  (hook-ready? [this] true)
-  (hook-value [this] val)
-  (hook-update! [this])
-  (hook-deps-update! [this new-val]
-    (let [updated? (not= new-val val)]
-      (set! val new-val)
-      updated?))
-  (hook-destroy! [this]))
-
-(extend-protocol gp/IBuildHook
-  default
-  (hook-build [val component-handle]
-    (SimpleVal. val)))
 

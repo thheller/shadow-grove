@@ -98,13 +98,11 @@
   [^:mutable val
    ^:mutable trigger-fn
    ^:mutable result
-   ^not-native component-handle]
-  gp/IBuildHook
-  (hook-build [this ch]
-    (TrackChange. val trigger-fn nil ch))
+   ^:mutable ^not-native component-handle]
 
   gp/IHook
-  (hook-init! [this]
+  (hook-init! [this ch]
+    (set! component-handle ch)
     (set! result (trigger-fn (gp/get-component-env component-handle) nil val)))
 
   (hook-ready? [this] true)
@@ -112,8 +110,6 @@
   (hook-update! [this] false)
 
   (hook-deps-update! [this ^TrackChange new-track]
-    (assert (instance? TrackChange new-track))
-
     (let [next-val (.-val new-track)
           prev-result result]
 

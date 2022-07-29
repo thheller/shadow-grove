@@ -9,6 +9,9 @@
     [shadow.grove.db :as db]
     [shadow.grove :as sg]))
 
+;; moved into the shadow.grove main ns
+;; FIXME: figure out what to do with the macro stuff
+
 (defn queue-fx [env fx-id fx-val]
   (sg/queue-fx env fx-id fx-val))
 

@@ -54,11 +54,6 @@
     (set! keyframes new-keyframes)
     (set! timing new-timing))
 
-  gp/IBuildHook
-  (hook-build [this new-component-handle]
-    (set! component-handle new-component-handle)
-    this)
-
   gp/IHookDomEffect
   (hook-did-update! [this did-render?]
     (when (and did-render? first-render?)
@@ -75,7 +70,9 @@
                          (+ (:delay opts 0) (* (:stagger opts 0) x))))))))))
 
   gp/IHook
-  (hook-init! [this])
+  (hook-init! [this new-component-handle]
+    (set! component-handle new-component-handle))
+
   (hook-ready? [this] true)
   (hook-value [this] this)
   ;; true-ish return if component needs further updating

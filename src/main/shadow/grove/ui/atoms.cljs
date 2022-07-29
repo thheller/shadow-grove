@@ -4,16 +4,21 @@
     [shadow.grove.protocols :as gp]
     [shadow.grove.ui.util :as util]))
 
-(deftype EnvWatch [key-to-atom path default the-atom ^:mutable val component-handle]
-  gp/IBuildHook
-  (hook-build [this ch]
+(deftype EnvWatch
+  [key-to-atom path default
+   ^:mutable the-atom
+   ^:mutable val
+   ^:mutable component-handle]
+
+  gp/IHook
+  (hook-init! [this ch]
+    (set! component-handle ch)
+
     (let [atom (get (gp/get-component-env ch) key-to-atom)]
       (when-not atom
         (throw (ex-info "no atom found under key" {:key key-to-atom :path path})))
-      (EnvWatch. key-to-atom path default atom nil ch)))
+      (set! the-atom atom))
 
-  gp/IHook
-  (hook-init! [this]
     (set! val (get-in @the-atom path default))
     (add-watch the-atom this
       (fn [_ _ _ new-value]
@@ -35,13 +40,15 @@
   (hook-destroy! [this]
     (remove-watch the-atom this)))
 
-(deftype AtomWatch [the-atom access-fn ^:mutable val component-handle]
-  gp/IBuildHook
-  (hook-build [this ch]
-    (AtomWatch. the-atom access-fn nil ch))
+(deftype AtomWatch
+  [the-atom
+   access-fn
+   ^:mutable val
+   ^:mutable component-handle]
 
   gp/IHook
-  (hook-init! [this]
+  (hook-init! [this ch]
+    (set! component-handle ch)
     (set! val (access-fn nil @the-atom))
     (add-watch the-atom this
       (fn [_ _ old new]

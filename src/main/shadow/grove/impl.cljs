@@ -354,18 +354,14 @@
    ^:mutable read-keys
    ^:mutable read-result]
 
-  gp/IBuildHook
-  (hook-build [this ch]
+  gp/IHook
+  (hook-init! [this ch]
     (set! component-handle ch)
 
     (let [env (gp/get-component-env ch)]
       (set! rt-ref (::rt/runtime-ref env))
       (set! active-queries-map (::rt/active-queries-map @rt-ref)))
 
-    this)
-
-  gp/IHook
-  (hook-init! [this]
     (set! query-id (rt/next-id))
 
     (.set active-queries-map query-id this)

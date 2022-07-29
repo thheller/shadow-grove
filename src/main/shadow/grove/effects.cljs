@@ -6,13 +6,12 @@
 
 ;; FIXME: make this actually useful, not just a dummy effect
 
-(deftype EffectHook [^:mutable dom-node component-handle]
-  gp/IBuildHook
-  (hook-build [this ch]
-    (EffectHook. dom-node ch))
-
+(deftype EffectHook
+  [^:mutable dom-node
+   ^:mutable component-handle]
   gp/IHook
-  (hook-init! [this])
+  (hook-init! [this ch]
+    (set! component-handle ch))
   (hook-ready? [this] true)
   (hook-value [this] this)
   (hook-update! [this]

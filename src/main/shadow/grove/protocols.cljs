@@ -25,7 +25,7 @@
 
 
 (defprotocol IHook
-  (hook-init! [this])
+  (hook-init! [this component-handle])
   (hook-ready? [this])
   (hook-value [this])
   ;; true-ish return if component needs further updating
@@ -36,8 +36,6 @@
 (defprotocol IHookDomEffect
   (hook-did-update! [this did-render?]))
 
-(defprotocol IBuildHook
-  (hook-build [this component-handle]))
 
 (defprotocol IComponentHookHandle
   (hook-invalidate! [this] "called when a hook wants the component to refresh"))
