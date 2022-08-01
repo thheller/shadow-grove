@@ -3,7 +3,7 @@
     [cljs.env :as cljs-env]
     [shadow.resource :as rc]
     [shadow.css.build :as cb]
-    [shadow.grove.runtime :as gr]
+    [shadow.grove :as sg]
     [shadow.grove.db :as db]
     [shadow.grove.examples.model :as m]
     [cljs.reader :as reader]))
@@ -29,4 +29,4 @@
 
 (defonce rt-ref
   (-> {::m/compile-state-ref (cljs-env/default-compiler-env)}
-      (gr/prepare data-ref ::app)))
+      (sg/prepare data-ref ::app)))

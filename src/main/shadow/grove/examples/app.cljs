@@ -60,7 +60,7 @@
 
               ;; simple example without any schema or custom env
               (and example-fn (fn? example-fn))
-              (let [rt-ref (gr/prepare {} (atom {}) ::example)]
+              (let [rt-ref (sg/prepare {} (atom {}) ::example)]
                 (sg/render rt-ref @example-div (example-fn))
                 (fn example-cleanup []
                   (sg/unmount-root @example-div)))
@@ -291,8 +291,6 @@
 
 (defn init []
   (transit/init! env/rt-ref)
-
-  (local-eng/init! env/rt-ref)
 
   (ev/reg-fx env/rt-ref :gist-api
     (http-fx/make-handler

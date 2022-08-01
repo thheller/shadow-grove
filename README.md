@@ -158,7 +158,7 @@ The event handler inside Components are really just meant to give you a point to
 
 This isn't always necessary, so most of the time events will just bubble up to the runtime and the `(event ...)` handler in the component can be omitted.
 
-You can register an event handler via the `shadow.grove.events/reg-event` function.
+You can register an event handler via the `shadow.grove/reg-event` function.
 
 ```clojure
 (sg/reg-event env/rt-ref ::foo!

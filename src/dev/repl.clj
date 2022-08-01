@@ -41,7 +41,9 @@
 (comment
   (generate-css))
 
-(defn start []
+(defn start
+  {:shadow/requires-server true}
+  []
   ;; until I can figure out a clean API for this
   (reset! css-ref
     (-> (cb/start)
