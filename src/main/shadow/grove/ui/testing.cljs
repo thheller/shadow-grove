@@ -5,17 +5,25 @@
 
 (set! *warn-on-infer* false)
 
-(deftype DelayHook [component-handle max ^:mutable timeout]
+(deftype DelayHook
+  [^:mutable max
+   ^:mutable component-handle
+   ^:mutable timeout]
   gp/IHook
-  (hook-init! [this]
+  (hook-init! [this ch]
+    (set! component-handle ch)
     (let [timeout-ms (rand-int max)]
       (set! timeout (js/setTimeout #(.on-timeout! this) timeout-ms))))
+
   (hook-ready? [this]
     (nil? timeout))
 
   (hook-value [this] ::timeout)
-  (hook-deps-update! [this val])
+  (hook-deps-update! [this ^DelayHook val]
+    (set! max (.-max val)))
+
   (hook-update! [this])
+
   (hook-destroy! [this]
     (when timeout
       (js/clearTimeout timeout)
@@ -26,10 +34,5 @@
     (set! timeout nil)
     (gp/hook-invalidate! component-handle)))
 
-(deftype DelayInit [max]
-  gp/IBuildHook
-  (hook-build [this ch]
-    (DelayHook. ch max nil)))
-
 (defn rand-delay [max]
-  (DelayInit. max))
+  (DelayHook. max nil nil))
