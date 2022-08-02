@@ -22,22 +22,29 @@
     [shadow.grove.examples.js-editor :as ed-js]
     [shadow.grove.examples.css-editor :as ed-css]
     [shadow.grove.examples.cljs-editor :as ed-cljs]
+    [shadow.grove.examples.html-editor :as ed-html]
     [shadow.grove.runtime :as gr]
-    [shadow.css.build :as cb]))
+    [shadow.css.build :as cb])
+  (:import [goog.string StringBuffer]))
 
 (defonce dom-root
   (js/document.getElementById "app"))
 
 (defc ui-root []
-  (bind {::m/keys [example-tab example-code example-js example-ns example-css] :as data}
+  (bind {::m/keys [example-tab example-src-tab example-code example-html example-js example-ns example-css] :as data}
     (sg/query-root
       [::m/example-code
        ::m/example-tab
+       ::m/example-src-tab
+       ::m/example-html
        ::m/example-ns
        ::m/example-js
        ::m/example-css]))
 
   (bind ed-cljs-ref
+    (sg/ref))
+
+  (bind ed-html-ref
     (sg/ref))
 
   (bind example-div
@@ -75,20 +82,47 @@
 
          [:div {:class (css :flex :flex-1 :overflow-hidden)}
           [:div {:class (css :flex-1 :text-sm :flex :flex-col)}
-           [:div {:class (css :flex-1 :relative)}
-            [:div {:class (css :absolute :inset-0)}
-             (ed-cljs/editor
-               {:editor-ref ed-cljs-ref
-                :value example-code
-                :submit-event {:e ::m/compile!}})]]
+           [:div {:class (css :font-bold :py-4 :border-b)}
+            [:div
+             {:class (css :inline :p-4 :cursor-pointer :border-r)
+              :on-click {:e ::m/select-src! :tab :cljs}}
+             "CLJS"]
+            [:div
+             {:class (css :inline :p-4 :cursor-pointer :border-r)
+              :on-click {:e ::m/select-src! :tab :html}}
+             "HTML Conversion"]]
 
+           (case example-src-tab
+             :html
+             (<< [:div {:class (css :flex-1 :flex :flex-col)}
+                  [:div {:class (css :flex-1 :relative)}
+                   [:div {:class (css :absolute :inset-0)}
+                    (ed-html/editor
+                      {:editor-ref ed-html-ref
+                       :value example-html
+                       :submit-event {:e ::m/convert!}})]]
 
-           [:div {:class (css :border-t :p-4)}
-            [:button
-             {:class (css :px-4 :border :shadow)
-              :on-click ::m/compile!}
-             "Eval"]
-            " or ctrl+enter or shift+enter to eval"]]
+                  [:div {:class (css :border-t :p-4)}
+                   [:button
+                    {:class (css :px-4 :border :shadow)
+                     :on-click ::m/convert!}
+                    "Convert"]
+                   " or ctrl+enter or shift+enter to convert + eval"]])
+
+             (<< [:div {:class (css :flex-1 :flex :flex-col)}
+                  [:div {:class (css :flex-1 :relative)}
+                   [:div {:class (css :absolute :inset-0)}
+                    (ed-cljs/editor
+                      {:editor-ref ed-cljs-ref
+                       :value example-code
+                       :submit-event {:e ::m/compile!}})]]
+
+                  [:div {:class (css :border-t :p-4)}
+                   [:button
+                    {:class (css :px-4 :border :shadow)
+                     :on-click ::m/compile!}
+                    "Eval"]
+                   " or ctrl+enter or shift+enter to eval"]]))]
 
           [:div {:class (css :flex-1 :border-l-2 :flex :flex-col)}
            [:div {:class (css :font-bold :py-4 :border-b)}
@@ -142,6 +176,9 @@
           ]]))
 
   ;; FIXME: code is already present when using keyboard submit
+  (event ::m/convert! [env e _]
+    (sg/run-tx env (assoc e :code (.getValue @ed-html-ref))))
+
   (event ::m/compile! [env e _]
     (sg/run-tx env (assoc e :code (.getValue @ed-cljs-ref)))))
 
@@ -150,6 +187,10 @@
 (ev/reg-event env/rt-ref ::m/select-tab!
   (fn [env {:keys [tab] :as e}]
     (assoc-in env [:db ::m/example-tab] tab)))
+
+(ev/reg-event env/rt-ref ::m/select-src!
+  (fn [env {:keys [tab] :as e}]
+    (assoc-in env [:db ::m/example-src-tab] tab)))
 
 (ev/reg-event env/rt-ref ::m/compile-result!
   (fn [env {:keys [formatted-source ns]}]
@@ -164,6 +205,10 @@
           (->> outputs
                (map :css)
                (str/join "\n"))]
+
+      (doseq [{:keys [warnings]} outputs
+              warn warnings]
+        (js/console.warn "CSS" (name (:warning-type warn)) (:alias warn) warn))
 
       (update env :db assoc
         ::m/example-ns ns
@@ -209,6 +254,123 @@
           ::m/example-code code
           ::m/example-ns nil)
         (ev/queue-fx :cljs-compile code))))
+
+(defn printi [sb indent arg]
+  (.append sb (str (str/join "" (repeat indent " ")) arg)))
+
+(defn sb-trim-right [sb]
+  (let [all (str/trimr (.toString sb))]
+    (.set sb all)
+    sb))
+
+(defn vec-conj [x y]
+  (if (nil? x)
+    [y]
+    (conj x y)))
+
+(defn convert-class [sb indent class]
+  ;; "px-4 sm:foo sm:bar"
+  ;; should put each sm: into the same group
+
+  (.append sb "(css ")
+  (let [parts
+        (reduce
+          (fn [m val]
+            (let [idx (str/index-of val ":")]
+              (if-not idx
+                (update m "_" conj (str ":" val))
+                (let [[prefix suffix] (str/split val #":" 2)]
+                  (update m (str ":" prefix) vec-conj (str ":" suffix))
+                  )))
+
+            )
+          {"_" []}
+          (str/split class #"\s+"))]
+
+    (.append sb
+      (->> (get parts "_")
+           (str/join " ")))
+
+    (doseq [group (-> parts (dissoc "_") (keys) (sort))]
+      (.append sb " [")
+      (.append sb group)
+      (.append sb " ")
+      (.append sb
+        (->> (get parts group)
+             (str/join " ")))
+      (.append sb "]")))
+
+  (.append sb ")"))
+
+(defn convert-html* [sb ^js node indent]
+  (case (.-nodeType node)
+    1 ;; element
+    (do (printi sb indent "[")
+        (.append sb (str ":" (str/lower-case (.-tagName node)) " "))
+
+        (let [attrs (array-seq (.getAttributeNames node))]
+
+          (when (seq attrs)
+            (.append sb "{")
+            (dotimes [x (count attrs)]
+              (when-not (zero? x)
+                (.append sb " "))
+              (let [name (nth attrs x)]
+                (when (not (str/starts-with? name "x-"))
+                  (.append sb (str ":" name " "))
+                  (let [val (.getAttribute node name)]
+                    (if (= "class" name)
+                      (convert-class sb indent val)
+                      (.append sb (pr-str val)))))))
+            (.append sb "}")))
+
+        (.append sb "\n")
+
+        (doseq [node (array-seq (.-childNodes node))]
+          (convert-html* sb node (inc indent)))
+        (sb-trim-right sb)
+        (.append sb "]\n"))
+    3 ;; text
+    (let [content (.-textContent node)]
+      ;; skip non-significant whitespace sections
+      (when (re-find #"\S" content)
+        (printi sb indent
+          ;; collapse leading/trailing whitespace
+          (-> content
+              (str/replace #"^\s+" " ")
+              (str/replace #"\s+$" " ")
+              (pr-str)))
+        (.append sb "\n")))
+
+    nil))
+
+(defn convert-html [source]
+  (let [el (doto (js/document.createElement "div")
+             (set! -innerHTML source))]
+    (str "(ns converted.html\n"
+         "  (:require [shadow.grove :refer (<< defc css)]))\n"
+         "\n"
+         "(defn example []\n"
+         "  (<< "
+         (let [sb (StringBuffer.)
+               nodes (array-seq (.-childNodes el))]
+           (dotimes [x (count nodes)]
+             (let [node (nth nodes x)]
+               (convert-html* sb node 6)))
+
+           (str/trim (.toString sb)))
+         "))\n")))
+
+(ev/reg-event env/rt-ref ::m/convert!
+  (fn [{:keys [db] :as env} {:keys [code] :as e}]
+    (let [converted (convert-html code)]
+      (-> env
+          (update :db assoc
+            ::m/example-src-tab :cljs
+            ::m/example-code converted
+            ::m/example-html code
+            ::m/example-ns nil)
+          (ev/queue-fx :cljs-compile converted)))))
 
 (ev/reg-fx env/rt-ref :cljs-compile
   (fn [{:keys [transact!] :as env} code]

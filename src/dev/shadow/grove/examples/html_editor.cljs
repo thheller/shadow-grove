@@ -1,15 +1,10 @@
-(ns shadow.grove.examples.cljs-editor
+(ns shadow.grove.examples.html-editor
   (:require
     ["codemirror" :as cm]
-    ["codemirror/mode/clojure/clojure"]
-    ["parinfer-codemirror" :as par-cm]
-    [clojure.string :as str]
+    ["codemirror/mode/htmlmixed/htmlmixed"]
     [shadow.arborist.protocols :as ap]
     [shadow.arborist.common :as common]
-    [shadow.arborist.dom-scheduler :as ds]
-    [shadow.grove :as sg]
-    [shadow.grove.components :as comp]
-    [shadow.grove.protocols :as gp]))
+    [shadow.arborist.dom-scheduler :as ds]))
 
 (deftype EditorRoot
   [env
@@ -25,7 +20,7 @@
   (dom-sync! [this next-opts]
     (let [{:keys [value cm-opts]} next-opts]
 
-      (when (and editor (seq value) (not= value (.getValue editor)))
+      (when (and editor (seq value))
         (.setValue editor value))
 
       (reduce-kv
@@ -49,18 +44,17 @@
   ;; which kill performance quite badly
   (dom-entered! [this]
     (ds/write!
-      (let [{:keys [editor-ref value cm-opts clojure]}
+      (let [{:keys [editor-ref value]}
             opts
 
             ;; FIXME: this config stuff needs to be cleaned up, this is horrible
             cm-opts
             (js/Object.assign
               #js {:lineNumbers true
-                   :theme "github"}
-              (when cm-opts (clj->js cm-opts))
-              (when-not (false? clojure)
-                #js {:mode "clojure"
-                     :matchBrackets true})
+                   :theme "github"
+                   :mode "htmlmixed"
+                   :matchBrackets true
+                   :autofocus false}
               (when (seq value)
                 #js {:value value}))
 
@@ -69,32 +63,14 @@
               (fn [el]
                 (set! editor-el el)
                 (.insertBefore (.-parentElement marker) el marker))
-              cm-opts)
-
-            ;; FIXME: this sucks
-            submit-fn
-            (fn [e]
-              (let [val (str/trim (.getValue ed))]
-                (when (seq val)
-                  (let [comp (comp/get-component env)]
-                    (gp/handle-event! comp (assoc (:submit-event opts) :code val) e env)))))]
-
-        (set! editor ed)
+              cm-opts)]
 
         (when editor-ref
           (vreset! editor-ref ed))
 
-        ;; FIXME: this sucks, find a better way to handle configuration like this
-        (when (:submit-event opts)
-          (.setOption ed "extraKeys"
-            #js {"Ctrl-Enter" submit-fn
-                 "Shift-Enter" submit-fn}))
-
-        #_(when-not (false? clojure)
-            (par-cm/init ed)))))
+        (set! editor ed))))
 
   (destroy! [this dom-remove?]
-
     (when-some [editor-ref (:editor-ref opts)]
       (vreset! editor-ref nil))
 
@@ -109,4 +85,3 @@
 
 (defn editor [opts]
   (with-meta opts {`ap/as-managed make-editor}))
-

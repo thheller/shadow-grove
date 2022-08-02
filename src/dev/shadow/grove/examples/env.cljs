@@ -10,6 +10,7 @@
 
 (defonce data-ref
   (-> {::m/example-tab :result
+       ::m/example-html "<!-- converts HTML with Tailwind classes to grove+css -->\n\n<div class=\"p-8 text-red-500 text-5xl\">Hello World</div>"
        ::m/example-result "No Result yet."}
       (db/configure m/schema)
       (atom)))
