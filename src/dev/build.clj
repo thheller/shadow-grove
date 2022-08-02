@@ -6,7 +6,7 @@
 (defn css-release []
   (let [build-state
         (-> (cb/start)
-            (cb/index-path (io/file "src" "main") {})
+            (cb/index-path (io/file "src" "dev") {})
             (cb/generate
               '{:ui
                 {:include
