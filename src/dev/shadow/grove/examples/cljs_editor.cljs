@@ -90,8 +90,8 @@
             #js {"Ctrl-Enter" submit-fn
                  "Shift-Enter" submit-fn}))
 
-        #_(when-not (false? clojure)
-            (par-cm/init ed)))))
+        (when-not (false? clojure)
+          (par-cm/init ed)))))
 
   (destroy! [this dom-remove?]
 

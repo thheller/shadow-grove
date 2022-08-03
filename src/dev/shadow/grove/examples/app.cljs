@@ -276,7 +276,8 @@
   (let [parts
         (reduce
           (fn [m val]
-            (let [idx (str/index-of val ":")]
+            (let [val (str/replace val #"/" "of")
+                  idx (str/index-of val ":")]
               (if-not idx
                 (update m "_" conj (str ":" val))
                 (let [[prefix suffix] (str/split val #":" 2)]
