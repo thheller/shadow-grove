@@ -11,6 +11,8 @@ The core pieces are
 - `shadow.grove.events`: Event system to handle changes to the system
 - `shadow.grove.components`: The component system providing the basis to connect the pieces: dispatching events, reading from the DB (via EQL queries) and updating the DOM.
 
+Try it live in your browser via the [shadow-grove Playground](https://code.thheller.com/shadow-grove-playground/0.4.0/).
+
 ### Prior Art
 
 Pretty much everything here borrows ideas from other libraries in the JS/CLJS space.
@@ -23,7 +25,7 @@ However, all things here are written from scratch. Mostly since we are not using
 
 ### Current Status
 
-`shadow.grove` is far from finished but usable. I have been using this for a few years now. Documentation is still in an terrible state though.
+`shadow.grove` is far from finished but usable. Performance is [good](https://github.com/thheller/js-framework-shadow-grove). I have been using this for a few years now. Documentation is still in an terrible state though.
 
 The [shadow-cljs UI](https://github.com/thheller/shadow-cljs/tree/master/src/main/shadow/cljs/ui) is sort of a reference application for all of this. You can experience it live at http://localhost:9630 if you have shadow-cljs running locally. You can also use the [grove-todo](https://github.com/thheller/grove-todo) example.
 
@@ -39,7 +41,6 @@ The core structures in `shadow.grove` are modular so each piece needs to be setu
 (ns todo.ui.env
   (:require
     [shadow.grove.db :as db]
-    [shadow.grove.runtime :as rt]
     [todo.model :as-alias m]))
 
 (def schema
@@ -58,7 +59,7 @@ The core structures in `shadow.grove` are modular so each piece needs to be setu
 
 (defonce rt-ref
   (-> {}
-      (rt/prepare data-ref :todo)))
+      (sg/prepare data-ref :todo)))
 ```
 
 This namespace can then potentially be used by everything else that may require access to `env/rt-ref`. It basically just holds all our application state.
