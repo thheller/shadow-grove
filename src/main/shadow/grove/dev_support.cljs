@@ -143,7 +143,16 @@
   cp/Datafiable
   (datafy [this]
     [(db/ident-key this)
-     (db/ident-val this)]))
+     (db/ident-val this)])
+
+  IComparable
+  (-compare [x y]
+    (if-not (instance? db-ident/Ident y)
+      (throw (ex-info "failed to compare to ident" {:x x :y y}))
+      (let [c (-compare (db/ident-key x) (db/ident-key y))]
+        (if-not (zero? c)
+          c
+          (-compare (db/ident-val x) (db/ident-val y)))))))
 
 (deftype IdentFormatter []
   Object
