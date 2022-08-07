@@ -1,4 +1,5 @@
-(ns shadow.grove.db.ident)
+(ns shadow.grove.db.ident
+  (:refer-clojure :exclude (ident?)))
 
 ;; keeping this in its own namespace only for hot-reload purposes
 ;; keeping it in db directly is a little annoying otherwise when working on db namespace
@@ -60,3 +61,6 @@
          (.write writer (pr-str (:id ident)))
          (.write writer "]"))))
 
+
+(defn ident? [thing]
+  (instance? Ident thing))

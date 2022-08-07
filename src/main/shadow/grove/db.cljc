@@ -10,26 +10,21 @@
      (identical? a b)))
 
 (defn make-ident [type id]
-  (ident/Ident. type id nil)
-  ;; [type id]
-  )
-
+  #?(:clj (ident/->Ident type id)
+     :cljs (ident/->Ident type id nil)))
 
 (defn ident? [thing]
-  (instance? ident/Ident thing)
-  #_(and (vector? thing)
-         (= (count thing) 2)
-         (keyword? (first thing))))
+  (ident/ident? thing))
 
-(defn ident-key [^Ident thing]
-  {:pre [(ident? thing)]}
-  ;; (nth thing 0)
-  (.-entity-type thing))
+(defn ident-key [thing]
+  {:pre [(ident/ident? thing)]}
+  #?(:clj (:entity-type thing)
+     :cljs (.-entity-type ^Ident thing)))
 
-(defn ident-val [^Ident thing]
-  {:pre [(ident? thing)]}
-  ;;(nth thing 1)
-  (.-id thing))
+(defn ident-val [thing]
+  {:pre [(ident/ident? thing)]}
+  #?(:clj (:id thing)
+     :cljs (.-id ^Ident thing)))
 
 (defn ident-as-vec [ident]
   [(ident-key ident)
