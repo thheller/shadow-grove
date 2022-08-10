@@ -1,4 +1,4 @@
-(ns shadow.arborist-test
+(ns shadow.experiments.arborist-test
   (:require
     [clojure.test :as t :refer (deftest is)]
     [clojure.pprint :refer (pprint)]
@@ -26,16 +26,13 @@
 
   '[[:div.card
      [:div.card-title title]
-     [:div.card-body {:foo "bar"} body]
-     [bar bar-child-can-change]
-     [foo {:bar 1}
-      [:foo.child "foo.child"]]
-     [:div.card-actions
+     [:div {:foo "bar" :class (css 1 2 3)} body]
+     [:div
       [:button "ok"]]]]
   #_[[:div x]
      [:> component {:foo "bar"} [:c1 [:c2 {:x x}] y] [:c3]]])
 
 
 (deftest test-macro-expand
-  (pprint (frag/make-fragment {} test-body)))
+  (pprint (frag/make-fragment {} nil test-body)))
 
