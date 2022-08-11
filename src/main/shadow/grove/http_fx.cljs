@@ -256,7 +256,75 @@
 (defn merge-right [left right]
   (merge right left))
 
-(defn make-handler [config]
+(defn make-handler
+  "Returns an fx handler which will initiate an XMLHttpRequest. The request itself
+   is defined in the event handler queuing the fx, i.e. as `fx-val` arg of
+   [[shadow.grove/queue-fx]].
+
+   ### Request definition
+
+   The request definition is a map with the following keys:
+   * `:request` – possible formats:
+     - `[method uri body opts]`
+     - `{:method , :uri , :body , :request-format ,}`. `:method` defaults to `POST`
+       if `:body` is present, `GET` otherwise. `:uri` defaults to empty string.
+     - `uri` string, same as `[:GET uri nil {}]`.
+
+     `uri` example:
+     ```clojure
+     [\"foo\" \"bar\" {:age 42 :name \"bob\"}] ;; \"foo/bar?age=42&name=bob\"
+     ```
+
+     Keys allowed in `opts` (or in the map): `:request-format`, `:timeout` (see below).
+
+   * `:on-success` - event (map) to trigger if the request is successful
+     (status code < 400). The transformed (per `:response-formats`, see below)
+ 	 response will be available in the event map under `:result`.
+
+   * `:request-many` – optional coll of requests. Only allowed instead of `:request`.
+
+   * `:on-error` – optional. See below.
+
+   ### `config`
+
+   `config` is a map with the following options:
+   * `:request-format` – sets the `content-type` of request header and transforms
+     request body. Value can be:
+     - `:edn`
+     - `:transit` (the `transit-str` needs to be available, see `grove.transit` ns.)
+     - a function `(request-format env body opts)` returning `[request-header request-body]`.
+   
+     Can be specified in:
+     1. `opts` of the request definition
+     2. `config` of `make-handler`
+     3. `env` under `::http-fx/request-format` – the `fx-env` of fx where `make-handler` is used
+
+   * `:response-formats` - a map associating `content-type` of the response to
+     transformation functions handling the body of the response. The defaults can
+     be found in [[default-response-formats]]. Users can specify their own in
+     `config` of [[make-handler]].
+
+   * `:on-error` – event (map) to trigger if the request returns an error
+     (status code >= 400). The response, status and the request itself will be
+     available in the event map under `:result`, `:status` and `:sent-request`. 
+     Can be specified in:
+     1. request definition
+     2. `config` of `make-handler`
+     3. `env` under `::http-fx/on-error` – the `fx-env` where `make-handler` is used.
+
+   * `:base-url` – part of the url common to all requests initiated by the handler.
+
+   * `:timeout` - sets `XMLHttpRequest.timeout`. Specified in `:opts` of the request.
+
+   * `:with-credentials` - boolean for `XMLHttpRequest.withCredentials`. Can be
+     specified in `:opts` of the request or `config` of [[make-handler]].
+   
+   If using `transit`, add the following to your `init` fn:
+   ```clojure
+   (shadow.grove.transit/init! rt-ref)
+   ```
+   There's also `shadow.grove.edn`." 
+  [config]
   ;; FIXME: deep-merge, so maps are merged properly
   (let [config (update config :response-formats merge-right default-response-formats)]
     (fn http-fx-handler [env request-def]
