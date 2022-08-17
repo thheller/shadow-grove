@@ -261,9 +261,9 @@
 
 (defonce keyboard-hook
   (do (js/window.addEventListener
-        "keypress"
+        "keydown"
         (fn [e]
           ;; ctrl+shift+s
-          (when (and (= (.-which e) 19) (.-ctrlKey e) (.-shiftKey e))
+          (when (and (= (.-key e) "S") (.-ctrlKey e) (.-shiftKey e))
             (select-element))))
       true))
