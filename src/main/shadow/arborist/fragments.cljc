@@ -457,8 +457,13 @@
               :code-ref
               (assoc sym->idx sym (count sym->idx))
 
+              ;; need references to static qualified keywords
+              ;; so they can get cleared properly
               :static-attr
-              sym->idx
+              (if (or (simple-keyword? (:attr ast))
+                      (contains? sym->idx sym))
+                sym->idx
+                (assoc sym->idx sym (count sym->idx)))
 
               :dynamic-attr
               (if (contains? sym->idx sym)

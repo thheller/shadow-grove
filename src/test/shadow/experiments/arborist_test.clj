@@ -28,7 +28,7 @@
      [:div.card-title title]
      [:div {:foo "bar" :class (css 1 2 3)} body]
      [:div
-      [:button "ok"]]]]
+      [:button {:style/height "15px"} "ok"]]]]
   #_[[:div x]
      [:> component {:foo "bar"} [:c1 [:c2 {:x x}] y] [:c3]]])
 
