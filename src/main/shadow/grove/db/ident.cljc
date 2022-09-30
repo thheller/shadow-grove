@@ -31,6 +31,18 @@
             (keyword-identical? entity-type (.-entity-type other))
             (= id (.-id other))))
 
+     IComparable
+     (-compare [this ^Ident other]
+       (when-not (instance? Ident other)
+         (throw (ex-info (str "cannot compare db/ident to " (type other))
+                  {:this this
+                   :other other})))
+
+       (let [tc (compare entity-type (.-entity-type other))]
+         (if-not (zero? tc)
+           tc
+           (compare id (.-id other)))))
+
      IPrintWithWriter
      (-pr-writer [this writer opts]
        ;; gdb = grove db
