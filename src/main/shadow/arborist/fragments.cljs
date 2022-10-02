@@ -1,6 +1,7 @@
 (ns shadow.arborist.fragments
   (:require-macros [shadow.arborist.fragments])
   (:require
+    [shadow.cljs.modern :refer (defclass)]
     [shadow.arborist.protocols :as p]
     [shadow.arborist.attributes :as a]
     [shadow.arborist.common :as common]))
@@ -40,13 +41,29 @@
 
 (declare ^{:arglists '([thing])} fragment-init?)
 
-(deftype ManagedFragment
-  [env
-   ^FragmentCode code
-   ^:mutable vals
-   marker
-   exports
-   ^boolean ^:mutable dom-entered?]
+(defclass ManagedFragment
+  (field env)
+  (field ^FragmentCode code)
+  (field vals)
+  (field marker)
+  (field exports)
+  (field ^boolean dom-entered?)
+
+  (constructor [this init-env init-code init-vals element-ns]
+    (let [element-fn (if (nil? element-ns) (:dom/element-fn init-env) (get-element-fn init-env element-ns))
+          init-env (cond-> init-env (some? element-ns) (assoc :dom/element-fn element-fn :dom/svg true))]
+
+      (set! env (assoc init-env ::fragment this))
+      (set! code init-code)
+      (set! vals init-vals)
+      (set! marker (common/dom-marker env))
+
+      ;; create-fn creates all necessary nodes but only exports those that will be accessed later in an array
+      ;; this might be faster if create-fn just closed over locals and returns the callbacks to be used later
+      ;; svelte does this but CLJS doesn't allow to set! locals so it would require ugly js* code to make it work
+      ;; didn't benchmark but the array variant shouldn't be that much slower. maybe even faster since
+      ;; the functions don't need to be recreated for each fragment instance
+      (set! exports (.. code (create-fn env vals element-fn)))))
 
   p/IManaged
   (dom-first [this] marker)
@@ -85,15 +102,7 @@
 (deftype FragmentInit [vals element-ns ^FragmentCode code]
   p/IConstruct
   (as-managed [_ env]
-    (let [element-fn (if (nil? element-ns) (:dom/element-fn env) (get-element-fn env element-ns))
-          env (cond-> env (some? element-ns) (assoc :dom/element-fn element-fn :dom/svg true))
-          ;; create-fn creates all necessary nodes but only exports those that will be accessed later in an array
-          ;; this might be faster if create-fn just closed over locals and returns the callbacks to be used later
-          ;; svelte does this but CLJS doesn't allow to set! locals so it would require ugly js* code to make it work
-          ;; didn't benchmark but the array variant shouldn't be that much slower. maybe even faster since
-          ;; the functions don't need to be recreated for each fragment instance
-          exports (.. code (create-fn env vals element-fn))]
-      (ManagedFragment. env code vals (common/dom-marker env) exports false)))
+    (ManagedFragment. env code vals element-ns))
 
   IEquiv
   (-equiv [this ^FragmentInit other]
