@@ -18,9 +18,9 @@ I'll try to explain everything based on the common TodoMVC example. Using a data
      :text "do c"}]})
 ```
 
-We follow the "props flow down, events bubble up" rendering model (similar to `react`). So one naive way to do all this would just be calling `(ui-root data)`. Pass in all data at the root and go from there. This quickly becomes a nightmare to maintain and also very inefficient since any update will need to be re-rendered from the root completely. No precise targeted updates possible.
+We follow the "props flow down, events bubble up" rendering model (similar to React). So one naive way to do all this would be just calling `(ui-root data)`. Pass in all data at the root and go from there. This quickly becomes a nightmare to maintain and also very inefficient since any update will need to be re-rendered from the root completely. No precise targeted updates possible.
 
-`om` tried to optimize this approach using `cursors`. Which alleviates some of the pain but also makes other things much harder. You really want the option to gain access to all data everywhere. You UI may not match your data layout exactly so we need to decouple this.
+Om tried to optimize this approach using `cursors`, which alleviates some of the pain but also makes other things much harder. You really want the option to gain access to all data everywhere. Your UI may not match your data layout exactly so we need to decouple this.
 
 ## Normalizing the DB
 
@@ -55,7 +55,7 @@ Now we can update `[:todo 3]` directly without having to touch `:todos` at all. 
 
 ## Components
 
-With "props flow down, events bubble up" we could still just pass the entire db at the root. Just by normalizing this would actually be more efficient than before. The burden is still on the developer passing this down manually everywhere though.
+With "props flow down, events bubble up" we could still just pass the entire db at the root. Just by normalizing, this would actually be more efficient than before. The burden is still on the developer to pass this down manually everywhere though.
 
 Components however provide a controlled way to inject data into the tree. They can manage their lifecycle in the DOM and as such can properly handle changes to the data and update accordingly.
 
@@ -89,7 +89,7 @@ It also happens to provide a way to turn the normalized data back into something
 
 In this we provide no data via the `ui-root` at all. Instead, it queries the "root" of the database for the `:todos` attribute. They are then rendered as a collection using the `ui-todo` component. Each `ui-todo` will receive the ident of the todo it is supposed to render. It will use this to query the data again from the DB. It doesn't specify the EQL attributes it wants here, which is just short for `(get db ident)` but `(sg/query-ident ident [:text])` would be valid and only provide the `{:text ...}` map instead of the complete one.
 
-What we end up with is 4 mounted queries. The first read the `:todos` key and nothing else. It will only update if `:todos` changes. The other three  just read their ident. So updating `[:todo 3]` will not cause `[:todo 2]` to update.
+What we end up with is 4 mounted queries. The first read the `:todos` key and nothing else. It will only update if `:todos` changes. The other three just read their ident. So updating `[:todo 3]` will not cause `[:todo 2]` to update.
 
 Queries manage their data needs and signal components when they need to update.
 
@@ -99,7 +99,7 @@ The above all handles data flowing down the component tree. Everything can acces
 
 Those updates can come from many places but most often they will be triggered by something the user does in the UI -- clicking a button.
 
-Events are expressed as data. Keeping with "props flow down, events bubble up" each component in the path is given a chance to handle it.
+Events are expressed as data. Keeping with "props flow down, events bubble up," each component in the path is given a chance to handle it.
 
 Suppose we want to add a button you can click to complete a certain todo.
 
@@ -128,7 +128,7 @@ We could handle this event directly in the component by declaring an event handl
          [:button {:on-click ::complete!} "complete me"]])))
 ```
 
-However, it is not the job of the component to handle database concerns. It should strictly focus on only updating the DOM. It will already receive updates it may need from the query. So instead we don't declare this event handler in the component and instead just let it bubble up.
+However, it is not the job of the component to handle database concerns. It should strictly focus on only updating the DOM. It will already receive updates it may need from the query. So we don't declare this event handler in the component and instead just let it bubble up.
 
 `ev` is a event map. `:on-click ::complete!` basically is just short for `:on-click {:e ::complete!}`. They are maps so you can easily provide more data in events. You could provide `:on-click {:e ::complete! :todo ident}` here to the `ev` map will contain the ident of the todo we want to update.
 
@@ -166,7 +166,7 @@ The event subsystem is very similar to `re-frame`. Events are maps of data inste
 
 When the event is handled by the root first a transaction is started. The event handler will receive two arguments, first the `tx-env` and second the `ev` event map.
 
-Event handlers can be registered by `(ev/reg-event rt-ref ::complete! (fn [tx-env ev] ...))` or via the metadata tools if setup properly.
+Event handlers can be registered by `(ev/reg-event rt-ref ::complete! (fn [tx-env ev] ...))` or via the metadata tools if set up properly.
 
 ```clojure
 (defn complete!
@@ -179,9 +179,9 @@ As far as event handling is concerned these are identical. I just happen to like
 
 So, the `tx-env` argument will have a `:db` attribute which contains a "transacted" db instance. Basically just the regular clojure map with some added modification tracking. You work with it like any other regular clojure map (eg. `assoc`, `update`, `dissoc`) but at the end of the transaction the system cheaply recorded what was actually done.
 
-As a general rule all event handlers must return a potentially updated `tx-env`. In a `re-frame` system you would return a new map with a updated `:db`. By returning `tx-env` however it becomes easier to compose events, since you always pass around the entire context.
+As a general rule all event handlers must return a potentially updated `tx-env`. In a `re-frame` system you would return a new map with an updated `:db`. By returning `tx-env` however it becomes easier to compose events, since you always pass around the entire context.
 
-So a simple event handle could just assoc what we need into the database.
+So a simple event handler could just assoc what we need into the database.
 
 ```clojure
 (defn complete!
