@@ -40,6 +40,7 @@ The core structures in `shadow.grove` are modular so each piece needs to be setu
 ```clojure
 (ns todo.ui.env
   (:require
+    [shadow.grove :as sg]
     [shadow.grove.db :as db]
     [todo.model :as-alias m]))
 

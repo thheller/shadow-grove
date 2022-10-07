@@ -140,7 +140,8 @@
         attr-ops
         (->> attrs
              (map (fn [[attr-key attr-value]]
-                    (if (const? env attr-value)
+                    (cond
+                      (const? env attr-value)
                       {:op :static-attr
                        :sym el-sym
                        :element-id id
@@ -148,12 +149,33 @@
                        :value attr-value
                        :src attrs}
 
-                      {:op :dynamic-attr
+                      ;; :class (css ...) is constant, no need to ever update
+                      ;; FIXME: shouldn't assume this is shadow.css/css only
+                      (and (= :class attr-key)
+                           (seq? attr-value)
+                           (= 'css (first attr-value)))
+                      {:op :static-attr
                        :sym el-sym
                        :element-id id
                        :attr attr-key
-                       :value (make-code env attr-value {})
+                       :value attr-value
                        :src attrs}
+
+                      :else
+                      (-> {:op :dynamic-attr
+                           :sym el-sym
+                           :element-id id
+                           :attr attr-key
+                           :value (make-code env attr-value {})
+                           :src attrs}
+                          (cond->
+                            ;; special case for (let [$cls (css ...)] ...)
+                            ;; so it can skip over updating those since they never change
+                            (and (= :class attr-key)
+                                 (simple-symbol? attr-value)
+                                 (= 'shadow.css/css-id (get-in env [:macro-env :locals attr-value :tag])))
+                            (assoc :constant true) ;; no need to update
+                            ))
                       )))
              (into []))
 
@@ -311,10 +333,12 @@
               mutations
 
               :dynamic-attr
-              (let [ref-id (-> ast :value :ref-id)
-                    form
-                    `(update-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) (aget ~oldv-sym ~ref-id) (aget ~newv-sym ~ref-id))]
-                (conj mutations form))))
+              (if (:constant ast)
+                mutations ;; no need to update constant attributes
+                (let [ref-id (-> ast :value :ref-id)
+                      form
+                      `(update-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) (aget ~oldv-sym ~ref-id) (aget ~newv-sym ~ref-id))]
+                  (conj mutations form)))))
           []
           ast)]
 
@@ -433,8 +457,13 @@
               :code-ref
               (assoc sym->idx sym (count sym->idx))
 
+              ;; need references to static qualified keywords
+              ;; so they can get cleared properly
               :static-attr
-              sym->idx
+              (if (or (simple-keyword? (:attr ast))
+                      (contains? sym->idx sym))
+                sym->idx
+                (assoc sym->idx sym (count sym->idx)))
 
               :dynamic-attr
               (if (contains? sym->idx sym)
