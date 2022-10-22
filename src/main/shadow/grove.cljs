@@ -162,8 +162,11 @@
 
 (defn simple-seq
   "Creates a collection of DOM elements by applying `render-fn` to each item 
-   in `coll`. `render-fn` can be a function or component. Best used with colls
-   that don't re-order or change much. Alternatively, look into [[keyed-seq]].
+   in `coll`. `render-fn` can be a function or component.
+   
+   Makes no attempts to minimize DOM operations required for updates. Efficient
+   with colls which change infrequently or colls updated at the tail. Otherwise,
+   consider using [[keyed-seq]].
 
    ---
    Example:
@@ -183,8 +186,8 @@
    * `key-fn` is used to extract a unique key from items in `coll`.
    * `render-fn` can be a function or component.
 
-   Prefer over [[simple-seq]] when the collection changes (e.g. re-orders)
-   frequently.
+   Uses the key to minimize DOM updates. Consider using instead of (the more
+   lightweight) [[simple-seq]] when `coll` changes frequently.
    
    ---
    Examples:
