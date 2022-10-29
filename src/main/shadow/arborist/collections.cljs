@@ -283,18 +283,16 @@
          (= coll (.-coll other)))))
 
 (defn keyed-seq [coll key-fn render-fn]
-  {:pre [(sequential? coll)
+  {:pre [(or (nil? coll) (sequential? coll))
          (ifn? key-fn)
          (ifn? render-fn)]}
-
-  ;; we always need compatible collections, it should already be a vector in most cases
-  ;; it must not allow lazy sequences since the sequence may not be used immediately
-  ;; some item may suspend and whatever the lazy seq did will happen in totally different phases
-  ;; cannot guarantee that some other data it previously may have relied upon is still valid
-  (let [coll (vec coll)]
-    (if (zero? (count coll))
-      nil ;; can skip much unneeded work for empty colls
-      (KeyedCollectionInit. coll key-fn render-fn))))
+  ;; handling nil and empty colls, can skip a lot of work
+  (when (seq coll)
+    ;; we always need compatible collections, it should already be a vector in most cases
+    ;; it must not allow lazy sequences since the sequence may not be used immediately
+    ;; some item may suspend and whatever the lazy seq did will happen in totally different phases
+    ;; cannot guarantee that some other data it previously may have relied upon is still valid
+    (KeyedCollectionInit. (vec coll) key-fn render-fn)))
 
 (declare SimpleCollectionInit)
 
@@ -436,9 +434,9 @@
          (= coll (.-coll other)))))
 
 (defn simple-seq [coll render-fn]
-  {:pre [(sequential? coll)
+  {:pre [(or (nil? coll) (sequential? coll))
          (ifn? render-fn)]}
-  (let [coll (vec coll)]
-    (if (zero? (count coll))
-      nil ;; can skip much unneeded work for empty colls
-      (SimpleCollectionInit. coll render-fn))))
+  ;; skip work if no coll or empty coll
+  (when (seq coll)
+    ;; forced vec, eliminates lazy seqs and allows skipping checks later
+    (SimpleCollectionInit. (vec coll) render-fn)))
