@@ -28,6 +28,8 @@
    - Set the `:ui/href` attribute on anchors for internal links. (Unlike regular 
      `href`, will handle of `path-prefix` and `use-fragment`.)
    - Register handler for the event `{:e :ui/route! :token token :tokens tokens}`.
+     - `token` is \"/a/b\"
+     - `tokens` is `[\"a\", \"b\"]`.
    - Intercepts only pure clicks with main mouse button (no keyboard modifiers).
    - The `:ui/redirect!` *fx* handler will be registered and can be 'called' with:
      * `:token` – URL to redirect to (a string starting with `/`)
