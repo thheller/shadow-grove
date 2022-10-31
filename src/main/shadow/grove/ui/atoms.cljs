@@ -41,8 +41,8 @@
     (remove-watch the-atom this)))
 
 (deftype AtomWatch
-  [the-atom
-   access-fn
+  [^:mutable the-atom
+   ^:mutable access-fn
    ^:mutable val
    ^:mutable component-handle]
 
@@ -50,24 +50,38 @@
   (hook-init! [this ch]
     (set! component-handle ch)
     (set! val (access-fn nil @the-atom))
-    (add-watch the-atom this
-      (fn [_ _ old new]
-        ;; check immediately and only invalidate if actually changed
-        ;; avoids kicking off too much work
-        ;; FIXME: maybe shouldn't check equiv? only identical?
-        ;; pretty likely that something changed after all
-        (let [next-val (access-fn old new)]
-          (when (not= val next-val)
-            (set! val next-val)
-            (gp/hook-invalidate! component-handle))))))
+    (.add-watch! this))
 
   (hook-ready? [this] true) ;; born ready
   (hook-value [this] val)
   (hook-update! [this]
     ;; only gets here if value changed
     true)
-  (hook-deps-update! [this new-val]
-    ;; FIXME: its ok to change the access-fn
-    (throw (ex-info "shouldn't have changing deps?" {})))
+  (hook-deps-update! [this ^AtomWatch next]
+    (set! access-fn (.-access-fn next))
+    (let [atom-val @(.-the-atom next)
+          curr-val @the-atom
+          next-val (access-fn curr-val atom-val)]
+
+      ;; need to forget about the previous atom
+      ;; since it was also redefined to be a new atom
+      ;; so any local update will update the new one, not the one we have
+      (remove-watch the-atom this)
+      (set! the-atom (.-the-atom next))
+      (.add-watch! this)
+
+      (when (not= val next-val)
+        (set! val next-val)
+        true)))
+
   (hook-destroy! [this]
-    (remove-watch the-atom this)))
+    (remove-watch the-atom this))
+
+  Object
+  (add-watch! [this]
+    (add-watch the-atom this
+      (fn [_ _ old new]
+        (let [next-val (access-fn old new)]
+          (when (not= val next-val)
+            (set! val next-val)
+            (gp/hook-invalidate! component-handle)))))))
