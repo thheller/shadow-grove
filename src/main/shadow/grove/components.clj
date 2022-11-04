@@ -312,6 +312,21 @@
          (let ~(let-bindings state deps)
            ~@body)))))
 
+(defmethod analyze-hook '<<
+  [{:keys [comp-sym bindings] :as state} {:keys [body] :as hook}]
+  ;; (<< something)
+  (when (contains? state :render-fn)
+    (throw (ex-info "render already defined" {})))
+
+  (let [deps (find-used-bindings #{} bindings body)]
+
+    (assoc state
+      :render-used deps
+      :render-fn
+      `(fn [~comp-sym]
+         (let ~(let-bindings state deps)
+           (shadow.grove/<< ~@body))))))
+
 (defmethod analyze-hook 'event
   [{:keys [comp-sym bindings] :as state} {:keys [body] :as hook}]
   ;; (event ::ev-id [env e] (do-something))
