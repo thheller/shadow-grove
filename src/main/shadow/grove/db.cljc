@@ -108,6 +108,7 @@
 
 (defn configure
   "Associates `spec` to `init-db` as its schema used for normalization operations.
+  *Note*: will not normalize data from `init-db` in any way.
    
    ---
    Example:
@@ -260,10 +261,12 @@
 
 (defn merge-seq 
   "Normalizes `coll` of items of `entity-type` into `data` (db).
-   The vector of idents normalized can be inserted at `target-path` (replacing
-   what's present). Alternatively, you can specify a `target-fn` which takes
-   `data normalized-idents` as arguments and should return updated `data`.
-   See [[add]] for more info."
+   The vector of idents normalized can be inserted at target-path, replacing
+   what's present. Alternatively, you can specify a target-fn which takes
+   `data normalized-idents` and returns updated `data`.
+
+   *Note*: using outside of event handlers won't record all necessary data
+   (e.g. adding to the [::all entity-type] set). See [[TransactedData]]."
   ([data entity-type coll]
    (merge-seq data entity-type coll nil))
   ([data entity-type coll target-path-or-fn]
@@ -304,7 +307,10 @@
    * `data` - db with schema (e.g. in transactions `(:db tx-env)`).
    * `entity-type` of `item` being added. Should be present in schema. 
    * `item` - a *map* of data to add. (For collections, see [[merge-seq]].)
-   * `target-path` - where to 'attach' the `item`.
+   * `target-path` - where to `conj` the ident of `item`.
+
+   *Note*: using outside of event handlers won't record all necessary data
+   (e.g. adding to the [::all entity-type] set). See [[TransactedData]].
 
    ---
    Examples:
@@ -375,11 +381,9 @@
 ;; don't want to write code that assumes it uses core remove
 (defn remove
   "Removes `thing` from `data` root. `thing` can be either an ident or a map
-   like `{:db/ident ident ...}`.
-   
-   Will *not* remove any remaining references of `thing`.
-   (When used on db/transacted, e.g. in event handlers, `thing` will be removed
-   from the set of all entities of `thing`'s type.)"
+   like `{:db/ident ident ...}`. When used on `TransactedData` (e.g. in event
+   handlers), `thing` will be removed from the set of all entities of `thing`'s
+   type. Will *not* remove any other references to `thing`."
   [data thing]
   (cond
     (ident? thing)
