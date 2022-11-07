@@ -1,5 +1,6 @@
 {:paths
- ["src/main"]
+ ["src/main"
+  "src/test"]
 
  :deps
  {com.thheller/shadow-css {:mvn/version "0.2.0"}}

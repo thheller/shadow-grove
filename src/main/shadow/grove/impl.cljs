@@ -268,13 +268,13 @@
             result
             (merge-result tx-env ev (handler tx-env ev))]
 
-        (let [{:keys [data keys-new keys-removed keys-updated] :as tx-result}
-              (db/commit! (:db result))]
+        (let [{:keys [db data keys-new keys-removed keys-updated] :as tx-result}
+              (db/tx-commit! (:db result))]
 
           (when-not (identical? @data-ref before)
             (throw (ex-info "someone messed with app-state while in tx" {})))
 
-          (reset! data-ref data)
+          (reset! data-ref db)
 
           ;; FIXME: figure out if invalidation/refresh should be immediate or microtask'd/delayed?
           (when-not (identical? before data)
@@ -323,7 +323,7 @@
                        :keys-removed keys-removed
                        :keys-updated keys-updated
                        :fx (::rt/fx result)
-                       :db-before before
+                       :db-before @before
                        :db-after data
                        :env env
                        :env-changes

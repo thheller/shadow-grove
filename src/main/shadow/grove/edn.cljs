@@ -10,7 +10,7 @@
           (reader/read-string opts data))]
 
     (reader/register-tag-parser!
-      "gdb/ident"
+      'gdb/ident
       (fn [[key val]]
         (db/make-ident key val)))
 
