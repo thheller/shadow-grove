@@ -590,8 +590,9 @@
     (if (instance? GroveDB db) @db db)))
 
 (defn configure
-  "Associates `spec` to `init-db` as its schema used for normalization operations.
-  *Note*: will not normalize data from `init-db` in any way.
+  "Returns a [[GroveDB]] instance with associated `spec` as its schema used for
+   normalization operations. You may optionally initialize the db to an `init-db`
+   map. This will not normalize data from `init-db` in any way.
    
    ---
    Example:
@@ -604,8 +605,7 @@
        :joins {:folder/contains [:many ::file]}}})
    
    (defonce data-ref
-     (-> {}
-         (db/configure schema)
+     (-> (db/configure schema)
          (atom)))
    ```"
   ([spec]
@@ -709,13 +709,10 @@
     imports))
 
 (defn merge-seq 
-  "Normalizes `coll` of items of `entity-type` into `data` (db).
-   The vector of idents normalized can be inserted at target-path, replacing
-   what's present. Alternatively, you can specify a target-fn which takes
-   `data normalized-idents` and returns updated `data`.
-
-   *Note*: using outside of event handlers won't record all necessary data
-   (e.g. adding to the [::all entity-type] set). See [[TransactedData]]."
+  "Normalizes `coll` of items of `entity-type` into `data` (a [[configure]]d
+   [[GroveDB]] instance). The vector of idents normalized can be inserted at
+   target-path, replacing what's present. Alternatively, you can specify a target-fn
+   which will be called with `data normalized-idents` and should return updated `data`."
   ([data entity-type coll]
    (merge-seq data entity-type coll nil))
   ([data entity-type coll target-path-or-fn]
@@ -750,13 +747,10 @@
 (defn add
   "Normalizes the `item` of `entity-type` into `data` at `target-path`.
 
-   * `data` - db with schema (e.g. in transactions `(:db tx-env)`).
-   * `entity-type` of `item` being added. Should be present in schema. 
+   * `data` - this should be a [[configure]]d [[GroveDB]] instance.
+   * `entity-type` of `item` being added. Should be present in db schema. 
    * `item` - a *map* of data to add. (For collections, see [[merge-seq]].)
    * `target-path` - where to `conj` the ident of `item`.
-
-   *Note*: using outside of event handlers won't record all necessary data
-   (e.g. adding to the [::all entity-type] set). See [[TransactedData]].
 
    ---
    Examples:
@@ -772,8 +766,7 @@
        :attrs {}
        :joins {:children [:many ::node]}}})
 
-   (-> {}
-       (db/configure schema)
+   (-> (db/configure schema)
        (db/add ::node {:id 0 :children [{:id 1} {:id 2}]} [::root]))
    ```"  
   ([data entity-type item]
@@ -824,9 +817,9 @@
 ;; don't want to write code that assumes it uses core remove
 (defn remove
   "Removes `thing` from `data` root. `thing` can be either an ident or a map
-   like `{:db/ident ident ...}`. When used on `TransactedData` (e.g. in event
-   handlers), `thing` will be removed from the set of all entities of `thing`'s
-   type. Will *not* remove any other references to `thing`."
+   like `{:db/ident ident ...}`. When used on a [[GroveDB]] instance, `thing` will 
+   be removed from the set of all entities of `thing`'s type. Will *not* remove
+   any other references to `thing`."
   [data thing]
   (cond
     (ident? thing)
