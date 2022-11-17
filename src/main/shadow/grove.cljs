@@ -135,16 +135,19 @@
   "calls (callback env) after render when provided deps argument changes
    callback can return a function which will be called if cleanup is required"
   [deps callback]
+  {:pre [(fn? callback)]}
   (comp/EffectHook. deps callback nil true nil))
 
 (defn render-effect
   "call (callback env) after every render"
   [callback]
+  {:pre [(fn? callback)]}
   (comp/EffectHook. :render callback nil true nil))
 
 (defn mount-effect
   "call (callback env) on mount once"
   [callback]
+  {:pre [(fn? callback)]}
   (comp/EffectHook. :mount callback nil true nil))
 
 ;; FIXME: does this ever need to take other options?
