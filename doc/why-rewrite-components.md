@@ -114,20 +114,21 @@ Maybe the entire approach of trying to make this look like a regular function ca
   (on-init [state bar]
      (assoc state :bar bar))
 
-  ;; cleanup?
+  ;; optional, cleanup
   (on-destroy [state])
 
-  ;; react useEffect always
+  ;; optional, react useEffect always
   (on-render [state])
   
-  ;; only on specific changes?
+  ;; optional, only on specific changes?
   (on-render :bar [state old new])
   (on-render #{:foo :bar} [state old new])
 
-  ;; react useLayoutEffect?
+  ;; optional, react useLayoutEffect?
   (on-before-paint [state])
 
   ;; react to changing of arg value
+  ;; without this the arg change is just ignored?
   (on-arg-change bar [state old new]
     (assoc state :bar new))
 
@@ -155,7 +156,8 @@ Looks simple enough, but how does it look with more complicated things.
     ;; and dispatches data event initially and when changed?
     ;; or maybe just takes state arg which carries some special key/metadata
     ;; which reference back to component?
-    (db/query-ident ident))
+    (db/query-ident ident)
+    state)
 
   (on :db/query-result! [state result]
     ;; can compare previous :data if needed?
@@ -212,7 +214,7 @@ This way it has no meaningful return value, could also have a return value in ca
 
 This would also work and not require runtime binding. Implementation can decide which path they want to take. I don't think a `queue-fx` style separating side effects is necessary. Might get annoying to always having to pass around `state` and it immediately becoming "stale". So, might be best to stick with binding? It could always read the latest state from the component if needed.
 
-How does this handle query update though? Maybe a changing in state wants to adjust the db query? In the above that gets tricky. So, maybe it needs to take query-id as an arg to identify the query and updatable by reference?
+How does this handle query update though? Maybe a change in state wants to adjust the db query? In the above that gets tricky. So, maybe it needs to take query-id as an arg to identify the query and updatable by reference?
 
 ```clojure
 (on-init [state ident]
@@ -309,4 +311,184 @@ Maybe this could incorporate a state machine, something like erlang `gen_fsm/gen
 
 Good thing that all of this can exist side by side with existing `defc`. No need to change any existing implementations or protocols.
 
+## Other problematic things
 
+One thing that bothered my about the current EQL implementation is abusing the `eql/attr` attribute to load data on first access. Sometimes a query cannot be fully answered locally. In case of the shadow-cljs UI I opted to do this via `eql/attr` hacks.
+
+https://github.com/thheller/shadow-cljs/blob/ac8b33e7643d187845b68f6ac4acb4fc3e043949/src/main/shadow/cljs/ui/db/inspect.cljs#L186-L200
+
+```clojure
+(defmethod eql/attr :summary [env db {:keys [oid runtime-id summary] :as current} query-part params]
+  (cond
+    summary
+    summary
+
+    (or (not oid) (not runtime-id))
+    (throw (ex-info "can only request obj-preview on objects" {:current current}))
+
+    :hack
+    (do (relay-ws/cast! env
+          {:op :obj-describe
+           :to runtime-id
+           :oid oid})
+
+        :db/loading)))
+```
+
+So, if a components queries `(sg/query-ident obj-ident [:summary])` it'll first get a `:db/loading`, which suspends the component. The read also triggers a websocket message to fetch the summary over the websocket.
+
+This works but is ugly. I never found a proper place for this. I always (and still) thought that the component is not the right place for this, but maybe it is?
+
+The question that needs an answer is: How do you load data on demand when you need it and not before? The component mounting is the ideal "moment", since you are exactly in the place where the data is needed. However loading it at this time also means that you have to show something else while its loading. Suspense helps but is not perfect.
+
+I always thought that the data should handle that in some way. Since the data is driving what is getting rendered, we technically know that this component is going to mount without actually needing to mount it first. However, expressing this in a reasonable way in code is hard.
+
+Doing it in the component at least means you don't need to replicate what it needs elsewhere. Also makes it the correct place to deal with Suspense. Who sets the `Suspense` flag though?
+
+```clojure
+(defc ui-component
+  (initial-state {:object nil})
+  ;; handle arguments that aren't supposed to change
+  ;; or rather a change indicates that the component should unmount/mount to start fresh?
+  (arg ident {:validate db/ident? :immutable true})
+
+  (on-init [state ident]
+    (db/query-ident ident [:summary])
+    state)
+
+  ;; very verbose and ugly
+  (on :db/query-result! [state {:keys [summary] :as result}]
+    (-> state
+        (assoc :data result)
+        (cond->
+          (not summary)
+          (-> (load-summary ident)
+              (suspend!)))))
+
+  ;; looks cleaner
+  (on :db/query-result! [state {:keys [summary] :as result}]
+    (when-not summary
+      ;; needs to guard against repeating loading
+      (load-summary ident)) 
+    (assoc state :data result))
+
+  ;; this is not needed, if the load-summary just writes directly to DB
+  ;; would just get the :db/query-result again with summary present
+  (on :summary-loaded! [state summary]
+    (assoc-in state [:data :summary] summary))
+
+  (render {:keys [data]}
+    (<< [:div (pr-str data)])))
+```
+
+Not sure if this is any better than doing it in `eql/attr` though.
+
+Another thing the EQL abstraction does is couple the component implementation directly to the DB structure. Thinking in a normalized DB is not always fun, but it is necessary to allow components efficient updates later. A parent component might only need a list of idents, and then passing that ident to the child component. The child component can query whatever it needs. If the ident data changes the parent does not need to update, since the ident remains identical.
+
+`re-frame` subscriptions hide db internals from the component. Which in certain aspects is nice, since you can just change the implementation while keeping the "contract" or the shape of data the subscription returns. So, you may not need to touch the component when changing your DB structure. I'm not sure how necessary that really is though.
+
+The "database" is your UI database after all, there is no need for it to match your backend db schema. So, directly coupling components to this schema might actually make things easier. I'm not sure adding this subscription abstraction is needed. It is possible to do with EQL, but reshaping data too much gets expensive quick.
+
+I've never written any real app with `re-frame`, so my judgements are likely off. The point always was that EQL is an option not a requirement. It should be possible to use something similar to the re-frame model.
+
+How would this look if I still don't want any refs and hidden deref side effects?
+
+```clojure
+(reg-sub :b-query
+  (fn [db _] {:hello "world"}))
+
+(reg-sub :a-query
+  (fn [db _] {:hello "world"}))
+
+(defc ui-thing
+  (on-init [state]
+    (subscribe [:a-query])
+    (subscribe [:b-query])
+    state)
+
+  (on :a-query [state data]
+    (assoc state :a data))
+  
+  (on :b-query [state data]
+    (assoc state :b data))
+
+  (render {:keys [a b]}
+    (<< [:div "rendering" a b])))
+```
+
+Very similar to EQL. Well, technically there is a hidden runtime ref accessed in subscribe. But no deref's anywhere. `(subscribe state [:a-query])` would mean no runtime binding needed either.
+
+The `subscribe` call could also return data immediately
+
+```clojure
+  (on-init [state]
+    (-> state
+        (assoc :a (subscribe state [:a-query]))
+        (assoc :b (subscribe state [:b-query]))))
+```
+
+but I feel like that might lead to more duplicated code.
+
+The plan is to make events queue up while inside an event handler. So, say `subscribe` has data immediately available. It would trigger the associated event. We are in `on-init`. The event handler runs as soon as `on-init` completes. It cannot run immediately since then changes to `state` would get lost, because `on-init` doesn't have them. Merging in some magic way sucks.
+
+There could also be an explicit "eager" event drain mechanism, so that we can work with the data immediately?
+
+```clojure
+  (on-init [state]
+    (subscribe state [:a-query])
+    (subscribe state [:b-query])
+    (-> state
+        (drain-pending-events!)
+        (do-stuff-with-a+b-being-available)))
+```
+
+Not sure if this is actually necessary but could be useful. I really don't like passing around `state` all over the place from an API perspective, when it is supposed to be data. But adding an extra argument is also noisy. So, maybe have to give into using a runtime binding?
+
+```clojure
+  (on-init [this state]
+    (subscribe this [:a-query])
+    (subscribe this [:b-query])
+    state)
+```
+
+Not great either.
+
+```clojure
+  (on-init [state]
+    (subscribe [:a-query])
+    (subscribe [:b-query])
+    state)
+```
+
+Definitely looks best. `subscribe` could also return a handle, so we can reference the query later, or we pass in such a handle via arguments.
+
+```clojure
+  (on-init [this state]
+    (-> state
+        (assoc :a-query-handle (subscribe [:a-query 1]))
+        (assoc :b-query-handle (subscribe [:a-query 2]))))
+```
+
+```clojure
+  (on-init [this state]
+    ;; same sub with different args
+    (subscribe [:a-query 1] {:query-id :a})
+    (subscribe [:a-query 2] {:query-id :b})
+    state)
+
+  (on :a [state result])
+  (on :b [state result])
+```
+
+Probably like this more.
+
+I think if the runtime binding provides some kind of controlled "hook" mechanism we can just about do anything. The only thing implementations need to do is maybe attach some of their own state, an unmount/destroy callback, and a way to dispatch events to the component.
+
+
+## Push vs Pull?
+
+Should "hooks" push events to the components or should be components pull data from hooks? Hooks could just signal that they have events available they want to execute. The component could then pull those events when it is ready to process them. The current `defc` is pull.
+
+The component should already queue events anyway, but it may not be able to decide if events can be dropped? ie. if two query results arrive before the component even rendered an update. It could drop the first? So, pull seems like the better design. The implementations can always decide if it wants to return all, first, latest or some aggregate? Under normal circumstances this won't matter since we are likely to process events fast "enough". Should there be some kind of back-pressure or is that overkill?
+
+Events ideally also have some kind of priority? Process high priority stuff first, while potentially doing offscreen stuff "later".
