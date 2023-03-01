@@ -276,6 +276,8 @@ Could even force this computation early if needed, just `(-> state (assoc :data 
 
 The DB needs something like this too still.
 
+
+
 ## Further Thoughts?
 
 In some sense this is just `react` `useReducer` disguised as a component? Is that a bad thing? Should it be factored out and be separate from components altogether?
@@ -492,3 +494,190 @@ Should "hooks" push events to the components or should be components pull data f
 The component should already queue events anyway, but it may not be able to decide if events can be dropped? ie. if two query results arrive before the component even rendered an update. It could drop the first? So, pull seems like the better design. The implementations can always decide if it wants to return all, first, latest or some aggregate? Under normal circumstances this won't matter since we are likely to process events fast "enough". Should there be some kind of back-pressure or is that overkill?
 
 Events ideally also have some kind of priority? Process high priority stuff first, while potentially doing offscreen stuff "later".
+
+
+## Execution order
+
+One thing `defc` ensured was ordering of execution. Each bind would execute in order, when needed. You could ensure that one block finishes before the next one starts.
+
+
+```clojure
+(defc ui-thing [ident]
+  (bind data (sg/query-ident ident))
+  (bind result (compute-with data))
+  (render ...))
+```
+
+The loop thing cannot ensure this, and may become a little messy?
+
+```clojure
+(defc ui-thing
+  (arg ident)
+  (compute :data [state data]
+    (assoc state :result (compute-with data)))
+  (on-init [state ident]
+    (sg/query-ident ident)
+    state)
+  (render
+    ...))
+```
+
+It could maybe ensure that `render` is last and `on-init` before any `compute` but the whole thing becomes very "callback" based potentially.
+
+```clojure
+(defc ui-thing [ident arg]
+  (bind data (sg/query-ident ident))
+  (bind a (compute-with data))
+  (bind b (compute-else arg))
+  (bind c (+ a b))
+  (render ...))
+```
+
+This order is ensured and the code is concise. It also can only get to `render` after running through all `bind`.
+
+It gets more noisy with the loop thing.
+
+```clojure
+(defc ui-thing
+  (arg ident)
+  (arg arg)
+  (on-init [state ident arg]
+    (sg/query-ident ident {:query-id :data!})
+    (assoc state :ident ident :arg arg))
+  (on :data! [state result]
+    (assoc state :data result))
+  (on-arg-change arg [state old new]
+    (assoc state :b (compute-else new)))
+  (compute :data [state data]
+    (assoc state :a (compute-with data)))
+  (compute #{:a :b} [state old {:keys [a b]}]
+    (assoc state :c (+ a b)))
+  (render {:keys [c]}
+    ...))
+```
+
+Not too bad, but very verbose compared. It can also get to render before any of the `compute` because they trigger based on `:data` which may come at any point, unless the query implicitly suspends? The hook impl suspends if a query cannot be immediately answer?
+
+Could make things a little more compact by making the macro smarter?
+
+```clojure
+(defc ui-thing
+  ;; (arg ..) not needed, because inferred from binding names in init?
+  ;; initial state created here?
+  (on-init [ident arg]
+    (sg/query-ident ident {:query-id :data!})
+    {:ident ident :arg arg})
+  
+  ;; non-state maps returned are merged into state?
+  (on :data! [state result]
+    {:data result})
+  (on-arg-change arg [state old new]
+    {:b (compute-else new)})
+  (compute :data [state data]
+    {:a (compute-with data)})
+  (compute #{:a :b} [state old {:keys [a b]}]
+    {:c (+ a b)})
+  
+  ;; or flipping how compute works
+  ;; in theory the dependencies of a compute can be inferred?
+  ;; so instead declare which attr the compute will provide?
+  (compute :c [{:keys [a b] :as state} prev-state]
+    ;; often won't need prev-state?
+    ;; prev-state represents the last return value of this compute?
+    ;; or the actual previous state it received? diff calcs are useful sometimes
+    ;; results in (assoc state :c result-of-compute)
+    (+ a b))
+
+  ;; compute multiple things? 
+  (compute [{:keys [a b] :as state} prev-state]
+    {:c (+ a b) :d (- a b)})
+
+  (render {:keys [c]}
+    ...))
+```
+
+The loop things definitely wins as soon as local state is needed though. Since it is threaded through everything, adding/changing/removing it is trivial.
+
+It also wins for changing args/state because the old/new is provided automatically. Possible with `bind` but trickier.
+
+## What if: Keep defc, but rewrite how hooks work?
+
+The main issue I have with hooks is the protocol stuff. What if this is just replaced with runtime binding, which the executing code can talk to. `bind` could create a "register", as in memory storage. Code executing in the associated "block" can "claim" that register and write data to it. On write the component triggers further updates.
+
+```clojure
+(defn query-ident [ident]
+  (let [register (reg/claim!)
+        ;; just to only allow one claim per bind
+        ;; can't have two things trying to write a value to it
+        
+        ;; persistent storage between runs?
+        ;; maybe register is just a ref type internally to swap!/reset!?
+        query-id (reg/use-state register :query-id #(random-uuid))]
+
+    ;; this runs again whenever the "dependencies" change, so need to check
+    ;; if this did run before. register could maintain a counter, so we can easily
+    ;; tell the first run?
+    (when-not (reg/cleanup-set?)
+      (reg/on-cleanup register #(db/remove-query query-id)))
+
+    ;; when the block re-runs replace a potentially existing query
+    (db/query-ident query-id
+      (fn [data]
+        ;; nice to have a specific place to write to, instead of a generic event?
+        (reg/write! register data)))))
+
+(defc ui-thing [ident arg]
+  (bind data (query-ident ident))
+  (render ...))
+```
+
+This is still substantially easier to write than the IHook protocol mess.
+
+But how does this handle side effects during read that should only happen once?
+
+
+```clojure
+(defc ui-thing [ident]
+  (bind {:keys [summary] :as data}
+    (sg/query-ident ident))
+  (bind _
+    (when-not summary
+      (load-summary ident)))
+  (render ...))
+```
+
+Assuming the `load-summary` ends up eventually writing to the DB. Then the query will invalidate the first register. That'll move `summary` from `nil` to data, the second bind block will re-run, and do nothing because of the `when-not`. Conditionals are problematic with hooks, are they here?
+
+```clojure
+(defc ui-thing [ident]
+  (bind data
+    (sg/query-ident ident))
+  (bind _
+    (when-not (:summary data)
+      (load-summary ident)))
+  (render ...))
+```
+
+This will also run the second bind whenever `data` changes, which might be often?
+
+```clojure
+(defc ui-thing [ident]
+  (bind data
+    (sg/query-ident ident))
+  (hook
+    (when-not (:summary data)
+      (load-summary ident)))
+  (render ...))
+```
+
+Could keep the separate thing for something that doesn't need a register?
+
+
+## What if: Do both?
+
+- Keep `defc` for "def component", with maybe rewritten hooks but otherwise the same.
+- Add `defsc` for "def stateful component", which always has managed local state and doesn't need refs?
+
+Let time figure out which one is better?
+
+Problem is that queries must work differently and therefor would need two separate `sg/query` variants which is not great? Most hooks for that matter need two variants? Too many options also may not be a good thing? Leaves users confused on what they should use.
