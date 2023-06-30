@@ -245,6 +245,7 @@
    called on component unmount *and* just before whenever callback would be
    called."
   [deps callback]
+  {:pre [(fn? callback)]}
   (comp/EffectHook. deps callback nil true nil))
 
 (defn render-effect
@@ -252,12 +253,14 @@
    function which is called on component unmount *and* after each render before
    callback."
   [callback]
+  {:pre [(fn? callback)]}
   (comp/EffectHook. :render callback nil true nil))
 
 (defn mount-effect
   "Calls `(callback env)` on mount. `callback` may return a cleanup function
    which is called on unmount."
   [callback]
+  {:pre [(fn? callback)]}
   (comp/EffectHook. :mount callback nil true nil))
 
 ;; FIXME: does this ever need to take other options?

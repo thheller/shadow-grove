@@ -8,25 +8,23 @@
 (defn init!
   ([rt-ref]
    (init! rt-ref {}))
-  ([rt-ref config]
+  ([rt-ref {:keys [reader-opts writer-opts]}]
    ;; FIXME: take more handlers from config somehow
    ;; maybe make tag used for idents configurable?
    (let [tr
          (transit/reader :json
-           {:handlers
-            {"gdb/ident"
+           (assoc-in reader-opts [:handlers "gdb/ident"]
              (fn [[key val]]
-               (db/make-ident key val))}})
+               (db/make-ident key val))))
 
          tw
          (transit/writer :json
-           {:handlers
-            {ident/Ident
+           (assoc-in writer-opts [:handlers ident/Ident]
              (transit/write-handler
                (constantly "gdb/ident")
                db/ident-as-vec
                nil
-               nil)}})
+               nil)))
 
          transit-read
          (fn transit-read [data]
