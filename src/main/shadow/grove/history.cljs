@@ -96,12 +96,13 @@
                 (subs js/window.location.hash (+ 1 (count path-prefix)))))))
 
         trigger-route!
-        (fn []
-          ;; token must start with /, strip it to get tokens vector
-          (let [token (get-token)
-                tokens (str/split (subs token 1) #"/")]
-
-            (sg/run-tx! rt-ref {:e :ui/route! :token token :tokens tokens})))
+        (fn trigger-route!
+          ([]
+           (trigger-route! (get-token)))
+          ([token]
+           ;; token must start with /, strip it to get tokens vector
+           (let [tokens (str/split (subs token 1) #"/")]
+             (sg/run-tx! rt-ref {:e :ui/route! :token token :tokens tokens}))))
 
         first-token
         (get-token)]
@@ -138,7 +139,10 @@
 
     ;; immediately trigger initial route when this is initialized
     ;; don't wait for first env-init, thats problematic with multiple roots
-    (trigger-route!)
+    (trigger-route!
+      (if (and (= "/" first-token) (seq start-token))
+        start-token
+        first-token))
 
     (swap! rt-ref
       (fn [rt]

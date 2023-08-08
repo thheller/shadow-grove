@@ -229,15 +229,22 @@
 
 (defn process-event
   [rt-ref
-   {ev-id :e :as ev}
+   ev
    origin]
-  {:pre [(map? ev)
-         (keyword? ev-id)]}
+  {:pre [(or (fn? ev) (map? ev))]}
 
   ;; (js/console.log ev-id ev origin @rt-ref)
 
-  (let [{::rt/keys [data-ref event-config fx-config] :as env} @rt-ref
-        handler (get event-config ev-id)]
+  (let [{::rt/keys [data-ref event-config fx-config] :as env}
+        @rt-ref
+
+        ev-id
+        (if (fn? ev) ::fn (:e ev))
+
+        handler
+        (if (fn? ev)
+          ev
+          (get event-config ev-id))]
 
     (if-not handler
       (unhandled-event-ex! ev-id ev origin)

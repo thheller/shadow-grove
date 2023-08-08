@@ -305,6 +305,11 @@
       :else
       nil)))
 
+(add-attr :dom/inner-html
+  (fn [env node oval nval]
+    (when (seq nval)
+      (set! node -innerHTML nval))))
+
 (defn merge-attrs
   "merge attributes from old/new attr maps"
   [env node old new]

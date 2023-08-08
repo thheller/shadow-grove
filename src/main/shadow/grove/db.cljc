@@ -791,7 +791,9 @@
      (-> data
          (merge-imports imports)
          (cond->
-           target-path
+           (fn? target-path)
+           (target-path ident)
+           (vector? target-path)
            (update-in target-path conj ident))))))
 
 (defn update-entity
