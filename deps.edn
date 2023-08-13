@@ -3,7 +3,9 @@
   "src/test"]
 
  :deps
- {com.thheller/shadow-css {:mvn/version "0.2.0"}}
+ {com.thheller/shadow-css {:mvn/version "0.2.0"}
+  org.clojure/clojure {:mvn/version "1.11.1"}
+  org.clojure/clojurescript {:mvn/version "1.11.60"}}
 
  :aliases
  {:dev

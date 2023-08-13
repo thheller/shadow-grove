@@ -29,6 +29,6 @@
     []}
    :cljs-dev
    {:dependencies
-    [[thheller/shadow-cljs "2.22.1"]
+    [[thheller/shadow-cljs "2.25.2"]
      ]}})
 
