@@ -61,18 +61,6 @@
 
     (is (= {ident {:a 1}} res))))
 
-(deftest test-query-join-ident
-  (let [env {}
-        ident (db/make-ident :a 1)
-        db {:foo ident
-            ident {:a 1 :b 1}
-            :bar 1}
-        res (eql/query env db
-              [{ident
-                [:a]}])]
-
-    (is (= {ident {:a 1}} res))))
-
 (deftest test-query-trace
   (let [env {}
         ident (db/make-ident :a 1)
