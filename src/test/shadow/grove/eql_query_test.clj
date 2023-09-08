@@ -94,3 +94,13 @@
               [{:foo [:a]}])]
 
     (is (= {:foo [{:db/ident ident :db/not-found true}]} res))))
+
+(deftest test-query-coll-ident-found
+  (let [env {}
+        ident (db/make-ident :a 1)
+        db {ident {:a 1}}
+        current {:foo [ident]}
+        res (eql/query env db current
+              [{:foo [:a]}])]
+
+    (is (= {:foo [{:a 1}]} res))))

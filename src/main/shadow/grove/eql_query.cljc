@@ -158,7 +158,7 @@
               (fn [acc join-item]
                 (cond
                   (db/ident? join-item)
-                  (let [val (db-ident-lookup env db join-val)]
+                  (let [val (db-ident-lookup env db join-item)]
                     (cond
                       (keyword-identical? ::missing val)
                       (conj! acc {:db/ident join-item
