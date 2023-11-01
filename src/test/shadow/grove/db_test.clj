@@ -75,3 +75,119 @@
         (db/tx-commit!)
         (get :data)
         (tap>))))
+
+(deftest tx-simple-add-test
+  (let [schema
+        {}
+
+        db
+        (db/configure {} schema)
+
+        {:keys [keys-updated keys-new keys-removed data] :as tx}
+        (-> (db/transacted db)
+            (assoc :foo "bar")
+            (db/tx-commit!))]
+
+    (is (= "bar" (get data :foo)))
+    (is (= #{:foo} keys-new))
+    (is (= #{} keys-removed))
+    (is (= #{} keys-updated))
+    ))
+
+(deftest tx-simple-remove-test
+  (let [schema
+        {}
+
+        db
+        (db/configure {:foo "bar"} schema)
+
+        {:keys [keys-updated keys-new keys-removed data] :as tx}
+        (-> (db/transacted db)
+            (dissoc :foo)
+            (db/tx-commit!))]
+
+    (is (= nil (get data :foo)))
+    (is (= #{} keys-new))
+    (is (= #{:foo} keys-removed))
+    (is (= #{} keys-updated))
+    ))
+
+(deftest tx-ident-add-test
+  (let [schema
+        {:foo
+         {:type :entity
+          :primary-key :foo-id
+          :joins {}}}
+
+        ident
+        (db/make-ident :foo 1)
+
+        db
+        (db/configure {} schema)
+
+        {:keys [keys-updated keys-new keys-removed data] :as tx}
+        (-> (db/transacted db)
+            (assoc ident {:foo "bar"})
+            (db/tx-commit!))]
+
+    (is (= {:foo "bar"} (get data ident)))
+    (is (= #{ident} keys-new))
+    (is (= #{} keys-removed))
+    (is (= #{[::db/all :foo]} keys-updated))
+    ))
+
+(deftest tx-ident-remove-test
+  (let [schema
+        {:foo
+         {:type :entity
+          :primary-key :foo-id
+          :joins {}}}
+
+        ident
+        (db/make-ident :foo 1)
+
+        db
+        (-> (db/configure {} schema)
+            (db/transacted)
+            (assoc ident {:foo "bar"})
+            (db/tx-commit!)
+            (get :db))
+
+        {:keys [keys-updated keys-new keys-removed data] :as tx}
+        (-> (db/transacted db)
+            (dissoc ident)
+            (db/tx-commit!))]
+
+    (is (= nil (get data ident)))
+    (is (= #{} keys-new))
+    (is (= #{ident} keys-removed))
+    (is (= #{[::db/all :foo]} keys-updated))
+    ))
+
+(deftest tx-ident-update-test
+  (let [schema
+        {:foo
+         {:type :entity
+          :primary-key :foo-id
+          :joins {}}}
+
+        ident
+        (db/make-ident :foo 1)
+
+        db
+        (-> (db/configure {} schema)
+            (db/transacted)
+            (assoc ident {:foo "bar"})
+            (db/tx-commit!)
+            (get :db))
+
+        {:keys [keys-updated keys-new keys-removed data] :as tx}
+        (-> (db/transacted db)
+            (update ident assoc :foo "baz")
+            (db/tx-commit!))]
+
+    (is (= {:foo "baz"} (get data ident)))
+    (is (= #{} keys-new))
+    (is (= #{} keys-removed))
+    (is (= #{ident} keys-updated))
+    ))
