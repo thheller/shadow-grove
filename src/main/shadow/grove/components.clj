@@ -123,8 +123,7 @@
                   (case type
                     :arg
                     `(get-arg ~comp-sym ~idx)
-                    #_#_:state
-                        `(get-state ~comp-sym)
+
                     :hook
                     `(get-hook-value ~comp-sym ~idx)
                     )]))
@@ -146,27 +145,33 @@
     deps))
 
 (defn add-destructure-binding
-  [{:keys [comp-sym hook-idx] :as state} ref-name binding-name kw defaults]
-  (-> state
-      (update-affects #{ref-name} hook-idx)
-      (assoc-in [:bindings binding-name]
-        {:type :hook
-         :idx hook-idx
-         :name binding-name
-         :deps #{ref-name}})
+  ([state ref-name binding-name kw defaults]
+   (add-destructure-binding
+     state ref-name binding-name
+     `(get ~ref-name ~kw ~@(when-some [default (get defaults binding-name)]
+                             default))))
 
-      (update :hooks conj
-        {:depends-on
-         (let [{:keys [type idx] :as ref} (get-in state [:bindings ref-name])]
-           (if (not= type :hook)
-             #{} ;; args are tracked elsewhere, this is only for hooks depending on other hooks
-             #{idx}))
-         :provides binding-name
-         :run
-         `(fn [~comp-sym]
-            (let ~(let-bindings state #{ref-name})
-              (~kw ~ref-name ~(get defaults binding-name))))})
-      (update :hook-idx inc)))
+  ([{:keys [comp-sym hook-idx] :as state} ref-name binding-name accessor]
+   (-> state
+       (update-affects #{ref-name} hook-idx)
+       (assoc-in [:bindings binding-name]
+         {:type :hook
+          :idx hook-idx
+          :name binding-name
+          :deps #{ref-name}})
+
+       (update :hooks conj
+         {:depends-on
+          (let [{:keys [type idx] :as ref} (get-in state [:bindings ref-name])]
+            (if (not= type :hook)
+              #{} ;; args are tracked elsewhere, this is only for hooks depending on other hooks
+              #{idx}))
+          :provides binding-name
+          :run
+          `(fn [~comp-sym]
+             (let ~(let-bindings state #{ref-name})
+               ~accessor))})
+       (update :hook-idx inc))))
 
 (defn hook-destructure-map
   [state
@@ -203,6 +208,53 @@
           (throw (ex-info "unknown destructure" {:entry entry}))
           )))))
 
+(defn hook-destructure-vec
+  [state
+   ref-name
+   v]
+
+  (let [idx-syms
+        (into []
+          (take-while #(and (simple-symbol? %)
+                            (not= '& %)))
+          v)
+
+        kv
+        (loop [kv {}
+               s (drop (count idx-syms) v)]
+          (if-not (seq s)
+            kv
+            (let [[k v & more] s]
+              (when-not v
+                (throw (ex-info "invalid vector destructure" {:k k :v v})))
+              (recur
+                (assoc kv k v)
+                more))))
+
+
+        ;; add index arguments
+        state
+        (reduce-kv
+          (fn [state idx sym]
+            (add-destructure-binding state ref-name sym idx {}))
+          state
+          idx-syms)]
+
+    ;; handle remaining kv pairs
+    ;; [... :as X]
+    ;; [... & more]
+    ;; FIXME: are there others?
+    (reduce-kv
+      (fn [state k v]
+        (case k
+          :as state ;; handled earlier, no need to do anything
+          & (add-destructure-binding state ref-name v
+              ;; forcing destructured rest into a vector to force any potential lazy seqs
+              `(vec (drop ~(count idx-syms) ~ref-name)))
+          (throw (ex-info "invalid vector destructure" {:k k :v v}))))
+      state
+      kv)))
+
 (defmulti analyze-hook (fn [state hook] (:name hook)))
 
 (defn analyze-arg
@@ -226,6 +278,24 @@
           (assoc-in [:bindings arg-name] {:type :arg :name arg-name :idx idx})
           (hook-destructure-map arg-name binding)))
 
+    (vector? binding)
+    (let [[_as sym :as v] (drop-while #(not= :as %) binding)
+
+          arg-name
+          (if-not (seq v)
+            (gensym (str "arg_" idx "_"))
+            ;; :as followed by symbol only
+            (do (when-not (simple-symbol? sym)
+                  (throw (ex-info "invalid data binding" {:binding binding})))
+                sym))
+
+          stable (or (:stable (meta binding))
+                     (:stable (meta arg-name)))]
+      (-> state
+          (assoc-in [:args idx] {:name arg-name :idx idx :stable stable})
+          (assoc-in [:bindings arg-name] {:type :arg :name arg-name :idx idx})
+          (hook-destructure-vec arg-name binding)))
+
     :else
     (throw (ex-info "unsupported form for component arg" {:binding binding :idx idx}))))
 
@@ -242,7 +312,15 @@
           (or (get binding :as)
               (symbol (str "__hook$" hook-idx)))
 
-          ;; FIXME: vector destructure
+          (vector? binding)
+          (let [[_as sym :as v] (drop-while #(not= :as %) binding)]
+            (if-not (seq v)
+              (symbol (str "__hook$" hook-idx))
+              ;; :as followed by symbol only
+              (do (when-not (simple-symbol? sym)
+                    (throw (ex-info "invalid data binding" {:binding binding})))
+                  sym)))
+
           :else
           (throw (ex-info "invalid data binding" {:binding binding})))
 
@@ -280,7 +358,11 @@
         (cond->
           ;; FIXME: vector destructure
           (map? binding)
-          (hook-destructure-map binding-name binding)))))
+          (hook-destructure-map binding-name binding)
+
+          (vector? binding)
+          (hook-destructure-vec binding-name binding)
+          ))))
 
 (defmethod analyze-hook 'bind [state {:keys [body]}]
   ;; (bind some-name (something-producing-a-value-or-hook))
@@ -372,24 +454,24 @@
         (assoc-in state [:events ev-id]
           (if (empty? deps)
             `(fn ~ev-args
-              ~@body
-              ;; ev-fn return value is ignored anyways, don't turn above into expression
-              nil)
+               ~@body
+               ;; ev-fn return value is ignored anyways, don't turn above into expression
+               nil)
             `(fn ~arg-syms
-              ;; FIXME: this is kinda hacky, the component calls (event-fn env e ...)
-              ;; and then we get the component out of the env
-              ;; but I don't want the component to be part of the event signature
-              ;; and I don't want to rewrite the ev-args to add the comp binding
-              ;; since I can't to that for (event ::foo some-fn) without going through too much apply
-              (let ~(-> []
-                        (conj comp-sym `(get-component ~(first arg-syms)))
-                        ;; let binding from hooks first
-                        (into (let-bindings state deps))
-                        ;; then function args because they may shadow let names
-                        (into (mapcat vector ev-args arg-syms)))
-                ~@body)
-              ;; ev-fn return value is ignored anyways, don't turn above into expression
-              nil))))
+               ;; FIXME: this is kinda hacky, the component calls (event-fn env e ...)
+               ;; and then we get the component out of the env
+               ;; but I don't want the component to be part of the event signature
+               ;; and I don't want to rewrite the ev-args to add the comp binding
+               ;; since I can't to that for (event ::foo some-fn) without going through too much apply
+               (let ~(-> []
+                         (conj comp-sym `(get-component ~(first arg-syms)))
+                         ;; let binding from hooks first
+                         (into (let-bindings state deps))
+                         ;; then function args because they may shadow let names
+                         (into (mapcat vector ev-args arg-syms)))
+                 ~@body)
+               ;; ev-fn return value is ignored anyways, don't turn above into expression
+               nil))))
 
       :else
       (throw (ex-info "invalid event declaration" {:hook hook})))))
@@ -498,6 +580,12 @@
 
 (comment
   (require 'clojure.pprint)
+  (clojure.pprint/pprint
+    (macroexpand
+      '(defc hello [[b c & more]]
+         (render
+           [:div b c more]))))
+
   (clojure.pprint/pprint
     (macroexpand
       '(defc hello
