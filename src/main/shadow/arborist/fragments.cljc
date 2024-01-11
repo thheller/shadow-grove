@@ -1,6 +1,23 @@
 (ns shadow.arborist.fragments
   (:require [clojure.string :as str]))
 
+;; https://developer.mozilla.org/en-US/docs/Glossary/Void_element
+(def void-tags
+  #{:area
+    :base
+    :br
+    :col
+    :embed
+    :hr
+    :img
+    :input
+    :link
+    :meta
+    :param
+    :source
+    :track
+    :wbr})
+
 (defn parse-tag [spec]
   (let [spec (name spec)
         fdot (.indexOf spec ".")
@@ -147,6 +164,11 @@
                        :element-id id
                        :attr attr-key
                        :value attr-value
+                       ;; FIXME: maybe limit to known HTML tag attrs. shouldn't set things this way for web components?
+                       :html-const (and (simple-keyword? attr-key)
+                                        (or (string? attr-value)
+                                            (number? attr-value)
+                                            (boolean? attr-value)))
                        :src attrs}
 
                       ;; :class (css ...) is constant, no need to ever update
@@ -182,16 +204,19 @@
         child-env
         (assoc env :parent [:element el-sym])]
 
+    (when (and (contains? void-tags tag)
+               (seq children))
+      (throw (ex-info (str tag " can't have child elements") {:tag tag})))
+
     {:op :element
      :parent parent
      :element-id id
      :sym el-sym
      :tag tag
      :src el
-     :children
-     (-> []
-         (into attr-ops)
-         (into (map #(analyze-node child-env %)) children))}))
+     :attrs attr-ops
+     ;; FIXME: potential to provide rendering hints to clients if only one child
+     :children (into [] (map #(analyze-node child-env %)) children)}))
 
 (defn analyze-element [env el]
   (assert (pos? (count el)))
@@ -242,45 +267,77 @@
   (reduce reduce-fn init coll))
 
 (defn make-build-impl [ast sym->idx]
-  (let [this-sym (gensym "this")
-        env-sym (with-meta (gensym "env") {:tag 'not-native})
+  (let [env-sym (with-meta (gensym "env") {:tag 'not-native})
         vals-sym (with-meta (gensym "vals") {:tag 'array})
-        element-fn-sym (with-meta (gensym "element-fn") {:tag 'function})
+        tpl-sym (gensym "tpl_")
+
+        ;; https://www.measurethat.net/Benchmarks/Show/15652/0/childnodes-vs-children-vs-firstchildnextsibling-vs-firs
+        ;; based on this it is much faster to walk elements using
+        ;; .firstChild/.nextSibling vs array access over .childNodes
+        ;; although in a real benchmark using fragments it makes no noticeable difference
+        ;; using child traversal since the code a slightly more pleasant to look at
 
         {:keys [bindings mutations] :as result}
         (reduce
-          (fn step-fn [env {:keys [op sym parent] :as ast}]
+          (fn step-fn [{:keys [prev] :as env} {:keys [op sym parent] :as ast}]
             (let [[parent-type parent-sym] parent]
               (case op
                 :element
                 (-> env
-                    (update :bindings conj sym (with-loc ast `(~element-fn-sym ~(:tag ast))))
-                    (cond->
-                      (and parent-sym (= parent-type :element))
-                      (update :mutations conj (with-loc ast `(append-child ~parent-sym ~sym))))
-                    (reduce-> step-fn (:children ast)))
+                    (update :bindings conj sym
+                      (cond
+                        prev
+                        `(.-nextSibling ~prev)
+                        parent-sym
+                        `(.-firstChild ~parent-sym)
+                        :else
+                        `(.-firstChild ~tpl-sym)))
+                    (dissoc :prev)
+                    (reduce-> step-fn (:attrs ast))
+                    (reduce-> step-fn (:children ast))
+                    (assoc :prev sym))
 
                 :text
                 (-> env
-                    (update :bindings conj sym `(create-text ~env-sym ~(:text ast)))
-                    (cond->
-                      parent-sym
-                      (update :mutations conj `(append-child ~parent-sym ~sym))))
+                    (update :bindings conj sym
+                      (cond
+                        prev
+                        `(.-nextSibling ~prev)
+                        parent-sym
+                        `(.-firstChild ~parent-sym)
+                        :else
+                        `(.-firstChild ~tpl-sym)))
+                    (assoc :prev sym))
 
                 :code-ref
-                (-> env
-                    (update :bindings conj sym
-                      (with-loc ast
-                        `(managed-create
-                           ~env-sym
-                           (aget ~vals-sym ~(:ref-id ast)))))
-                    (cond->
-                      parent-sym
-                      (update :mutations conj (with-loc ast `(managed-append ~parent-sym ~sym)))))
+                (let [anchor-sym (gensym "anchor_")]
+                  (-> env
+                      (assoc :prev anchor-sym)
+                      (update :bindings conj sym
+                        (with-loc ast
+                          `(managed-create
+                             ~env-sym
+                             (aget ~vals-sym ~(:ref-id ast)))))
+                      (update :bindings conj anchor-sym
+                        (cond
+                          prev
+                          `(.-nextSibling ~prev)
+                          parent-sym
+                          `(.-firstChild ~parent-sym)
+                          :else
+                          `(.-firstChild ~tpl-sym)))
+
+                      (cond->
+                        parent-sym
+                        (-> (update :mutations conj (with-loc ast `(managed-insert ~sym ~parent-sym ~anchor-sym)))
+                            (update :mutations conj `(.remove ~anchor-sym)))
+                        )))
 
                 :static-attr
                 (-> env
-                    (update :mutations conj (with-loc ast `(set-attr ~env-sym ~(:sym ast) ~(:attr ast) nil ~(:value ast)))))
+                    (cond->
+                      (not (:html-const ast))
+                      (update :mutations conj (with-loc ast `(set-attr ~env-sym ~(:sym ast) ~(:attr ast) nil ~(:value ast))))))
 
                 :dynamic-attr
                 (update env :mutations conj (with-loc ast `(set-attr ~env-sym ~(:sym ast) ~(:attr ast) nil (aget ~vals-sym ~(-> ast :value :ref-id)))))
@@ -295,7 +352,7 @@
              (sort-by second)
              (map first))]
 
-    `(fn [~env-sym ~vals-sym ~element-fn-sym]
+    `(fn [~env-sym ~tpl-sym ~vals-sym]
        (let [~@bindings]
          ~@mutations
          (cljs.core/array ~@return)))))
@@ -312,7 +369,9 @@
           (fn step-fn [mutations {:keys [op sym] :as ast}]
             (case op
               :element
-              (reduce-> mutations step-fn (:children ast))
+              (-> mutations
+                  (reduce-> step-fn (:attrs ast))
+                  (reduce-> step-fn (:children ast)))
 
               :text
               mutations
@@ -336,8 +395,9 @@
               (if (:constant ast)
                 mutations ;; no need to update constant attributes
                 (let [ref-id (-> ast :value :ref-id)
+                      idx (get sym->idx sym)
                       form
-                      `(update-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) (aget ~oldv-sym ~ref-id) (aget ~newv-sym ~ref-id))]
+                      `(update-attr ~env-sym ~exports-sym ~idx ~(:attr ast) (aget ~oldv-sym ~ref-id) (aget ~newv-sym ~ref-id))]
                   (conj mutations form)))))
           []
           ast)]
@@ -347,8 +407,7 @@
        ~@mutations)))
 
 (defn make-mount-impl [ast sym->idx]
-  (let [this-sym (gensym "this")
-        exports-sym (gensym "exports")
+  (let [exports-sym (gensym "exports")
         parent-sym (gensym "parent")
         anchor-sym (gensym "anchor")
 
@@ -367,8 +426,7 @@
        ~@mount-calls)))
 
 (defn make-destroy-impl [ast sym->idx]
-  (let [this-sym (gensym "this")
-        exports-sym (gensym "exports")
+  (let [exports-sym (gensym "exports")
         env-sym (gensym "env")
         oldv-sym (gensym "oldv")
         dom-remove-sym (with-meta (gensym "dom_remove") {:tag 'boolean})
@@ -383,6 +441,7 @@
                     ;; can skip removing nodes when the parent is already removed
                     (nil? (:parent ast))
                     (conj `(when ~dom-remove-sym (dom-remove (aget ~exports-sym ~(get sym->idx sym))))))
+                  (reduce-> step-fn (:attrs ast))
                   (reduce-> step-fn (:children ast)))
 
               :code-ref
@@ -419,6 +478,41 @@
     `(fn [~env-sym ~exports-sym ~oldv-sym ~dom-remove-sym]
        ~@destroy-calls)))
 
+(defn make-template-string [{:keys [op] :as ast}]
+  (case op
+    :element
+    (let [{:keys [tag attrs children]} ast]
+      (str "<" (name tag) " "
+           (->> attrs
+                (filter :html-const)
+                (map (fn [{:keys [attr value]}]
+                       (when value
+                         (str (name attr)
+                              (when-not (true? value)
+                                (str "=" (pr-str (str value))))))))
+                (str/join " "))
+           ">"
+           (when-not (contains? void-tags tag)
+             (str (->> children
+                       (map make-template-string)
+                       (str/join ""))
+                  "</" (name tag) ">"))
+           ))
+
+    ;; FIXME: might be able to get away without code placeholders
+    ;; and smarter navigation through the constructed nodes
+    ;; currently accessing everything by index
+    ;; these will always be cloned and then immediately removed, so wasted work
+    :code-ref
+    (str "<!-- #" (:sym ast) " -->")
+
+    :text
+    (:text ast)
+
+    ;; else
+    ""
+    ))
+
 (def shadow-analyze-top
   #?(:cljs
      nil
@@ -452,6 +546,7 @@
                   (cond->
                     (nil? parent)
                     (assoc sym (count sym->idx)))
+                  (reduce-> step-fn (:attrs ast))
                   (reduce-> step-fn (:children ast)))
 
               :code-ref
@@ -521,6 +616,9 @@
 
         fragment-code
         `(shadow.arborist.fragments/FragmentCode.
+           ~(->> ast
+                 (map make-template-string)
+                 (str/join ""))
            ~(make-build-impl ast sym->idx)
            ~(make-mount-impl ast sym->idx)
            ~(make-update-impl ast sym->idx)

@@ -149,7 +149,7 @@
    (add-destructure-binding
      state ref-name binding-name
      `(get ~ref-name ~kw ~@(when-some [default (get defaults binding-name)]
-                             default))))
+                             [default]))))
 
   ([{:keys [comp-sym hook-idx] :as state} ref-name binding-name accessor]
    (-> state

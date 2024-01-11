@@ -139,7 +139,7 @@
               (.. element -classList (add class-exit-active))
               (.. element -classList (remove class-exit)))))))))
 
-(defn trigger-out! [{::keys [root] :as env} callback]
+(defn trigger-out! [{::keys [^clj root] :as env} callback]
   (.begin-exit root callback))
 
 (defn make-group [opts env]

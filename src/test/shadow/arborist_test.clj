@@ -1,4 +1,4 @@
-(ns shadow.experiments.arborist-test
+(ns shadow.arborist-test
   (:require
     [clojure.test :as t :refer (deftest is)]
     [clojure.pprint :refer (pprint)]
@@ -24,7 +24,8 @@
        [:div.card-header title]
        [:div.card-body {:on-click ^:once [::foo {:bar yo}] :attr "foo"} "Hello"]]]
 
-  '[[:div.card
+  '[(some-code)
+    [:div.card
      [:div.card-title title]
      [:div {:foo "bar" :class (css 1 2 3)} body]
      [:div
@@ -34,5 +35,6 @@
 
 
 (deftest test-macro-expand
-  (pprint (frag/make-fragment {} nil test-body)))
+  (let [frag (frag/make-fragment {} nil test-body)]
+    (pprint frag)))
 
