@@ -26,7 +26,9 @@
 
   '[(some-code)
     [:div.card
+     1 2 3 " foo " "bar"
      [:div.card-title title]
+
      [:div {:foo "bar" :class (css 1 2 3)} body]
      [:div
       [:button {:style/height "15px"} "ok"]]]]

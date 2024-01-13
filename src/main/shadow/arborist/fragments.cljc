@@ -44,6 +44,11 @@
        (subs spec (inc fhash) fdot)
        (str/replace (.substring spec (inc fdot)) #"\." " ")])))
 
+;; used to check if an element in a hiccup vector can be inlined as a string
+(defn string-part? [part]
+  (or (string? part)
+      (number? part)
+      (boolean? part)))
 
 (defn const? [env thing]
   (or (string? thing)
@@ -122,11 +127,33 @@
     (assoc attrs :class html-class)
     (assoc attrs :class `(css-join ~html-class ~class))))
 
+(defn combine-string-parts [children]
+  (reduce
+    (fn [children child]
+      (cond
+        (empty? children)
+        [child]
+
+        (string-part? child)
+        (let [last-idx (dec (count children))
+              last-val (nth children last-idx)]
+          (if-not (string-part? last-val)
+            (conj children child)
+            (update children last-idx str child)))
+
+        :else
+        (conj children child)))
+    nil
+    children))
+
 (defn analyze-dom-element [{:keys [parent] :as env} [tag-kw attrs :as el]]
   (let [[attrs children]
         (if (and attrs (map? attrs))
           [attrs (subvec el 2)]
           [nil (subvec el 1)])
+
+        children
+        (combine-string-parts children)
 
         [tag html-id html-class]
         (parse-tag tag-kw)
@@ -166,9 +193,7 @@
                        :value attr-value
                        ;; FIXME: maybe limit to known HTML tag attrs. shouldn't set things this way for web components?
                        :html-const (and (simple-keyword? attr-key)
-                                        (or (string? attr-value)
-                                            (number? attr-value)
-                                            (boolean? attr-value)))
+                                        (string-part? attr-value))
                        :src attrs}
 
                       ;; :class (css ...) is constant, no need to ever update
