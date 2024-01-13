@@ -74,7 +74,7 @@
 
                        ;; {::ev/handle true} equals event name matches defn name
                        (true? ev-handle)
-                       [(keyword (namespace ev-handle) (name ev-handle))]
+                       [(keyword (namespace fq-name) (name fq-name))]
 
                        ;; multiple events
                        ;; {::ev/handle [::some/event ::other/event]}
