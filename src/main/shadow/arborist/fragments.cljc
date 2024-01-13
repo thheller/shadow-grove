@@ -131,7 +131,7 @@
   (reduce
     (fn [children child]
       (cond
-        (empty? children)
+        (nil? children)
         [child]
 
         (string-part? child)
