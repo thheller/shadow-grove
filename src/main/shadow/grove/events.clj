@@ -57,11 +57,11 @@
       (throw (ana/error env "Namespace using register-events! must use :dev/always meta")))
 
     `(do
-       ~@(for [{:keys [name defs]} (vals (::ana/namespaces compiler-env))
-               :when (let [ns-mod (module-for-ns compiler-env name)]
-                       (and (not= name current-ns)
+       ~@(for [{ns-name :name :keys [defs]} (vals (::ana/namespaces compiler-env))
+               :when (let [ns-mod (module-for-ns compiler-env ns-name)]
+                       (and (not= ns-name current-ns)
                             (= our-mod ns-mod)
-                            (str/starts-with? (str name) ns-prefix)))
+                            (str/starts-with? (name ns-name) ns-prefix)))
 
                {fq-name :name def-meta :meta :as def} (vals defs)
 
