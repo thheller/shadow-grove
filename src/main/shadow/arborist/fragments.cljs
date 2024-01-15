@@ -37,7 +37,7 @@
     svg-element-fn
     dom-element-fn))
 
-(deftype FragmentCode [template create-fn mount-fn update-fn destroy-fn])
+(deftype FragmentCode [create-fn mount-fn update-fn destroy-fn])
 
 (declare ^{:arglists '([thing])} fragment-init?)
 
