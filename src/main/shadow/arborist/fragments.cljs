@@ -39,8 +39,6 @@
 
 (deftype FragmentCode [template create-fn mount-fn update-fn destroy-fn])
 
-(defonce templates #js {})
-
 (declare ^{:arglists '([thing])} fragment-init?)
 
 (defclass ManagedFragment
@@ -53,29 +51,19 @@
 
   (constructor [this init-env ^FragmentCode init-code init-vals element-ns]
     (let [element-fn (if (nil? element-ns) (:dom/element-fn init-env) (get-element-fn init-env element-ns))
-          init-env (cond-> init-env (some? element-ns) (assoc :dom/element-fn element-fn :dom/svg true))
-          tpl-key (.-template init-code)
-          tpl (or (unchecked-get templates tpl-key)
-                  (let [tpl (js/document.createElement "template")]
-                    (set! tpl -innerHTML tpl-key)
-                    (unchecked-set templates tpl-key tpl)
-                    tpl))]
-
-      ;; FIXME: templates is never cleaned up, maybe use a WeakMap setup?
+          init-env (cond-> init-env (some? element-ns) (assoc :dom/element-fn element-fn :dom/svg true))]
 
       (set! env (assoc init-env ::fragment this))
       (set! code init-code)
       (set! vals init-vals)
       (set! marker (common/dom-marker env))
 
-      (let [tpl (.cloneNode (.-content tpl) true)]
-
-        ;; create-fn creates all necessary nodes but only exports those that will be accessed later in an array
-        ;; this might be faster if create-fn just closed over locals and returns the callbacks to be used later
-        ;; svelte does this but CLJS doesn't allow to set! locals so it would require ugly js* code to make it work
-        ;; didn't benchmark but the array variant shouldn't be that much slower. maybe even faster since
-        ;; the functions don't need to be recreated for each fragment instance
-        (set! exports (.. code (create-fn env tpl vals))))))
+      ;; create-fn creates all necessary nodes but only exports those that will be accessed later in an array
+      ;; this might be faster if create-fn just closed over locals and returns the callbacks to be used later
+      ;; svelte does this but CLJS doesn't allow to set! locals so it would require ugly js* code to make it work
+      ;; didn't benchmark but the array variant shouldn't be that much slower. maybe even faster since
+      ;; the functions don't need to be recreated for each fragment instance
+      (set! exports (.. code (create-fn env vals element-fn)))))
 
   p/IManaged
   (dom-first [this] marker)

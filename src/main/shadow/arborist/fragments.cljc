@@ -291,59 +291,37 @@
 (defn reduce-> [init reduce-fn coll]
   (reduce reduce-fn init coll))
 
-(defn make-build-impl [ast sym->idx]
-  (let [env-sym (with-meta (gensym "env") {:tag 'not-native})
-        vals-sym (with-meta (gensym "vals") {:tag 'array})
-        tpl-sym (gensym "tpl_")
+;; build impl using <template> tags and navigating that DOM
+;; trouble with that is that some fragments may yield a different DOM structure than expected
 
-        ;; https://www.measurethat.net/Benchmarks/Show/15652/0/childnodes-vs-children-vs-firstchildnextsibling-vs-firs
-        ;; based on this it is much faster to walk elements using
-        ;; .firstChild/.nextSibling vs array access over .childNodes
-        ;; although in a real benchmark using fragments it makes no noticeable difference
-        ;; using child traversal since the code a slightly more pleasant to look at
+;;   <table><tr>...
+;; will actually yield a slighty different DOM
+;;   <table><tbody><tr>...
 
-        {:keys [bindings mutations] :as result}
-        (reduce
-          (fn step-fn [{:keys [prev] :as env} {:keys [op sym parent] :as ast}]
-            (let [[parent-type parent-sym] parent]
-              (case op
-                :element
-                (-> env
-                    (update :bindings conj sym
-                      (cond
-                        prev
-                        `(.-nextSibling ~prev)
-                        parent-sym
-                        `(.-firstChild ~parent-sym)
-                        :else
-                        `(.-firstChild ~tpl-sym)))
-                    (dissoc :prev)
-                    (reduce-> step-fn (:attrs ast))
-                    (reduce-> step-fn (:children ast))
-                    (assoc :prev sym))
+;; so it inserts a tbody. code is expecting to get a tr via table.firstChild, but gets a tbody
 
-                :text
-                (-> env
-                    (update :bindings conj sym
-                      (cond
-                        prev
-                        `(.-nextSibling ~prev)
-                        parent-sym
-                        `(.-firstChild ~parent-sym)
-                        :else
-                        `(.-firstChild ~tpl-sym)))
-                    (assoc :prev sym))
+;; performance wise it makes almost no difference vs just constructing elements via document.createElement
+;; so instead of implementing the HTML spec, we just go back to createElement for now
 
-                :code-ref
-                (let [anchor-sym (gensym "anchor_")]
+#_(defn make-build-impl [ast sym->idx]
+    (let [env-sym (with-meta (gensym "env") {:tag 'not-native})
+          vals-sym (with-meta (gensym "vals") {:tag 'array})
+          tpl-sym (gensym "tpl_")
+
+          ;; https://www.measurethat.net/Benchmarks/Show/15652/0/childnodes-vs-children-vs-firstchildnextsibling-vs-firs
+          ;; based on this it is much faster to walk elements using
+          ;; .firstChild/.nextSibling vs array access over .childNodes
+          ;; although in a real benchmark using fragments it makes no noticeable difference
+          ;; using child traversal since the code a slightly more pleasant to look at
+
+          {:keys [bindings mutations] :as result}
+          (reduce
+            (fn step-fn [{:keys [prev] :as env} {:keys [op sym parent] :as ast}]
+              (let [[parent-type parent-sym] parent]
+                (case op
+                  :element
                   (-> env
-                      (assoc :prev anchor-sym)
                       (update :bindings conj sym
-                        (with-loc ast
-                          `(managed-create
-                             ~env-sym
-                             (aget ~vals-sym ~(:ref-id ast)))))
-                      (update :bindings conj anchor-sym
                         (cond
                           prev
                           `(.-nextSibling ~prev)
@@ -351,18 +329,111 @@
                           `(.-firstChild ~parent-sym)
                           :else
                           `(.-firstChild ~tpl-sym)))
+                      (dissoc :prev)
+                      (reduce-> step-fn (:attrs ast))
+                      (reduce-> step-fn (:children ast))
+                      (assoc :prev sym))
 
+                  :text
+                  (-> env
+                      (update :bindings conj sym
+                        (cond
+                          prev
+                          `(.-nextSibling ~prev)
+                          parent-sym
+                          `(.-firstChild ~parent-sym)
+                          :else
+                          `(.-firstChild ~tpl-sym)))
+                      (assoc :prev sym))
+
+                  :code-ref
+                  (let [anchor-sym (gensym "anchor_")]
+                    (-> env
+                        (assoc :prev anchor-sym)
+                        (update :bindings conj sym
+                          (with-loc ast
+                            `(managed-create
+                               ~env-sym
+                               (aget ~vals-sym ~(:ref-id ast)))))
+                        (update :bindings conj anchor-sym
+                          (cond
+                            prev
+                            `(.-nextSibling ~prev)
+                            parent-sym
+                            `(.-firstChild ~parent-sym)
+                            :else
+                            `(.-firstChild ~tpl-sym)))
+
+                        (cond->
+                          parent-sym
+                          (-> (update :mutations conj (with-loc ast `(managed-insert ~sym ~parent-sym ~anchor-sym)))
+                              (update :mutations conj `(.remove ~anchor-sym)))
+                          )))
+
+                  :static-attr
+                  (-> env
                       (cond->
-                        parent-sym
-                        (-> (update :mutations conj (with-loc ast `(managed-insert ~sym ~parent-sym ~anchor-sym)))
-                            (update :mutations conj `(.remove ~anchor-sym)))
-                        )))
+                        (not (:html-const ast))
+                        (update :mutations conj (with-loc ast `(set-attr ~env-sym ~(:sym ast) ~(:attr ast) nil ~(:value ast))))))
+
+                  :dynamic-attr
+                  (update env :mutations conj (with-loc ast `(set-attr ~env-sym ~(:sym ast) ~(:attr ast) nil (aget ~vals-sym ~(-> ast :value :ref-id)))))
+                  )))
+            {:bindings []
+             :mutations []}
+            ast)
+
+          return
+          (->> sym->idx
+               (map identity)
+               (sort-by second)
+               (map first))]
+
+      `(fn [~env-sym ~tpl-sym ~vals-sym]
+         (let [~@bindings]
+           ~@mutations
+           (cljs.core/array ~@return)))))
+
+(defn make-build-impl [ast sym->idx]
+  (let [env-sym (with-meta (gensym "env") {:tag 'not-native})
+        vals-sym (with-meta (gensym "vals") {:tag 'array})
+        element-fn-sym (with-meta (gensym "element-fn") {:tag 'function})
+
+        {:keys [bindings mutations] :as result}
+        (reduce
+          (fn step-fn [env {:keys [op sym parent] :as ast}]
+            (let [[parent-type parent-sym] parent]
+              (case op
+                :element
+                (-> env
+                    (update :bindings conj sym (with-loc ast `(~element-fn-sym ~(:tag ast))))
+                    (cond->
+                      (and parent-sym (= parent-type :element))
+                      (update :mutations conj (with-loc ast `(append-child ~parent-sym ~sym))))
+                    (reduce-> step-fn (:attrs ast))
+                    (reduce-> step-fn (:children ast)))
+
+                :text
+                (-> env
+                    (update :bindings conj sym `(create-text ~env-sym ~(:text ast)))
+                    (cond->
+                      parent-sym
+                      (update :mutations conj `(append-child ~parent-sym ~sym))))
+
+                :code-ref
+                (-> env
+                    (update :bindings conj sym
+                      (with-loc ast
+                        `(managed-create
+                           ~env-sym
+                           (aget ~vals-sym ~(:ref-id ast)))))
+                    (cond->
+                      parent-sym
+                      (update :mutations conj (with-loc ast `(managed-append ~parent-sym ~sym)))))
 
                 :static-attr
                 (-> env
-                    (cond->
-                      (not (:html-const ast))
-                      (update :mutations conj (with-loc ast `(set-attr ~env-sym ~(:sym ast) ~(:attr ast) nil ~(:value ast))))))
+                    (update :mutations conj (with-loc ast `(set-attr ~env-sym ~(:sym ast) ~(:attr ast) nil ~(:value ast)))))
 
                 :dynamic-attr
                 (update env :mutations conj (with-loc ast `(set-attr ~env-sym ~(:sym ast) ~(:attr ast) nil (aget ~vals-sym ~(-> ast :value :ref-id)))))
@@ -377,7 +448,7 @@
              (sort-by second)
              (map first))]
 
-    `(fn [~env-sym ~tpl-sym ~vals-sym]
+    `(fn [~env-sym ~vals-sym ~element-fn-sym]
        (let [~@bindings]
          ~@mutations
          (cljs.core/array ~@return)))))
@@ -641,9 +712,9 @@
 
         fragment-code
         `(shadow.arborist.fragments/FragmentCode.
-           ~(->> ast
-                 (map make-template-string)
-                 (str/join ""))
+           #_~(->> ast
+                   (map make-template-string)
+                   (str/join ""))
            ~(make-build-impl ast sym->idx)
            ~(make-mount-impl ast sym->idx)
            ~(make-update-impl ast sym->idx)
