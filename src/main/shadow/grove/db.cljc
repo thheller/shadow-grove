@@ -590,6 +590,24 @@
     (if (instance? GroveDB db) @db db)))
 
 (defn configure
+  "Returns a [[GroveDB]] instance with associated `spec` as its schema used for
+   normalization operations. You may optionally initialize the db to an `init-db`
+   map. This will not normalize data from `init-db` in any way.
+   
+   ---
+   Example:
+   ```
+   (def schema
+     {::folder
+      {:type :entity
+       :primary-key :id
+       :attrs {}
+       :joins {:folder/contains [:many ::file]}}})
+   
+   (defonce data-ref
+     (-> (db/configure schema)
+         (atom)))
+   ```"
   ([spec]
    (configure {} spec))
   ([init-db spec]
@@ -690,7 +708,11 @@
     data
     imports))
 
-(defn merge-seq
+(defn merge-seq 
+  "Normalizes `coll` of items of `entity-type` into `data` (a [[configure]]d
+   [[GroveDB]] instance). The vector of idents normalized can be inserted at
+   target-path, replacing what's present. Alternatively, you can specify a target-fn
+   which will be called with `data normalized-idents` and should return updated `data`."
   ([data entity-type coll]
    (merge-seq data entity-type coll nil))
   ([data entity-type coll target-path-or-fn]
@@ -723,6 +745,30 @@
          ))))
 
 (defn add
+  "Normalizes the `item` of `entity-type` into `data` at `target-path`.
+
+   * `data` - this should be a [[configure]]d [[GroveDB]] instance.
+   * `entity-type` of `item` being added. Should be present in db schema. 
+   * `item` - a *map* of data to add. (For collections, see [[merge-seq]].)
+   * `target-path` - where to `conj` the ident of `item`.
+
+   ---
+   Examples:
+   ```clojure
+   ;; inside event handler
+   (update tx-env :db db/add ::node data-to-add [:root])
+
+   ;; repl testing
+   (def schema
+     {::node
+      {:type :entity
+       :primary-key :id
+       :attrs {}
+       :joins {:children [:many ::node]}}})
+
+   (-> (db/configure schema)
+       (db/add ::node {:id 0 :children [{:id 1} {:id 2}]} [::root]))
+   ```"  
   ([data entity-type item]
    (add data entity-type item nil))
   ([data entity-type item target-path]
@@ -750,21 +796,33 @@
            (vector? target-path)
            (update-in target-path conj ident))))))
 
-(defn update-entity [data entity-type id update-fn & args]
+(defn update-entity
+  "Updates entity `(make-ident entity-type id)` in `data` (db) with
+   `(update-fn entity & args)`."
+  [data entity-type id update-fn & args]
   ;; FIXME: validate that both entity-type is defined and id matches type
   (update data (make-ident entity-type id) #(apply update-fn % args)))
 
-(defn all-idents-of [db entity-type]
+(defn all-idents-of
+  "Returns the set of all idents of `entity-type`."
+  [db entity-type]
   ;; FIXME: check in schema if entity-type is actually declared
   (get db [::all entity-type]))
 
-(defn all-of [db entity-type]
+(defn all-of
+  "Returns vals of all idents of `entity-type`."
+  [db entity-type]
   (->> (all-idents-of db entity-type)
        (map #(get db %))))
 
 ;; keep this as the very last thing since we excluded clojure remove
 ;; don't want to write code that assumes it uses core remove
-(defn remove [data thing]
+(defn remove
+  "Removes `thing` from `data` root. `thing` can be either an ident or a map
+   like `{:db/ident ident ...}`. When used on a [[GroveDB]] instance, `thing` will 
+   be removed from the set of all entities of `thing`'s type. Will *not* remove
+   any other references to `thing`."
+  [data thing]
   (cond
     (ident? thing)
     (dissoc data thing)
@@ -775,6 +833,8 @@
     :else
     (throw (ex-info "don't know how to remove thing" {:thing thing}))))
 
-(defn remove-idents [data idents]
+(defn remove-idents
+  "Given a coll of `idents`, [[remove]]s all corresponding entities from `data`."  
+  [data idents]
   (reduce remove data idents))
 

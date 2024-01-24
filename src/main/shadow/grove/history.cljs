@@ -7,6 +7,56 @@
     [shadow.arborist.attributes :as attr]))
 
 (defn init!
+  "Use to intercept clicks on 'internal' links and HTML `History` modifications to:
+   1. update the state of `History` (e.g. update the URL),
+   2. trigger the `:ui/route!` event (for which the handler is defined by the user).
+
+   `config` map:
+   * `:start-token`  – replaces the \"/\" URL on init. Defaults to `\"/\"`.
+                       Should start – but not end – with `/`.
+   * `:path-prefix`  – a common URL base to use. Defaults to `\"\"`.
+                       Should start – but not end – with `/`.
+   * `:use-fragment` – pass `true` if you want to use hash-based URLs. 
+                       Defaults to `false`.
+   * `:root-el`      - optional DOM node to set the click listener on.
+                       Defaults to `document.body`.
+
+   ### Usage
+   - This function should be called before component env is initialised (e.g.
+     before [[shadow.grove/render]]). *Note*: the `:ui/route!` event
+     will be triggered on call.
+   - Set the `:ui/href` attribute on anchors for internal links. (Unlike regular 
+     `href`, will handle of `path-prefix` and `use-fragment`.)
+   - Register handler for the event `{:e :ui/route! :token token :tokens tokens}`.
+     - `token` is \"/a/b\"
+     - `tokens` is `[\"a\", \"b\"]`.
+   - Intercepts only pure clicks with main mouse button (no keyboard modifiers).
+   - The `:ui/redirect!` *fx* handler will be registered and can be 'called' with:
+     * `:token` – URL to redirect to (a string starting with `/`)
+     * `:title` – optional. `title` arg for `history.pushState`
+   
+   ---
+   Example:
+   ```clojure
+    ;; in a component
+    [:a {:ui/href (str \"/\" id)} \"internal link\"]
+
+    ;; handle clicks
+    (sg/reg-event rt-ref :ui/route!
+      (fn [env {:keys [token tokens]}]
+        (let [ident (db/make-ident ::entity (first tokens))]
+          (-> env
+              (assoc-in [:db ::main-root] ident)
+              (sg/queue-fx :ui/set-window-title! {:title (get-title ident)})))))
+
+    ;; calling init
+    (defn ^:dev/after-load start []
+      (sg/render rt-ref root-el (ui-root)))
+
+    (defn init []
+      (history/init! rt-ref {})
+      (start))
+   ```"  
   [rt-ref
    {:keys [start-token path-prefix use-fragment root-el]
     :or {start-token "/"

@@ -24,7 +24,10 @@
 
 (set! *warn-on-infer* false)
 
-(defn dispatch-up! [{::comp/keys [^not-native parent] :as env} ev-map]
+(defn dispatch-up!
+  "Use within a component event handler to propagate the event `ev-map` up the
+   component tree. `env` is the environment map available in event handlers."
+  [{::comp/keys [^not-native parent] :as env} ev-map]
   {:pre [(map? env)
          (map? ev-map)
          (qualified-keyword? (:e ev-map))]}
@@ -32,6 +35,27 @@
   (gp/handle-event! parent ev-map nil env))
 
 (defn query-ident
+  "Queries the db starting from `ident`.
+   * `query`  - Optional. EQL query. Defaults to ident lookup if not provided.
+   * `config` - Optional. Any kind of config that may come up.
+
+   Changes to idents accessed by the query (including inside `eql/attr`) during
+   transactions will cause the query to re-un.
+
+   ---
+   Example
+   ```clojure
+    (defmethod eql/attr ::contains
+      [env db {:dir/keys [files dirs] :as current} query-part params]
+      (cond->> (concat dirs files)
+        (not (::show-hidden? db))
+        (filterv (fn [ident] (not (::hidden? (get db ident)))))))
+
+    (bind {:as query-result
+           :dir/keys [name open?]
+           ::keys [contains]}
+      (sg/query-ident ident [:dir/name :dir/open? ::contains]))
+   ```"
   ;; shortcut for ident lookups that can skip EQL queries
   ([ident]
    (impl/hook-query ident nil {}))
@@ -42,16 +66,49 @@
    (impl/hook-query ident query config)))
 
 (defn query-root
+  "Queries from the root of the db.
+   * `query`  - EQL query.
+   * `config` - Optional. Any kind of config that may come up.
+
+   Changes to idents accessed by the query (including inside `eql/attr`) during
+   transactions will cause the query to re-un.
+
+   ---
+   Example
+   ```clojure
+    (defmethod eql/attr :products-in-stock [env db _ _]
+      (->> (db/all-of :product)
+           (filter #(pos? (:stock %)))
+           (mapv :db/ident)))
+
+    (defc ui-homepage []
+      (bind {:keys [products-in-stock a-root-key]}
+        (sg/query-root [:products-in-stock :a-root-key]))
+   ```"
   ([query]
    (impl/hook-query nil query {}))
   ([query config]
    (impl/hook-query nil query config)))
 
 (defn run-tx
+  "Use inside a component event handler. Runs transaction `tx`, e.g.
+   `{:e ::some-event :data ...}`. `env` is the component environment map
+   available in event handlers.
+   
+   ---
+   Example
+   ```clojure
+    (event :hide! [env ev-map event]
+      (when (.-ctrlKey event)
+        (sg/run-tx env ev-map)))
+   ```"
   [{::rt/keys [runtime-ref] :as env} tx]
   (impl/process-event runtime-ref tx env))
 
-(defn run-tx! [runtime-ref tx]
+(defn run-tx!
+  "Runs the transaction `tx`, e.g. `{:e ::some-event :data ...}`, outside of the
+   component context."
+  [runtime-ref tx]
   (assert (rt/ref? runtime-ref) "expected runtime ref?")
   (let [{::rt/keys [scheduler]} @runtime-ref]
     (gp/run-now! scheduler #(impl/process-event runtime-ref tx nil) ::run-tx!)))
@@ -63,11 +120,23 @@
     (js-delete root-el "sg$env")))
 
 (defn watch
-  "hook that watches an atom and triggers an update on change
-   accepts an optional path-or-fn arg that can be used for quick diffs
-
+  "Hook that watches `the-atom` and updates when the atom's value changes.
+   
+   Accepts an optional `path-or-fn` arg that can be used to 'watch' a portion of
+   `the-atom`, enabling quick diffs.
+   * 'path' – as in `(get-in @the-atom path)`
+   * 'fn'   - similar to above, defines how to access the relevant parts of
+   `the-atom`. Takes [old-state new-state] of `the-atom` and returns the actual
+   value stored in the hook. Example: `(fn [_ new] (get-in new [:id :name]))`.
+   
+   **Use strongly discouraged** in favor of the normalized central db.
+   
+   ---
+   Examples
+   ```clojure
    (watch the-atom [:foo])
-   (watch the-atom (fn [old new] ...))"
+   (watch the-atom (fn [old new] ...))
+   ```"
   ([the-atom]
    (watch the-atom (fn [old new] new)))
   ([the-atom path-or-fn]
@@ -76,6 +145,7 @@
      (atoms/AtomWatch. the-atom path-or-fn nil nil))))
 
 (defn env-watch
+  "Similar to [[watch]], but for atoms inside the component env."
   ([key-to-atom]
    (env-watch key-to-atom [] nil))
   ([key-to-atom path]
@@ -85,13 +155,51 @@
           (vector? path)]}
    (atoms/EnvWatch. key-to-atom path default nil nil nil)))
 
-(defn suspense [opts vnode]
+(defn suspense
+  "See [docs](https://github.com/thheller/shadow-experiments/blob/master/doc/async.md)."
+  [opts vnode]
   (suspense/SuspenseInit. opts vnode))
 
-(defn simple-seq [coll render-fn]
+(defn simple-seq
+  "Creates a collection of DOM elements by applying `render-fn` to each item 
+   in `coll`. `render-fn` can be a function or component.
+   
+   Makes no attempts to minimize DOM operations required for updates. Efficient
+   with colls which change infrequently or colls updated at the tail. Otherwise,
+   consider using [[keyed-seq]].
+
+   ---
+   Example:
+
+   ```clojure
+   (sg/simple-seq
+    (range 5)
+    (fn [num]
+      (<< [:div \"inline-item: \" num])))
+   ```"
+  [coll render-fn]
   (sc/simple-seq coll render-fn))
 
-(defn keyed-seq [coll key-fn render-fn]
+(defn keyed-seq
+  "Creates a keyed collection of DOM elements by applying `render-fn` to each
+   item in `coll`.
+   * `key-fn` is used to extract a unique key from items in `coll`.
+   * `render-fn` can be a function or component.
+
+   Uses the key to minimize DOM updates. Consider using instead of (the more
+   lightweight) [[simple-seq]] when `coll` changes frequently.
+   
+   ---
+   Examples:
+
+   ```clojure
+   ;; ident used as key
+   (keyed-seq [[::ident 1] ...] identity component)
+
+   (keyed-seq [{:id 1 :data ...} ...] :id
+     (fn [item] (<< [:div.id (:data item) ...])))
+   ```"
+  [coll key-fn render-fn]
   (sc/keyed-seq coll key-fn render-fn))
 
 (deftype TrackChange
@@ -132,20 +240,25 @@
   (volatile! nil))
 
 (defn effect
-  "calls (callback env) after render when provided deps argument changes
-   callback can return a function which will be called if cleanup is required"
+  "Calls `(callback env)` after render when `deps` changes. (*Note*: will be
+   called on mount too.) `callback` may return a cleanup function which is
+   called on component unmount *and* just before whenever callback would be
+   called."
   [deps callback]
   {:pre [(fn? callback)]}
   (comp/EffectHook. deps callback nil true nil))
 
 (defn render-effect
-  "call (callback env) after every render"
+  "Calls `(callback env)` after every render. `callback` may return a cleanup
+   function which is called on component unmount *and* after each render before
+   callback."
   [callback]
   {:pre [(fn? callback)]}
   (comp/EffectHook. :render callback nil true nil))
 
 (defn mount-effect
-  "call (callback env) on mount once"
+  "Calls `(callback env)` on mount. `callback` may return a cleanup function
+   which is called on unmount."
   [callback]
   {:pre [(fn? callback)]}
   (comp/EffectHook. :mount callback nil true nil))
@@ -220,7 +333,12 @@
       (set! (.-sg$env root-el) new-env)
       ::started)))
 
-(defn render [rt-ref ^js root-el root-node]
+(defn render
+  "Renders the UI root. Call on init and `^:dev/after-load`.
+   * `rt-ref`    – runtime atom
+   * `root-el`   – DOM element, e.g. `(js/document.getElementById \"app\")`.
+   * `root-node` – root fn/component (e.g. defined with `defc`)."
+  [rt-ref ^js root-el root-node]
   {:pre [(rt/ref? rt-ref)]}
   (gp/run-now! ^not-native (::rt/scheduler @rt-ref) #(render* rt-ref root-el root-node) ::render))
 
@@ -320,6 +438,19 @@
 (goog-define TRACE false)
 
 (defn prepare
+  "Initialises the runtime atom.
+   * `init`       – Optional. A map.
+   * `data-ref`   – Ref to the grove db atom.
+   * `runtime-id`
+  
+  ---
+  Example:
+   
+  ```clojure
+  (defonce rt-ref
+    (-> {::rt/tx-reporter (fn [report] (tap> report))}
+        (rt/prepare data-ref ::my-rt)))
+  ```"
   ([data-ref runtime-id]
    (prepare {} data-ref runtime-id))
   ([init data-ref runtime-id]
@@ -357,15 +488,83 @@
 (defn vec-conj [x y]
   (if (nil? x) [y] (conj x y)))
 
-(defn queue-fx [env fx-id fx-val]
+(defn queue-fx
+  "Used inside an event handler, it queues up the registered handler of `fx-id`
+   to run at the end of the transaction. The handler will be called with
+   `fx-val`.
+
+   ---
+   Example:
+
+   ```clojure
+    (sg/reg-event rt-ref ::toggle-show-hidden!
+      (fn [tx-env {:keys [show?] :as event}]
+        (-> tx-env
+            (assoc-in [:db ::show-hidden?] show?)   ;; modify the db
+            (sg/queue-fx ::alert! event))))         ;; schedule an fx
+
+    (sg/reg-fx rt-ref ::alert!
+      (fn [fx-env {:keys [show?] :as fx-val}]
+        (js/alert (str \"Will \" (when-not show? \"not\") \" show hidden files.\"))))
+   ```"
+  [env fx-id fx-val]
   (update env ::rt/fx vec-conj [fx-id fx-val]))
 
-(defn reg-event [rt-ref ev-id handler-fn]
+(defn reg-event
+  "Registers the `handler-fn` for event `ev-id`. `handler-fn` will be called
+   with `{:as tx-env :keys [db]} event-map` and should return the modified
+   `tx-env`.
+
+   There is an alternative approach to registering event handlers, see examples.
+   
+   ---
+   Example:
+   ```clojure
+   (sg/reg-event rt-ref ::complete!
+     (fn [tx-env {:keys [checked ident] :as ev}]
+       (assoc-in tx-env [:db ident :completed?] checked)))
+   
+   ;; metadata approach
+   (defn complete! {::ev/handle ::complete!}
+     [tx-env {:keys [checked ident] :as ev}]
+     (assoc-in tx-env [:db ident :completed?] checked))
+   
+   ;; use `{:dev/always true}` in namespaces utilising the metadata approach. 
+   ```"
+  [rt-ref ev-id handler-fn]
   {:pre [(keyword? ev-id)
          (ifn? handler-fn)]}
   (swap! rt-ref assoc-in [::rt/event-config ev-id] handler-fn)
   rt-ref)
 
-(defn reg-fx [rt-ref fx-id handler-fn]
+(defn reg-fx
+  "Registers the `handler-fn` for fx `fx-id`. fx is used for side effects, so
+   `handler-fn` shouldn't modify the db.
+   
+   ---
+   Examples:
+
+   ```clojure
+    (sg/reg-event rt-ref ::toggle-show-hidden!
+      (fn [tx-env {:keys [show?] :as event}]
+        (-> tx-env
+            (assoc-in [:db ::show-hidden?] show?)   ;; modify the db
+            (sg/queue-fx ::alert! event))))         ;; schedule an fx
+
+    (sg/reg-fx rt-ref ::alert!
+      (fn [fx-env {:keys [show?] :as fx-data}]
+        (js/alert (str \"Will \" (when-not show? \"not\") \" show hidden files.\"))))
+   ```
+   
+   `(:transact! fx-env)` allows fx to schedule another transaction, but it
+   should be an async call:
+   ```clojure
+    (sg/reg-fx rt-ref :ui/redirect!
+      (fn [{:keys [transact!] :as env} {:keys [token title]}]
+        (let [tokens (str/split (subs token 1) #\"/\")]
+          ;; forcing the transaction to be async
+          (js/setTimeout #(transact! {:e :ui/route! :token token :tokens tokens}) 0))))
+   ```"
+  [rt-ref fx-id handler-fn]
   (swap! rt-ref assoc-in [::rt/fx-config fx-id] handler-fn)
   rt-ref)
