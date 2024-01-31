@@ -94,6 +94,56 @@
     (.preventDefault e)
     (target e)))
 
+(defn maybe-wrap-ev-fn [ev-fn m ev-opts]
+  (let [{:e/keys
+         [debounce
+          throttle
+          rate-limit
+          once
+          passive
+          capture
+          signal
+          stop!
+          stop
+          prevent-default]}
+        m]
+
+    ;; FIXME: need to track if once already happened. otherwise may re-attach and actually fire more than once
+    ;; but it should be unlikely to have a changing val with :e/once?
+    (when once
+      (gobj/set ev-opts "once" true))
+
+    (when passive
+      (gobj/set ev-opts "passive" true))
+
+    (when capture
+      (gobj/set ev-opts "capture" true))
+
+    (when signal
+      (gobj/set ev-opts "signal" true))
+
+    ;; FIXME: should these be exclusive?
+    (cond-> ev-fn
+      debounce
+      (gfn/debounce debounce)
+
+      throttle
+      (gfn/debounce throttle)
+
+      rate-limit
+      (gfn/debounce rate-limit)
+
+      ;; FIXME: would it be better to default these to true?
+      prevent-default
+      (wrap-prevent-default)
+
+      stop
+      (wrap-stop)
+
+      stop!
+      (wrap-stop!)
+      )))
+
 (defn make-attr-handler [^Keyword key]
   (let [prop-name (.-name key)
         prop-ns (.-ns key)]
@@ -139,10 +189,7 @@
                 ;; easier to miss in tests and stuff that don't test particular events
                 (p/validate-dom-event-value! ev-handler env event nval))
 
-              (let [m?
-                    (map? nval)
-
-                    ev-fn
+              (let [ev-fn
                     (fn [dom-event]
                       (p/handle-dom-event! ev-handler env event nval dom-event))
 
@@ -150,56 +197,9 @@
                     #js {}
 
                     ev-fn
-                    (if-not m?
+                    (if-not (map? nval)
                       ev-fn
-                      (let [{:e/keys
-                             [debounce
-                              throttle
-                              rate-limit
-                              once
-                              passive
-                              capture
-                              signal
-                              stop!
-                              stop
-                              prevent-default]}
-                            nval]
-
-                        ;; FIXME: need to track if once already happened. otherwise may re-attach and actually fire more than once
-                        ;; but it should be unlikely to have a changing val with :e/once?
-                        (when once
-                          (gobj/set ev-opts "once" true))
-
-                        (when passive
-                          (gobj/set ev-opts "passive" true))
-
-                        (when capture
-                          (gobj/set ev-opts "capture" true))
-
-                        (when signal
-                          (gobj/set ev-opts "signal" true))
-
-                        ;; FIXME: should these be exclusive?
-                        (cond-> ev-fn
-                          debounce
-                          (gfn/debounce debounce)
-
-                          throttle
-                          (gfn/debounce throttle)
-
-                          rate-limit
-                          (gfn/debounce rate-limit)
-
-                          ;; FIXME: would it be better to default these to true?
-                          prevent-default
-                          (wrap-prevent-default)
-
-                          stop
-                          (wrap-stop)
-
-                          stop!
-                          (wrap-stop!)
-                          )))]
+                      (maybe-wrap-ev-fn ev-fn nval ev-opts))]
 
                 ;; FIXME: ev-opts are not supported by all browsers
                 ;; closure lib probably has something to handle that

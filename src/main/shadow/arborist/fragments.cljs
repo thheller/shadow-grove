@@ -63,7 +63,7 @@
       ;; svelte does this but CLJS doesn't allow to set! locals so it would require ugly js* code to make it work
       ;; didn't benchmark but the array variant shouldn't be that much slower. maybe even faster since
       ;; the functions don't need to be recreated for each fragment instance
-      (set! exports (.. code (create-fn env vals element-fn)))))
+      (set! exports (.. code (create-fn this env vals element-fn)))))
 
   p/IManaged
   (dom-first [this] marker)
@@ -97,7 +97,25 @@
     (when dom-remove?
       (.remove marker))
 
-    (. code (destroy-fn env exports vals dom-remove?))))
+    (. code (destroy-fn env exports vals dom-remove?)))
+
+  Object
+  (handle-event [this event ev-value dom-event]
+    (if (fn? ev-value)
+      (ev-value dom-event)
+      (let [^not-native ev-handler (::p/dom-event-handler env)]
+
+        (when-not ev-handler
+          (throw (ex-info "missing dom-event-handler!" {:env env :event event :value ev-value})))
+
+        (when ^boolean js/goog.DEBUG
+          ;; validate value now in dev so it fails on construction
+          ;; slightly better experience than firing on-event
+          ;; easier to miss in tests and stuff that don't test particular events
+          (p/validate-dom-event-value! ev-handler env event ev-value))
+
+        (p/handle-dom-event! ev-handler env event ev-value dom-event)
+        ))))
 
 (deftype FragmentInit [vals element-ns ^FragmentCode code]
   p/IConstruct
@@ -204,3 +222,40 @@
   (when dom-remove?
     (dom-remove (aget exports 0)))
   js/undefined)
+
+
+;; event handling
+;; the goal being only attaching event handlers once and never updating them
+;; since all work the update would do can be delayed until the event actually fired
+(defn frag-add-event-listener [^ManagedFragment frag ^js node ^string event ev-value ev-fn]
+  (let [ev-opts
+        #js {}
+
+        ev-fn
+        (if-not (map? ev-value)
+          ev-value
+          ;; all this on one hand need to be static, otherwise debounce/throttle wont work
+          ;; but since this only runs once it also means its values cannot change
+          ;; FIXME: I think this is fine but the compiler should maybe warn if there are not.
+          (a/maybe-wrap-ev-fn ev-fn ev-value ev-opts))]
+
+    (.addEventListener node event ev-fn ev-opts)))
+
+;; macro calls this for :on-click {:e :foo!}
+(defn frag-add-static-event-listener
+  [^ManagedFragment frag ^js node ^string event ev-value]
+  (frag-add-event-listener frag node event ev-value
+    (fn [e]
+      (.handle-event frag event ev-value e))))
+
+;; macro calls this for :on-click {:e :foo! :arg arg}, entire map becomes a value in vals array
+(defn frag-add-updating-event-listener
+  [^ManagedFragment frag ^js node ^string event val-idx]
+  (frag-add-event-listener frag node event
+    (aget (.-vals frag) val-idx)
+    (fn [e]
+      (.handle-event frag event
+        ;; we can always get the latest value
+        ;; this saves ever having to check or update the existing handler added in mount
+        (aget (.-vals frag) val-idx)
+        e))))

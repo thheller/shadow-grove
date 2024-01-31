@@ -233,6 +233,17 @@
         (->> attrs
              (map (fn [[attr-key attr-value]]
                     (cond
+                      (str/starts-with? (name attr-key) "on-")
+                      (let [op
+                            {:op :event-attr
+                             :sym el-sym
+                             :element-id id
+                             :event (subs (name attr-key) 3)}]
+
+                        (if (const? env attr-value)
+                          (assoc op :value attr-value)
+                          (assoc op :code (make-code env attr-value {}))))
+
                       (const? env attr-value)
                       {:op :static-attr
                        :sym el-sym
@@ -462,7 +473,8 @@
            (cljs.core/array ~@return)))))
 
 (defn make-build-impl [ast sym->idx]
-  (let [env-sym (with-meta (gensym "env") {:tag 'not-native})
+  (let [frag-sym (with-meta (gensym "frag") {:tag 'not-native})
+        env-sym (with-meta (gensym "env") {:tag 'not-native})
         vals-sym (with-meta (gensym "vals") {:tag 'array})
         element-fn-sym (with-meta (gensym "element-fn") {:tag 'function})
 
@@ -510,6 +522,20 @@
                       parent-sym
                       (update :mutations conj (with-loc ast `(managed-append ~parent-sym ~sym)))))
 
+                :event-attr
+                (update env :mutations conj
+                  (with-loc ast
+                    (if (:code ast)
+                      `(frag-add-updating-event-listener ~frag-sym
+                         ~(:sym ast)
+                         ~(:event ast)
+                         ~(-> ast :code :ref-id))
+                      `(frag-add-static-event-listener ~frag-sym
+                         ~(:sym ast)
+                         ~(:event ast)
+                         ~(:value ast))
+                      )))
+
                 :static-attr
                 (-> env
                     (update :mutations conj (with-loc ast `(set-attr ~env-sym ~(:sym ast) ~(:attr ast) nil ~(:value ast)))))
@@ -527,7 +553,7 @@
              (sort-by second)
              (map first))]
 
-    `(fn [~env-sym ~vals-sym ~element-fn-sym]
+    `(fn [~frag-sym ~env-sym ~vals-sym ~element-fn-sym]
        (let [~@bindings]
          ~@mutations
          (cljs.core/array ~@return)))))
@@ -584,7 +610,7 @@
                        (aget ~oldv-sym ~ref-id)
                        (aget ~newv-sym ~ref-id)))))
 
-              :static-attr
+              (:static-attr :event-attr)
               mutations
 
               :dynamic-attr
@@ -674,6 +700,8 @@
                           `(clear-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) ~(:value ast))
                           )))
 
+                  :event-attr
+                  calls
 
                   :dynamic-attr
                   (if-not (qualified-keyword? (:attr ast))
@@ -767,6 +795,9 @@
 
               :code-ref
               (assoc sym->idx sym (count sym->idx))
+
+              :event-attr
+              sym->idx
 
               ;; need references to static qualified keywords
               ;; so they can get cleared properly
