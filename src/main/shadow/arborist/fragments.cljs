@@ -189,3 +189,18 @@
 (defn css-join [from-el from-attrs]
   [from-el from-attrs])
 
+;; function used by fragment macro
+;;
+;; places it wants a function that does nothing
+;; results in less code than (fn []) which is "function() {}" vs "x" (after :advanced)
+(defn noop [])
+
+;; fragment with single DOM root node, always the same for mount/destroy
+(defn frag-single-dom-mount [exports parent anchor]
+  (dom-insert-before parent (aget exports 0) anchor)
+  js/undefined)
+
+(defn frag-single-dom-destroy [env exports oldv dom-remove?]
+  (when dom-remove?
+    (dom-remove (aget exports 0)))
+  js/undefined)

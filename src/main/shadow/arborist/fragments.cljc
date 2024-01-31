@@ -549,7 +549,7 @@
                 (-> mutations
                     (cond->
                       (and text-content (not (:static text-content)))
-                      (conj mutations
+                      (conj
                         (with-loc ast
                           ;; FIXME: how bad is it that strings are repeated here?
                           ;; might be worth storing them somewhere so the emitted JS doesn't contain strings twice
@@ -598,81 +598,98 @@
           []
           ast)]
 
-
-    `(fn [~this-sym ~env-sym ~exports-sym ~oldv-sym ~newv-sym]
-       ~@mutations)))
+    (if (empty? mutations)
+      `shadow.arborist.fragments/noop
+      `(fn [~this-sym ~env-sym ~exports-sym ~oldv-sym ~newv-sym]
+         ~@mutations
+         ;; trying to avoid turning any mutation into expr and used as return value
+         ;; just generates useless extra code we don't need
+         ;; wish there was a :no-return or similar fn annotation in the compiler
+         ;; closure :advanced removes "return undefined;" entirely, so this is fine
+         js/undefined))))
 
 (defn make-mount-impl [ast sym->idx]
   (let [exports-sym (gensym "exports")
         parent-sym (gensym "parent")
         anchor-sym (gensym "anchor")
+        first-op (:op (first ast))]
 
-        mount-calls
-        (->> ast
-             (map (fn [{:keys [op sym]}]
-                    (case op
-                      (:text :element)
-                      `(dom-insert-before ~parent-sym (aget ~exports-sym ~(get sym->idx sym)) ~anchor-sym)
-                      :code-ref
-                      `(managed-insert (aget ~exports-sym ~(get sym->idx sym)) ~parent-sym ~anchor-sym)
-                      nil)))
-             (remove nil?))]
+    (if (and (= 1 (count ast)) (or (= :text first-op) (= :element first-op)))
+      ;; for fragments with a single DOM root the insert impl is always the same
+      ;; instead of generating the same code over and over just use a dedicated function
+      `shadow.arborist.fragments/frag-single-dom-mount
+      ;; multiple root elements create custom fn
+      (let [mount-calls
+            (->> ast
+                 (map (fn [{:keys [op sym]}]
+                        (case op
+                          (:text :element)
+                          `(dom-insert-before ~parent-sym (aget ~exports-sym ~(get sym->idx sym)) ~anchor-sym)
+                          :code-ref
+                          `(managed-insert (aget ~exports-sym ~(get sym->idx sym)) ~parent-sym ~anchor-sym)
+                          nil)))
+                 (remove nil?))]
 
-    `(fn [~exports-sym ~parent-sym ~anchor-sym]
-       ~@mount-calls)))
+        `(fn [~exports-sym ~parent-sym ~anchor-sym]
+           ~@mount-calls
+           js/undefined)))))
 
 (defn make-destroy-impl [ast sym->idx]
   (let [exports-sym (gensym "exports")
         env-sym (gensym "env")
         oldv-sym (gensym "oldv")
         dom-remove-sym (with-meta (gensym "dom_remove") {:tag 'boolean})
+        first-op (:op (first ast))]
 
-        destroy-calls
-        (reduce
-          (fn step-fn [calls {:keys [op sym] :as ast}]
-            (case op
-              (:text :element)
-              (-> calls
-                  (cond->
-                    ;; can skip removing nodes when the parent is already removed
-                    (nil? (:parent ast))
-                    (conj `(when ~dom-remove-sym (dom-remove (aget ~exports-sym ~(get sym->idx sym))))))
-                  (reduce-> step-fn (:attrs ast))
-                  (reduce-> step-fn (:children ast)))
+    (if (and (= 1 (count ast)) (or (= :text first-op) (= :element first-op)))
+      `shadow.arborist.fragments/frag-single-dom-destroy
+      (let [destroy-calls
+            (reduce
+              (fn step-fn [calls {:keys [op sym] :as ast}]
+                (case op
+                  (:text :element)
+                  (-> calls
+                      (cond->
+                        ;; can skip removing nodes when the parent is already removed
+                        (nil? (:parent ast))
+                        (conj `(when ~dom-remove-sym (dom-remove (aget ~exports-sym ~(get sym->idx sym))))))
+                      (reduce-> step-fn (:attrs ast))
+                      (reduce-> step-fn (:children ast)))
 
-              :code-ref
-              (-> calls
-                  (conj `(managed-remove
-                           (aget ~exports-sym ~(get sym->idx sym))
-                           ~(if (:parent ast)
-                              false
-                              dom-remove-sym)))
-                  (reduce-> step-fn (:children ast)))
+                  :code-ref
+                  (-> calls
+                      (conj `(managed-remove
+                               (aget ~exports-sym ~(get sym->idx sym))
+                               ~(if (:parent ast)
+                                  false
+                                  dom-remove-sym)))
+                      (reduce-> step-fn (:children ast)))
 
-              ;; only clean up qualified keywords
-              :static-attr
-              (if-not (qualified-keyword? (:attr ast))
-                calls
-                (-> calls
-                    (conj
-                      `(clear-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) ~(:value ast))
-                      )))
+                  ;; only clean up qualified keywords
+                  :static-attr
+                  (if-not (qualified-keyword? (:attr ast))
+                    calls
+                    (-> calls
+                        (conj
+                          `(clear-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) ~(:value ast))
+                          )))
 
 
-              :dynamic-attr
-              (if-not (qualified-keyword? (:attr ast))
-                calls
-                (-> calls
-                    (conj
-                      `(clear-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) (aget ~oldv-sym ~(-> ast :value :ref-id)))
-                      )))
+                  :dynamic-attr
+                  (if-not (qualified-keyword? (:attr ast))
+                    calls
+                    (-> calls
+                        (conj
+                          `(clear-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) (aget ~oldv-sym ~(-> ast :value :ref-id)))
+                          )))
 
-              calls))
-          []
-          ast)]
+                  calls))
+              []
+              ast)]
 
-    `(fn [~env-sym ~exports-sym ~oldv-sym ~dom-remove-sym]
-       ~@destroy-calls)))
+        `(fn [~env-sym ~exports-sym ~oldv-sym ~dom-remove-sym]
+           ~@destroy-calls
+           js/undefined)))))
 
 (defn make-template-string [{:keys [op] :as ast}]
   (case op
