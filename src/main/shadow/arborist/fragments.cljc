@@ -80,6 +80,35 @@
            ;; FIXME: this should maybe resolve instead?
            (not (get-in env [:macro-env :locals thing])))))
 
+;; if all children of an element can be turned into a single string
+;; it is more performant doing that than splitting into X elements with potential upgrade paths
+;; [:div "foo " bar " baz"] will be a very common occurrence. if we can infer that bar will be string-ish type
+;; then we can turn the above into (str "foo " bar " baz") and instead have only a single child, which may even skip
+;; the upgrade path and directly set textContent of the parent node
+
+;; based on https://www.measurethat.net/Benchmarks/Show/3618/0/createtextnode-vs-textcontent-vs-innertext-vs-innerhtml
+
+(defn string-ish? [env child]
+  ;; adding a ^:text tag, as an option so that things we know are not strings
+  ;; don't need to be tagged as ^string, as act solely as fragment option, not maybe have other unintended effects
+  (or (:text (meta child))
+      (when-some [tag (:tag (meta child))]
+        (or (= tag 'string)
+            (= tag 'numeric)))
+      ;; FIXME: maybe some kind of analysis to detect more things that for sure return a string
+      ;; (str ...) calls will be common
+      (and (list? child) (= 'str (first child)))
+      ;; FIXME: should definitely handle more than just locals
+      (and (symbol? child)
+           (when-some [var (get-in env [:macro-env :locals child])]
+             (let [{:keys [tag]} var]
+               ;; FIXME: other tags this should support?
+               (or (= tag 'string)
+                   (= tag 'numeric)
+                   (:text (meta (:name var))))
+               )))
+      ))
+
 (defn next-el-id [{:keys [el-seq-ref] :as env}]
   (swap! el-seq-ref inc))
 
@@ -107,6 +136,7 @@
       {:op :code-ref
        :parent (:parent env)
        :src code
+       :str-able? (string-ish? env code)
        :sym (if element-id
               (symbol (str "d" element-id)) ;; dynamic "elements"
               (gensym))
@@ -145,6 +175,24 @@
         (conj children child)))
     nil
     children))
+
+(defn can-interpolate-string?
+  [children]
+  (every?
+    (fn [ast]
+      (or (= :text (:op ast))
+          (:str-able? ast)))
+    children))
+
+(defn as-text-content-part [{:keys [op] :as ast}]
+  (case op
+    :text
+    (:text ast)
+    :code-ref
+    (:ref-id ast)))
+
+(defn make-text-content [children]
+  {:parts (mapv as-text-content-part children)})
 
 (defn analyze-dom-element [{:keys [parent] :as env} [tag-kw attrs :as el]]
   (let [[attrs children]
@@ -224,24 +272,43 @@
                             (assoc :constant true) ;; no need to update
                             ))
                       )))
-             (into []))
-
-        child-env
-        (assoc env :parent [:element el-sym])]
+             (into []))]
 
     (when (and (contains? void-tags tag)
                (seq children))
       (throw (ex-info (str tag " can't have child elements") {:tag tag})))
 
-    {:op :element
-     :parent parent
-     :element-id id
-     :sym el-sym
-     :tag tag
-     :src el
-     :attrs attr-ops
-     ;; FIXME: potential to provide rendering hints to clients if only one child
-     :children (into [] (map #(analyze-node child-env %)) children)}))
+    (let [el
+          {:op :element
+           :parent parent
+           :element-id id
+           :sym el-sym
+           :tag tag
+           :src el
+           :attrs attr-ops}
+
+          child-env
+          (assoc env :parent [:element el-sym])
+
+          children
+          (into [] (map #(analyze-node child-env %)) children)]
+
+      ;; potentially optimize children to skip needlessly complex string handling
+      ;; when a simple textContent assignment will do
+      (cond
+        ;; multiple text children have already been collapsed into one via combine above
+        (and (= 1 (count children))
+             (= :text (:op (first children))))
+        (assoc el :text-content {:static true :text (:text (first children))})
+
+        ;; [:div "foo " ^string x " bar"]
+        ;; needs to check if there are actually any children
+        ;; otherwise setting textContent to ""
+        (and (seq children) (can-interpolate-string? children))
+        (assoc el :text-content (make-text-content children))
+
+        :else
+        (assoc el :children children)))))
 
 (defn analyze-element [env el]
   (assert (pos? (count el)))
@@ -405,13 +472,25 @@
             (let [[parent-type parent-sym] parent]
               (case op
                 :element
-                (-> env
-                    (update :bindings conj sym (with-loc ast `(~element-fn-sym ~(:tag ast))))
-                    (cond->
-                      (and parent-sym (= parent-type :element))
-                      (update :mutations conj (with-loc ast `(append-child ~parent-sym ~sym))))
-                    (reduce-> step-fn (:attrs ast))
-                    (reduce-> step-fn (:children ast)))
+                (let [{:keys [tag attrs children text-content]} ast]
+                  (-> env
+                      (update :bindings conj sym (with-loc ast `(~element-fn-sym ~tag)))
+                      (cond->
+                        (and parent-sym (= parent-type :element))
+                        (update :mutations conj
+                          (with-loc ast
+                            `(append-child ~parent-sym ~sym)))
+
+                        text-content
+                        (update :mutations conj
+                          (with-loc ast
+                            `(set! ~sym ~'-textContent
+                               ~(or (:text text-content)
+                                    `(str ~@(map (fn [x] (if (string? x) x `(aget ~vals-sym ~x))) (:parts text-content)))
+                                    )))))
+
+                      (reduce-> step-fn attrs)
+                      (reduce-> step-fn children)))
 
                 :text
                 (-> env
@@ -465,9 +544,30 @@
           (fn step-fn [mutations {:keys [op sym] :as ast}]
             (case op
               :element
-              (-> mutations
-                  (reduce-> step-fn (:attrs ast))
-                  (reduce-> step-fn (:children ast)))
+              (let [{:keys [attrs children text-content]} ast]
+
+                (-> mutations
+                    (cond->
+                      (and text-content (not (:static text-content)))
+                      (conj mutations
+                        (with-loc ast
+                          ;; FIXME: how bad is it that strings are repeated here?
+                          ;; might be worth storing them somewhere so the emitted JS doesn't contain strings twice
+                          ;; but then the lookup might be more expensive than just repeating it
+                          ;; I think repeating is fine in a gzip context
+                          ;; FIXME: should this even check for changes at all?
+                          ;; 3 array lookups instead of 1
+                          ;; vs just constructing the string and letting the browser compare?
+                          ;; probably doesn't matter either way
+                          `(when-not (and ~@(->> (:parts text-content)
+                                                 (remove string?)
+                                                 (map (fn [id] `(= (aget ~oldv-sym ~id)
+                                                                   (aget ~newv-sym ~id))))))
+                             (set! (aget ~exports-sym ~(get sym->idx sym)) ~'-textContent
+                               (str ~@(map (fn [x] (if (string? x) x `(aget ~newv-sym ~x))) (:parts text-content)))
+                               )))))
+                    (reduce-> step-fn attrs)
+                    (reduce-> step-fn children)))
 
               :text
               mutations
@@ -640,7 +740,10 @@
               (:text :element)
               (-> sym->idx
                   (cond->
-                    (nil? parent)
+                    ;; nodes without parent need to be exported as we need to access them for dom-insert
+                    ;; nodes with updating textContent need to be exported, since we need the reference for updates
+                    (or (nil? parent)
+                        (and (:text-content ast) (not (:static (:text-content ast)))))
                     (assoc sym (count sym->idx)))
                   (reduce-> step-fn (:attrs ast))
                   (reduce-> step-fn (:children ast)))
