@@ -233,7 +233,7 @@
 
         ev-fn
         (if-not (map? ev-value)
-          ev-value
+          ev-fn
           ;; all this on one hand need to be static, otherwise debounce/throttle wont work
           ;; but since this only runs once it also means its values cannot change
           ;; FIXME: I think this is fine but the compiler should maybe warn if there are not.
