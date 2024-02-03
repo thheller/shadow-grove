@@ -219,7 +219,8 @@
       (.did-update! this true)))
 
   (supports? [this next]
-    (and (component-init? next)
+    (and (not error?) ;; do not try to update an error component, prefer remount
+         (component-init? next)
          (let [other (.-component ^ComponentInit next)]
            (identical? config other))
          ;; (defc ui-thing [^:stable ident] ...)
@@ -307,26 +308,35 @@
   ;; parent tells us to work
   gp/IWork
   (work! [this]
-    (when-not error?
-      (try
-        ;; always complete our own work first
-        ;; a re-render may cause the child tree to change
-        ;; and maybe some work to disappear
-        (while ^boolean (.work-pending? this)
-          (.run-next! this))
+    (try
+      ;; always complete our own work first
+      ;; a re-render may cause the child tree to change
+      ;; and maybe some work to disappear
+      ;; work-pending? checks error?, no need to check that again
+      (while ^boolean (.work-pending? this)
+        (.run-next! this))
 
-        ;; FIXME: only process children when this is done and not suspended?
-        (let [iter (.values work-set)]
-          (loop []
-            (let [current (.next iter)]
-              (when (not ^boolean (.-done current))
-                (gp/work! ^not-native (.-value current))
+      (catch :default ex
+        (.handle-error! this ex)))
 
-                ;; should time slice later and only continue work
-                ;; until a given time budget is consumed
-                (recur)))))
-        (catch :default ex
-          (.handle-error! this ex)))))
+    ;; FIXME: only process children when this is done and not suspended?
+    ;; FIXME: only process children when we are not in error state?
+    ;; child tasks should handle their own errors?
+    (try
+      (let [iter (.values work-set)]
+        (loop []
+          (let [current (.next iter)]
+            (when (not ^boolean (.-done current))
+              (gp/work! ^not-native (.-value current))
+
+              ;; should time slice later and only continue work
+              ;; until a given time budget is consumed
+              (recur)))))
+      (catch :default ex
+        ;; FIXME: actually treat sub-tree errors different that our own?
+        (.handle-error! this ex)))
+
+    js/undefined)
 
   ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
@@ -577,17 +587,11 @@
          (fn? run)]}
   (SlotConfig. depends-on affects run))
 
-(defn make-dirty-bits [mask n]
-  (if (zero? n)
-    mask
-    (recur
-      (bit-or (bit-shift-left mask 1) 1)
-      (dec n))))
-
 (defn make-component-config
   "used by defc macro, do not use directly"
   [component-name
    slots
+   slot-dirty-bits
    opts
    check-args-fn
    render-deps
@@ -606,7 +610,7 @@
         (gp/ComponentConfig.
           component-name
           slots
-          (make-dirty-bits 0 (alength slots))
+          slot-dirty-bits
           opts
           check-args-fn
           render-deps

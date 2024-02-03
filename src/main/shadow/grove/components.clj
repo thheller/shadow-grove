@@ -496,6 +496,13 @@
 
 (s/fdef defc :args ::defc-args)
 
+(defn make-dirty-bits [mask n]
+  (if (zero? n)
+    mask
+    (recur
+      (bit-or (bit-shift-left mask 1) 1)
+      (dec n))))
+
 (defmacro defc [& args]
   (let [{:keys [comp-name args slots opts] :as c}
         (s/conform ::defc-args args)
@@ -553,6 +560,7 @@
                             ~(reduce bit-set 0 depends-on)
                             ~(reduce bit-set 0 affects)
                             ~run)))))
+         ~(make-dirty-bits 0 (count (:slots state)))
          ~(or opts {})
          ;; fn that checks args and invalidates slots or sets render-required
          (fn [~comp-sym ~old-args-sym ~new-args-sym]
