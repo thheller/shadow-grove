@@ -1,19 +1,15 @@
 # Components
 
-The goal of the Component design is to gain access to incremental computation based on application events (eg. state changes). It is based on a simple macro to make them easy to write. It all looks like regular function calls from an API perspective, the complicated parts are implemented as reusable/composable hooks.
+The goal of the Component design is to gain access to incremental computation based on application events (eg. state changes). It is based on a macro to make them easy to write. It all looks like regular function calls from an API perspective, the complicated parts are implemented as "slots".
 
-I name them hooks since naming is hard and they somewhat resemble the same concept in React. If I find a better name I'll most certainly change it.
+When defining a component via `defc` it takes several slots representing as a list starting with a symbol. Currently, there are `bind`, `hook`, `render` and `effect`.
 
-When definining a component via `defc` it takes several hooks representing as a list starting with a symbol. Currently there are `bind`, `hook`, `render` and `effect`.
-
-- `(bind <name> <&body>)` sets up a named binding that can be used in later hooks. If the value changes all other hooks using that binding will also be triggered
-- `(hook <&body>)` is the same as `bind` but does not have an output other hooks can use
+- `(bind <name> <&body>)` sets up a named binding that can be used in later slots. If the value changes all other slots using that binding will also be triggered
+- `(hook <&body>)` is the same as `bind` but does not have an output other slots can use, used purely for side effects
 - `(render <&body>)` produces the component output, can only occur once
 - `(event <event-kw> <arg-vector> <&body>)` creates an event handler fn
 
 Note that all of these execute in order so `bind` and `hook` cannot be used after `render`. They may also only use bindings declared before themselves. They may shadow the binding name if desired. `event` can be used after or before `render` as it will trigger when the event fires are not during component rendering.
-
-This design was changed from previous iterations because `(defc name [arg] [hook1 (foo)] ...)` was too generic and this design should make things easier to adapt for server-side stuff at some point. Server side would never process events so could easily just drop `(event ...)` definitions.
 
 Example dummy component:
 ```clojure
@@ -22,7 +18,7 @@ Example dummy component:
 
 (defc ui-foo []
   (bind {:keys [foo bar] :as data}
-    (watch bad-global-atom))
+    (sg/watch bad-global-atom))
 
   (bind baz
     (compute-expensive foo))
@@ -40,83 +36,30 @@ Example dummy component:
     )))
 ```
 
-Unlike `react` hooks all of these are wired up at compile time and will only trigger if their "inputs" change (eg. previous `bind` name or component arguments).
-
-In the above example the `compute-expensive` will only re-trigger if `foo` changes, not if `bar` changes.
-
-To make things actually composable `hook` or `bind` can return values that implement a simple protocol which will give them access to the component lifecycle. In fact there is one default implementation for this protocol that will be used unless overriden. It is also the simplest hook implementation.
+Unlike `react hooks` all of these are wired up at compile time and will only trigger if their "inputs" change (eg. previous `bind` name or component arguments). Conceptually the above component will create 2 "slot functions", which internally are referenced by their index. *(The actual implementation is a bit more complicated, but the concept stays the same)*
 
 ```clojure
-(deftype SimpleVal [^:mutable val]
-  p/IHook
-  (hook-init! [this])
-  (hook-ready? [this] true)
-  (hook-value [this] val)
-  (hook-update! [this])
-  (hook-deps-update! [this new-val]
-    (let [updated? (not= new-val val)]
-      (set! val new-val)
-      updated?))
-  (hook-destroy! [this]))
-
-(extend-protocol p/IBuildHook
-  default
-  (hook-build [val component idx]
-    (SimpleVal. val)))
+[(fn [component] ;; idx 0
+   (sg/watch bad-global-atom))
+ (fn [component] ;; idx 1
+   (let [foo (:foo (comp/get-slot-value component 0))]
+     (compute-expensive foo)))]
 ```
 
-First the component will call `hook-build` on the result of the function call. This will just wrap the value in a `SimpleVal` hook by default. It doesn't need access to the component so it'll just discard those.
+The component ensures that these function execute only when needed, reducing the amount of code that needs to run per component render cycle substantially.
 
-Once constructed the `SimpleVal` will just hold on to the actual val and return it to be using as the `bind` value. Initially the `hook-init!` lifecycle fn is also called but `SimpleVal` doesn't need to do anything. The `SimpleVal` instance will only be created once, whenever any dependencies of that hook were changed the component will run the hook function again and call `hook-deps-update!` with the return value, which will just replace the hook-value and tell the component whether it needs to update others that depended on the hook.
+Slots by default are stateless, as in a function that returns a value, such as the above. They may opt into being stateful by "claiming" the `bind` slot. The process of claiming creates an `atom` which the code may then update whenever needed. Any update to this atom will notify the component to update and causing the slot code (and dependents) to run again.
 
-When the component is destroyed it'll also call `hook-destroy!` in case some cleanup needs to be done.
+For example the functionality behind the [sg/watch](https://github.com/thheller/shadow-grove/blob/65d61e64e10d3eeca77ccaeb42a9aa550ca35dfe/src/main/shadow/grove/components.cljs#L729-L764) function will watch the supplied atom and trigger an update when it changes.
 
-Note that every hook must return the same "type" of value as once constructed a hook instance remains for the entire lifecycle of the component. `react` hooks have the same restrictions. Simple values can change over time but hooks returning `IBuildHook` implementations must always return that type and a hook may know how to change itself but it cannot change to another type.
+`claim-bind!` will always return the same `atom` for its slot. Everything else is up to the code whether it runs again or re-uses previous values. Updating the `ref` while the slot fn is running will not trigger an update of itself, so doing updates there is fine.
 
-Another simple hook is used in the implementation of `watch`. It just returns an instance of `AtomWatch` which implements the hook protocols and also acts as its own builder.
+The return value returned by the slot fn will be used as the value for the `bind` slot. If the value is equal to the previous returned value the component may decide to skip re-rendering the component and/or updating other dependent slots.
 
-```clojure
-(defn watch [the-atom]
-  (AtomWatch. the-atom nil nil nil))
-```
-
-```clojure
-(deftype AtomWatch [the-atom ^:mutable val component idx]
-  p/IBuildHook
-  (hook-build [this c i]
-    (AtomWatch. the-atom nil c i))
-
-  p/IHook
-  (hook-init! [this]
-    (set! val @the-atom)
-    (add-watch the-atom this
-      (fn [_ _ _ _]
-        ;; don't take new-val just yet, it may change again in the time before
-        ;; we actually get to an update. deref'ing when the actual update occurs
-        ;; which will also reset the dirty flag
-        (comp/invalidate! component idx))))
-
-  (hook-ready? [this] true) ;; born ready
-  (hook-value [this] val)
-  (hook-update! [this]
-    ;; time to actually deref, any change after this will invalidate and trigger
-    ;; an update again. this doesn't mean the value will actually get to render.
-    (set! val @the-atom)
-    true)
-  (hook-deps-update! [this new-val]
-    (throw (ex-info "shouldn't have changing deps?" {})))
-  (hook-destroy! [this]
-    (remove-watch the-atom this)))
-```
-
-Again the same flow of events. First the `hook-build` fn is called, this time keeping a reference to the `component`. Then the component calls `hook-init!` which will do the initial `deref` and then add the actual watch to `the-atom`. Whenever the watch triggers it will invalidate the hook value which will tell the component that it needs to update this hook before it can render again. So whenever the component gets to this point it'll call `hook-update!` which then do the `deref` again. When the component is destroyed the `hook-destroy!` will make sure the watch is removed as well.
-
-I don't expect the user to actually write hooks. They'll likely be provided by libraries/frameworks. The above already enables a basic `reagent` style model.
-
-Just like `react` hooks there are some rules for hooks. Luckily the macro already enforces that things are called in the correct order. Basically the only thing that must be avoided is conditional results. So no `thing (when one-thing (watch foo))` since that might return `nil` which would turn it into a `SimpleVal` hook. Once created the type of the hook must remain consistent and cannot be changed. It cannot be turned into an `AtomWatch` later.
-
-A dummy todomvc example can be found [here](https://github.com/thheller/shadow-experiments/blob/master/src/dev/todomvc/simple.cljs), compiled demo [here](https://code.thheller.com/demos/todomvc/).
-
-Note that this is all still extremely experimental.
+A `bind` slot can only be claimed once, since its return value is used for the `bind` name.
 
 To be continued ...
+
+## Previous Implementation
+
+The implementation prior to this used a special "hook" return value and protocols. It was way too complex for what it ended up doing. The goal of that was to avoid magic runtime bindings, but I didn't like the design due to its complexity. The new version is also much more flexible and doesn't have some of the constraints the previous impl had, e.g. return values can be conditional now.
