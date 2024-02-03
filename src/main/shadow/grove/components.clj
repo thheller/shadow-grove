@@ -124,8 +124,8 @@
                     :arg
                     `(get-arg ~comp-sym ~idx)
 
-                    :hook
-                    `(get-hook-value ~comp-sym ~idx)
+                    :slot
+                    `(get-slot-value ~comp-sym ~idx)
                     )]))
        (vec)))
 
@@ -136,11 +136,11 @@
        (map :idx)
        (set)))
 
-(defn update-affects [{:keys [bindings] :as state} deps hook-idx]
+(defn update-affects [{:keys [bindings] :as state} deps slot-idx]
   (reduce
     (fn [state dep-sym]
       (let [{:keys [type idx] :as binding} (get bindings dep-sym)]
-        (update-in state [(case type :hook :hooks :arg :args) idx :affects] set-conj hook-idx)))
+        (update-in state [(case type :slot :slots :arg :args) idx :affects] set-conj slot-idx)))
     state
     deps))
 
@@ -151,29 +151,29 @@
      `(get ~ref-name ~kw ~@(when-some [default (get defaults binding-name)]
                              [default]))))
 
-  ([{:keys [comp-sym hook-idx] :as state} ref-name binding-name accessor]
+  ([{:keys [comp-sym slot-idx] :as state} ref-name binding-name accessor]
    (-> state
-       (update-affects #{ref-name} hook-idx)
+       (update-affects #{ref-name} slot-idx)
        (assoc-in [:bindings binding-name]
-         {:type :hook
-          :idx hook-idx
+         {:type :slot
+          :idx slot-idx
           :name binding-name
           :deps #{ref-name}})
 
-       (update :hooks conj
+       (update :slots conj
          {:depends-on
           (let [{:keys [type idx] :as ref} (get-in state [:bindings ref-name])]
-            (if (not= type :hook)
-              #{} ;; args are tracked elsewhere, this is only for hooks depending on other hooks
+            (if (not= type :slot)
+              #{} ;; args are tracked elsewhere, this is only for slots depending on other slots
               #{idx}))
           :provides binding-name
           :run
           `(fn [~comp-sym]
              (let ~(let-bindings state #{ref-name})
                ~accessor))})
-       (update :hook-idx inc))))
+       (update :slot-idx inc))))
 
-(defn hook-destructure-map
+(defn slot-destructure-map
   [state
    ref-name
    {defaults :or :as map}]
@@ -208,7 +208,7 @@
           (throw (ex-info "unknown destructure" {:entry entry}))
           )))))
 
-(defn hook-destructure-vec
+(defn slot-destructure-vec
   [state
    ref-name
    v]
@@ -255,7 +255,7 @@
       state
       kv)))
 
-(defmulti analyze-hook (fn [state hook] (:name hook)))
+(defmulti analyze-slot (fn [state slot] (:name slot)))
 
 (defn analyze-arg
   [state idx binding]
@@ -276,7 +276,7 @@
       (-> state
           (assoc-in [:args idx] {:name arg-name :idx idx :stable stable})
           (assoc-in [:bindings arg-name] {:type :arg :name arg-name :idx idx})
-          (hook-destructure-map arg-name binding)))
+          (slot-destructure-map arg-name binding)))
 
     (vector? binding)
     (let [[_as sym :as v] (drop-while #(not= :as %) binding)
@@ -294,13 +294,13 @@
       (-> state
           (assoc-in [:args idx] {:name arg-name :idx idx :stable stable})
           (assoc-in [:bindings arg-name] {:type :arg :name arg-name :idx idx})
-          (hook-destructure-vec arg-name binding)))
+          (slot-destructure-vec arg-name binding)))
 
     :else
     (throw (ex-info "unsupported form for component arg" {:binding binding :idx idx}))))
 
 (defn add-data-binding
-  [{:keys [comp-sym hook-idx bindings] :as state}
+  [{:keys [comp-sym slot-idx bindings] :as state}
    [binding & body]]
 
   (let [binding-name
@@ -310,12 +310,12 @@
 
           (map? binding)
           (or (get binding :as)
-              (symbol (str "__hook$" hook-idx)))
+              (symbol (str "__slot$" slot-idx)))
 
           (vector? binding)
           (let [[_as sym :as v] (drop-while #(not= :as %) binding)]
             (if-not (seq v)
-              (symbol (str "__hook$" hook-idx))
+              (symbol (str "__slot$" slot-idx))
               ;; :as followed by symbol only
               (do (when-not (simple-symbol? sym)
                     (throw (ex-info "invalid data binding" {:binding binding})))
@@ -330,21 +330,21 @@
     (-> state
         ;; must be done first, otherwise shadowed bindings affect themselves
         ;; must track these here by id since names may be shadowed later
-        (update-affects deps hook-idx)
+        (update-affects deps slot-idx)
 
         (cond->
           ;; don't make _ an accessible name when using (bind _ "something")
           ;; should be convention for unused name, accessing it should be an error
           (not= '_ binding-name)
           (assoc-in [:bindings binding-name]
-            {:type :hook
-             :idx hook-idx
+            {:type :slot
+             :idx slot-idx
              :name binding-name
              :deps deps}))
 
-        (update :hooks conj
+        (update :slots conj
           {:all-deps deps
-           :depends-on (bindings-indexes-of-type state deps :hook)
+           :depends-on (bindings-indexes-of-type state deps :slot)
            :provides binding-name
            :run
            (if (empty? deps)
@@ -353,19 +353,19 @@
              `(fn [~comp-sym]
                 (let ~(let-bindings state deps)
                   ~@body)))})
-        (update :hook-idx inc)
+        (update :slot-idx inc)
 
         (cond->
           ;; FIXME: vector destructure
           (map? binding)
-          (hook-destructure-map binding-name binding)
+          (slot-destructure-map binding-name binding)
 
           (vector? binding)
-          (hook-destructure-vec binding-name binding)
+          (slot-destructure-vec binding-name binding)
           ))))
 
-(defmethod analyze-hook 'bind [state {:keys [body]}]
-  ;; (bind some-name (something-producing-a-value-or-hook))
+(defmethod analyze-slot 'bind [state {:keys [body]}]
+  ;; (bind some-name (something-producing-a-value-or-slot))
 
   ;; don't want to deal with render using bindings not yet declared
   (when (contains? state :render-fn)
@@ -373,14 +373,14 @@
 
   (add-data-binding state body))
 
-(defmethod analyze-hook 'hook [state {:keys [body]}]
+(defmethod analyze-slot 'hook [state {:keys [body]}]
   ;; (hook (some-hook-without-output))
 
-  ;; purely for side effects where the hook may hook into the lifecycle of the component
+  ;; purely for side effects where the slot may slot into the lifecycle of the component
   (add-data-binding state (into ['_] body)))
 
-(defmethod analyze-hook 'render
-  [{:keys [comp-sym bindings] :as state} {:keys [body] :as hook}]
+(defmethod analyze-slot 'render
+  [{:keys [comp-sym bindings] :as state} {:keys [body] :as slot}]
   ;; (render something)
   (when (contains? state :render-fn)
     (throw (ex-info "render already defined" {})))
@@ -394,8 +394,8 @@
          (let ~(let-bindings state deps)
            ~@body)))))
 
-(defmethod analyze-hook '<<
-  [{:keys [comp-sym bindings] :as state} {:keys [body] :as hook}]
+(defmethod analyze-slot '<<
+  [{:keys [comp-sym bindings] :as state} {:keys [body] :as slot}]
   ;; (<< something)
   (when (contains? state :render-fn)
     (throw (ex-info "render already defined" {})))
@@ -409,14 +409,14 @@
          (let ~(let-bindings state deps)
            (shadow.grove/<< ~@body))))))
 
-(defmethod analyze-hook 'event
-  [{:keys [comp-sym bindings] :as state} {:keys [body] :as hook}]
+(defmethod analyze-slot 'event
+  [{:keys [comp-sym bindings] :as state} {:keys [body] :as slot}]
   ;; (event ::ev-id [env e] (do-something))
   (let [[ev-id ev-args & body] body]
 
     (cond
       ;; (event ::some-id some-other-fn)
-      ;; no access to hook data, just calls fn
+      ;; no access to slot data, just calls fn
       (and (symbol? ev-args) (nil? body))
       (assoc-in state [:events ev-id] ev-args)
 
@@ -465,7 +465,7 @@
                ;; since I can't to that for (event ::foo some-fn) without going through too much apply
                (let ~(-> []
                          (conj comp-sym `(get-component ~(first arg-syms)))
-                         ;; let binding from hooks first
+                         ;; let binding from slots first
                          (into (let-bindings state deps))
                          ;; then function args because they may shadow let names
                          (into (mapcat vector ev-args arg-syms)))
@@ -474,15 +474,15 @@
                nil))))
 
       :else
-      (throw (ex-info "invalid event declaration" {:hook hook})))))
+      (throw (ex-info "invalid event declaration" {:slot slot})))))
 
-(defn hook-symbol? [x]
+(defn slot-symbol? [x]
   (and (symbol? x)
-       (contains? (methods analyze-hook) x)))
+       (contains? (methods analyze-slot) x)))
 
-(s/def ::defc-hook
+(s/def ::defc-slot
   (s/cat
-    :name hook-symbol?
+    :name slot-symbol?
     :body (s/* any?)))
 
 (s/def ::defc-args
@@ -492,12 +492,12 @@
     :opts (s/? map?)
     :args vector? ;; FIXME: core.specs for destructure help
     ;; + since it requires at least (render ...)
-    :hooks (s/+ (s/spec ::defc-hook))))
+    :slots (s/+ (s/spec ::defc-slot))))
 
 (s/fdef defc :args ::defc-args)
 
 (defmacro defc [& args]
-  (let [{:keys [comp-name args hooks opts] :as c}
+  (let [{:keys [comp-name args slots opts] :as c}
         (s/conform ::defc-args args)
 
         {:keys [new-args-sym old-args-sym comp-sym render-used render-fn] :as state}
@@ -506,13 +506,13 @@
              :old-args-sym (with-meta (gensym "old") {:tag 'not-native})
              :new-args-sym (with-meta (gensym "new") {:tag 'not-native})
              :args []
-             :hooks []
+             :slots []
              :events {}
              :opts opts
              :effect-idx 0
-             :hook-idx 0}
+             :slot-idx 0}
             (rkv-> analyze-arg args)
-            (r-> analyze-hook hooks))
+            (r-> analyze-slot slots))
 
         opts
         (let [stable-args
@@ -527,15 +527,15 @@
             (assoc opts ::stable-args stable-args)))
 
         render-deps
-        (bindings-indexes-of-type state render-used :hook)
+        (bindings-indexes-of-type state render-used :slot)
 
         render-args
         (bindings-indexes-of-type state render-used :arg)]
 
     ;; assume 30 bits is safe for ints?
     ;; FIXME: JS numbers are weird, how many bits are actually safe to use?
-    (when (>= (:hook-idx state) 30)
-      (throw (ex-info "too many hooks" {})))
+    (when (>= (:slot-idx state) 30)
+      (throw (ex-info "too many slots" {})))
 
     (when-not render-fn
       (throw (ex-info "missing render" {})))
@@ -547,20 +547,20 @@
        (make-component-config
          ~(str *ns* "/" comp-name)
          (cljs.core/array
-           ~@(->> (:hooks state)
+           ~@(->> (:slots state)
                   (map (fn [{:keys [depends-on affects run]}]
-                         `(make-hook-config
+                         `(make-slot-config
                             ~(reduce bit-set 0 depends-on)
                             ~(reduce bit-set 0 affects)
                             ~run)))))
          ~(or opts {})
-         ;; fn that checks args and invalidates hooks or sets render-required
+         ;; fn that checks args and invalidates slots or sets render-required
          (fn [~comp-sym ~old-args-sym ~new-args-sym]
            (check-args! ~comp-sym ~new-args-sym ~(count (:args state)))
            ~@(for [{:keys [idx affects]} (:args state)
                    :let [affects-render? (contains? render-args idx)
-                         affects-hooks? (seq affects)]
-                   :when (or affects-render? affects-hooks?)]
+                         affects-slots? (seq affects)]
+                   :when (or affects-render? affects-slots?)]
                `(when (not=
                         ;; validated to be vectors elsewhere
                         (cljs.core/-nth ~old-args-sym ~idx)
@@ -568,8 +568,8 @@
                   ;; ~@ so that it doesn't leave ugly nil
                   ~@(when affects-render?
                       [`(arg-triggers-render! ~comp-sym ~idx)])
-                  ~@(when affects-hooks?
-                      [`(arg-triggers-hooks! ~comp-sym ~idx ~(reduce bit-set 0 affects))])))
+                  ~@(when affects-slots?
+                      [`(arg-triggers-slots! ~comp-sym ~idx ~(reduce bit-set 0 affects))])))
            ;; trailing nil so the above isn't turned into an expression which results in ? : ...
            ;; dunno if there is a way to tell CLJS that this function has no return value
            nil)

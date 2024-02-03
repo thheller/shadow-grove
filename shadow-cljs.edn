@@ -8,7 +8,7 @@
   "../shadow-css/src/main"]
 
  :version
- "2.26.3"
+ "2.26.5"
 
  :jvm-opts
  ["-XX:-OmitStackTraceInFastThrow"]
@@ -17,7 +17,7 @@
  ;; for benchmark purposes, not actually a dependency
  [[reagent "0.9.0-rc3"]
 
-  [com.thheller/shadow-css "0.2.0"]]
+  [com.thheller/shadow-css "0.4.5"]]
 
  :dev-http
  {3005 "public"

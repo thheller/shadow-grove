@@ -182,8 +182,8 @@
     ;; FIXME: figure out if this can be smarter
     (.forEach query-ids
       (fn [query-id]
-        (when-some [query (.get active-queries-map query-id)]
-          (gp/query-refresh! query))))))
+        (when-some [callback (.get active-queries-map query-id)]
+          (callback))))))
 
 (defn merge-result [tx-env ev result]
   (cond
@@ -348,81 +348,63 @@
 
           (:return result))))))
 
-(deftype HookQuery
-  [^:mutable ident
-   ^:mutable query
-   ^:mutable config
-   ^:mutable ^not-native component-handle
-   ^:mutable rt-ref
-   ^:mutable active-queries-map
-   ^:mutable query-id
-   ^:mutable ready?
-   ^:mutable read-count
-   ^:mutable read-keys
-   ^:mutable read-result]
+(defn slot-query [ident query config]
+  {:pre [(or (nil? ident) (db/ident? ident))
+         (or (nil? query) (vector? query))
+         (map? config)]}
 
-  gp/IHook
-  (hook-init! [this ch]
-    (set! component-handle ch)
+  (let [ref
+        (comp/claim-bind! ::hook-query)
 
-    (let [env (gp/get-component-env ch)]
-      (set! rt-ref (::rt/runtime-ref env))
-      (set! active-queries-map (::rt/active-queries-map @rt-ref)))
+        {prev-ident :ident
+         prev-query :query
+         prev-config :config
+         prev-query-id :query-id
+         :as state} @ref
 
-    (set! query-id (rt/next-id))
+        rt-ref
+        (::rt/runtime-ref comp/*env*)
 
-    (.set active-queries-map query-id this)
+        {::rt/keys [active-queries-map] :as query-env}
+        @rt-ref]
 
-    (.do-read! this))
+    (comp/set-cleanup! ref
+      (fn [{:keys [query-id read-keys] :as last-state}]
+        (unindex-query @rt-ref query-id read-keys)
+        ))
 
-  (hook-ready? [this]
-    (or ready? (false? (:suspend config))))
+    ;; if anything changed, clean up previous
+    (when (or (not= ident prev-ident)
+              (not= query prev-query)
+              (not= config prev-config))
 
-  (hook-value [this] read-result)
+      ;; just throw away old
+      (when prev-query-id
+        (unindex-query query-env prev-query-id (:read-keys state))
+        (.delete active-queries-map prev-query-id))
 
-  ;; node deps changed, check if query changed
-  (hook-deps-update! [this ^HookQuery val]
-    (let [new-ident (.-ident val)
-          ident-equal? (= ident new-ident)]
+      (let [query-id (rt/next-id)]
 
-      (if (and ident-equal?
-               (= query (.-query val))
-               (= config (.-config val)))
-        false
-        ;; query changed, perform read immediately
-        (do (when-not ident-equal?
-              ;; need to reset this to 0 since do-read! uses this to track
-              ;; whether it needs to index the query or not
-              ;; thus a query with changing ident is not properly re-indexed if this is not reset
-              ;; I intended read-count as a debug utility to find overly active queries
-              ;; so this somehow needs to be addressed properly somewhere so this doesn't have multiple uses
-              (set! read-count 0))
+        (.set active-queries-map query-id
+          (fn []
+            ;; called by invalidate-keys! to signal that the keys read by a query where updated
+            ;; not actually performing query now, just triggering a component update by touching atom
+            (swap! ref assoc :pending? true)))
 
-            (set! ident new-ident)
-            (set! query (.-query val))
-            (set! config (.-config val))
-            (let [old-result read-result]
-              (.do-read! this)
-              (not= old-result read-result))))))
+        (swap! ref assoc :ident ident :query query :config config :query-id query-id :read-count 0)
+        ))
 
-  ;; node was invalidated and needs update
-  (hook-update! [this]
-    (let [old-result read-result]
-      (.do-read! this)
-      (not= old-result read-result)))
+    (swap! ref (fn [state]
+                 (-> state
+                     (assoc :pending? false)
+                     (update :read-count inc))))
 
-  (hook-destroy! [this]
-    (unindex-query @rt-ref query-id read-keys)
-    (.delete active-queries-map query-id))
+    ;; perform query
+    (let [db
+          @(::rt/data-ref query-env)
 
-  gp/IQuery
-  (query-refresh! [this]
-    (gp/hook-invalidate! component-handle))
-
-  Object
-  (do-read! [this]
-    (let [query-env @rt-ref
-          db @(::rt/data-ref query-env)]
+          {:keys [query-id read-count read-keys]}
+          @ref]
 
       (if (and ident (nil? query))
         ;; shortcut for just getting data for an ident
@@ -431,15 +413,15 @@
               new-keys #{ident}]
 
           ;; only need to index once
-          (when (zero? read-count)
+          (when (= 1 read-count)
             (index-query query-env query-id read-keys new-keys))
 
-          (set! read-keys new-keys)
+          (swap! ref assoc :read-keys new-keys)
 
+          ;; FIXME: restore suspense support
           (if (keyword-identical? result :db/loading)
-            (set! read-result (assoc (:default config {}) ::sg/loading-state :loading))
-            (do (set! read-result result)
-                (set! ready? true))))
+            (assoc (:default config {}) ::sg/loading-state :loading)
+            result))
 
         ;; query env is not the component env
         (let [observed-data (db/observed db)
@@ -449,88 +431,57 @@
 
           (index-query query-env query-id read-keys new-keys)
 
-          (set! read-keys new-keys)
+          (swap! ref assoc :read-keys new-keys)
 
           (if (keyword-identical? result :db/loading)
-            (set! read-result (assoc (:default config {}) ::sg/loading-state :loading))
+            ;; FIXME: this is sort of dirty to get suspense behavior back
+            (do (set! comp/*ready* false)
+                (assoc (:default config {}) ::sg/loading-state :loading))
 
-            (do (set! read-result
-                  (-> (if ident (get result ident) result)
-                      (assoc ::sg/loading-state :ready)))
-                (set! ready? true))))))
+            (-> (if ident (get result ident) result)
+                (assoc ::sg/loading-state :ready))
+            ))))))
 
-    (set! read-count (inc read-count))))
+(defonce direct-queries-ref
+  (atom {}))
 
-(defn hook-query [ident query config]
-  {:pre [(or (nil? ident) (db/ident? ident))
-         (or (nil? query) (vector? query))
-         (map? config)]}
-  (HookQuery.
-    ident
-    query
-    config
-    nil
-    nil
-    nil
-    nil
-    false
-    0
-    nil
-    nil))
-
-(deftype DirectQuery
-  [rt-ref
-   query-id
-   query
-   callback
-   ^:mutable read-keys
-   ^:mutable read-result
-   ^:mutable destroyed?]
-
-  gp/IQuery
-  (query-refresh! [this]
-    (when-not destroyed?
-      (.do-read! this)))
-
-  Object
-  (do-read! [this]
-    (let [query-env @rt-ref
-          observed-data (db/observed @(::rt/data-ref query-env))
-          result (eql/query query-env observed-data query)
-          new-keys (db/observed-keys observed-data)]
-
-      ;; remember this even if query is still loading
-      (index-query query-env query-id read-keys new-keys)
-
-      (set! read-keys new-keys)
-
-      ;; if query is still loading don't send to main
-      (when (and (not (keyword-identical? result :db/loading))
-                 ;; empty result likely means the query is no longer valid
-                 ;; eg. deleted ident. don't send update, will likely be destroyed
-                 ;; when other query updates
-                 (some? result)
-                 (not (empty? result))
-                 ;; compare here so main doesn't need to compare again
-                 (not= result read-result))
-
-        (set! read-result result)
-
-        (callback result))))
-
-  (destroy! [this]
-    (set! destroyed? true)
-    (unindex-query @rt-ref query-id read-keys)))
-
-;; direct query, hooks don't use this
 (defn query-init [rt-ref query-id query config callback]
   (let [{::rt/keys [active-queries-map]} @rt-ref
-        q (DirectQuery. rt-ref query-id query callback nil nil false)]
-    (.set active-queries-map query-id q)
-    (.do-read! q)))
+
+        do-read!
+        (fn do-read! []
+          (let [{:keys [read-keys read-result] :as state} (get @direct-queries-ref query-id)
+
+                query-env @rt-ref
+                observed-data (db/observed @(::rt/data-ref query-env))
+                result (eql/query query-env observed-data query)
+                new-keys (db/observed-keys observed-data)]
+
+            ;; remember this even if query is still loading
+            (index-query query-env query-id read-keys new-keys)
+
+            (swap! direct-queries-ref assoc-in [query-id :read-keys] new-keys)
+
+            (when (and (not (keyword-identical? result :db/loading))
+                       ;; empty result likely means the query is no longer valid
+                       ;; eg. deleted ident. don't send update, will likely be destroyed
+                       ;; when other query updates
+                       (some? result)
+                       (not (empty? result))
+                       ;; compare here so main doesn't need to compare again
+                       (not= result read-result))
+
+              (swap! direct-queries-ref assoc-in [query-id :read-result] result)
+              (callback result))))]
+
+    (.set active-queries-map query-id do-read!)
+    (do-read!)
+    ))
 
 (defn query-destroy [rt-ref query-id]
   (let [{::rt/keys [active-queries-map]} @rt-ref]
     (when-some [q (.get active-queries-map query-id)]
       (.delete active-queries-map query-id)
-      (.destroy! q))))
+      (unindex-query @rt-ref query-id (get-in @direct-queries-ref [query-id :read-keys]))
+      (swap! direct-queries-ref dissoc query-id)
+      )))

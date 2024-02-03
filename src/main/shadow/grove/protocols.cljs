@@ -23,23 +23,6 @@
   ;; e and origin can be considered optional and will be ignored by most actual handlers
   (handle-event! [this ev-map e origin]))
 
-
-(defprotocol IHook
-  (hook-init! [this component-handle])
-  (hook-ready? [this])
-  (hook-value [this])
-  ;; true-ish return if component needs further updating
-  (hook-deps-update! [this val])
-  (hook-update! [this])
-  (hook-destroy! [this]))
-
-(defprotocol IHookDomEffect
-  (hook-did-update! [this did-render?]))
-
-
-(defprotocol IComponentHookHandle
-  (hook-invalidate! [this] "called when a hook wants the component to refresh"))
-
 (defprotocol IEnvSource
   (get-component-env [this]))
 
@@ -50,12 +33,10 @@
 ;; with already constructed components
 (deftype ComponentConfig
   [component-name
-   hooks
+   slots
+   slot-init-bits
    opts
    check-args-fn
    render-deps
    render-fn
    events])
-
-(defprotocol IQuery
-  (query-refresh! [this]))

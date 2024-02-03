@@ -23,6 +23,13 @@
 
 (set! *warn-on-infer* false)
 
+(def ^:dynamic ^ManagedComponent *component* nil)
+(def ^:dynamic ^not-native *env* nil)
+(def ^:dynamic ^numeric *slot-idx* nil)
+(def ^:dynamic *slot-value* ::pending)
+(def ^:dynamic *claimed* nil)
+(def ^:dynamic *ready* true)
+
 (defn debug-find-roots []
   (reduce
     (fn [all instance]
@@ -113,90 +120,12 @@
       idx
       (recur (bit-shift-right search 1) (inc idx)))))
 
-(deftype EffectHook
-  [^:mutable deps
-   ^:mutable ^function callback
-   ^:mutable callback-result
-   ^:mutable ^boolean should-call?
-   ^:mutable ^not-native component-handle]
-
-  gp/IHook
-  (hook-init! [this ch]
-    (set! component-handle ch))
-
-  (hook-ready? [this] true)
-  (hook-value [this] ::effect-hook)
-  (hook-update! [this] false)
-
-  (hook-deps-update! [this ^EffectHook new]
-    ;; comp-did-update! will call it
-    ;; FIXME: (sg/effect :mount (fn [] ...)) is only called once ever
-    ;; should it be called in case it uses other hook data?
-    (set! callback (.-callback new))
-
-    ;; run after each render
-    ;; (sg/effect :render (fn [env] ...))
-
-    ;; run once on mount, any constant really works
-    ;; (sg/effect :mount (fn [env] ...))
-
-    ;; when when [a b] changes
-    ;; (sg/effect [a b] (fn [env] ....))
-
-    (let [new-deps (.-deps new)]
-      (when (not= new-deps :render)
-        (set! should-call? (not= deps new-deps))
-        (set! deps new-deps)))
-
-    ;; doesn't have a usable output
-    false)
-
-  (hook-destroy! [this]
-    (when (fn? callback-result)
-      (callback-result)))
-
-  gp/IHookDomEffect
-  (hook-did-update! [this ^boolean did-render?]
-    (when (and did-render? should-call?)
-      (when (fn? callback-result)
-        (callback-result))
-
-      (set! callback-result (callback (gp/get-component-env component-handle)))
-
-      (when (not= deps :render)
-        (set! should-call? false))
-      )))
-
-(deftype ComponentHookHandle [^not-native component idx]
-  gp/IEnvSource
-  (get-component-env [this]
-    (.-component-env component))
-
-  gp/ISchedulerSource
-  (get-scheduler [this]
-    (.-scheduler component))
-
-  gp/IComponentHookHandle
-  (hook-invalidate! [this]
-    (.invalidate-hook! component idx)))
-
-(deftype SimpleVal [^:mutable val]
-  gp/IHook
-  (hook-init! [this ch])
-  (hook-ready? [this] true)
-  (hook-value [this] val)
-  (hook-update! [this])
-  (hook-deps-update! [this ^SimpleVal next]
-    (let [new-val (.-val next)
-          updated? (not= new-val val)]
-      (set! val new-val)
-      updated?))
-  (hook-destroy! [this]))
-
-(defn maybe-wrap-val [val]
-  (if (implements? gp/IHook val)
-    val
-    (SimpleVal. val)))
+(defn run-callback-map [m]
+  (reduce-kv
+    (fn [_ key callback]
+      (callback))
+    nil
+    m))
 
 (defclass ManagedComponent
   (field ^not-native scheduler)
@@ -207,11 +136,21 @@
   (field args)
   (field rendered-args)
   (field ^number current-idx (int 0))
-  (field ^array hooks)
-  (field ^array hooks-with-effects #js [])
+
+  ;; lifecycle actions
+  (field ^not-native on-destroy {})
+  (field ^not-native after-render {})
+  (field ^not-native before-render {})
+
+  (field ^array slot-values)
+
+  ;; using maps here since not all slots are going to have refs/cleanup
+  (field ^not-native slot-refs {})
+  (field ^not-native slot-cleanup {})
+
   (field ^number dirty-from-args (int 0))
-  (field ^number dirty-hooks (int 0))
-  (field ^number updated-hooks (int 0))
+  (field ^number dirty-slots (int 0))
+  (field ^number updated-slots (int 0))
   (field ^boolean needs-render? true) ;; initially needs a render
   (field ^boolean suspended? false)
   (field ^boolean destroyed? false)
@@ -251,7 +190,9 @@
           (set! -shadow$instance this))))
 
     (set! root (common/managed-root component-env))
-    (set! hooks (js/Array. (alength (.-hooks config)))))
+    ;; marking everything dirty to ensure all slots run
+    (set! dirty-slots (.-slot-init-bits config))
+    (set! slot-values (js/Array. (alength (.-slots config)))))
 
   cljs.core/IHash
   (-hash [this]
@@ -312,10 +253,11 @@
 
     (set! destroyed? true)
 
-    (.forEach hooks
-      (fn [^not-native hook]
-        (when hook
-          (gp/hook-destroy! hook))))
+    (reduce-kv
+      (fn [_ ref callback]
+        (callback @ref))
+      nil
+      slot-cleanup)
 
     (ap/destroy! root dom-remove?))
 
@@ -395,135 +337,140 @@
     (let [err-fn (::error-handler parent-env)]
       (err-fn this ex)))
 
-  (get-hook-value [this idx]
-    (gp/hook-value (aget hooks idx)))
+  (get-slot-value [this idx]
+    (aget slot-values idx))
 
-  (invalidate-hook! [this idx]
-    ;; (js/console.log "invalidate-hook!" idx current-idx (.-component-name config) this)
+  (set-slot-cleanup! [this ref callback]
+    (set! slot-cleanup (assoc slot-cleanup ref callback)))
 
-    (set! dirty-hooks (bit-set dirty-hooks idx))
+  (get-slot-ref [this idx]
+    (or (get slot-refs idx)
+        ;; FIXME: maybe custom atom type that links back to component?
+        (let [ref (atom nil)]
+          ;; watch atom so that any update will cause the slot to run again
+          ;; and potentially re-render the component
+          (add-watch ref this
+            (fn [_ _ old new]
+              ;; only actually invalidate when the slot isn't currently running
+              (when (not= *slot-idx* idx)
+                (when (not= old new)
+                  (.invalidate-slot! this idx)
+                  ))))
+          (set! slot-refs (assoc slot-refs idx ref))
+          ref
+          )))
+
+  (invalidate-slot! [this idx]
+    ;; (js/console.log "invalidate-slot!" idx current-idx (.-component-name config) this)
+
+    (set! dirty-slots (bit-set dirty-slots idx))
 
     ;; don't set higher when currently at lower index, would otherwise skip work
     (set! current-idx (js/Math.min idx current-idx))
 
-    ;; always need to resume so the invalidated hooks can do work
+    ;; always need to resume so the invalidated slots can do work
     ;; could check if actually suspended but no need
     (set! suspended? false)
 
-    (.schedule! this ::hook-invalidate!))
+    (.schedule! this ::slot-invalidate!))
 
-  (mark-hooks-dirty! [this dirty-bits]
-    (set! dirty-hooks (bit-or dirty-hooks dirty-bits))
-    (set! current-idx (find-first-set-bit-idx dirty-hooks)))
+  (mark-slots-dirty! [this dirty-bits]
+    (set! dirty-slots (bit-or dirty-slots dirty-bits))
+    (set! current-idx (find-first-set-bit-idx dirty-slots)))
 
   (mark-dirty-from-args! [this dirty-bits]
     (set! dirty-from-args (bit-or dirty-from-args dirty-bits))
-    (.mark-hooks-dirty! this dirty-bits))
+    (.mark-slots-dirty! this dirty-bits))
 
   (set-render-required! [this]
     (set! needs-render? true)
-    (set! current-idx (js/Math.min current-idx (alength (.-hooks config)))))
+    (set! current-idx (js/Math.min current-idx (alength (.-slots config))))
+    js/undefined)
+
+  (add-after-render-effect [this key callback]
+    (set! after-render (assoc after-render key callback))
+    this)
+
+  (add-after-render-effect-once [this key callback]
+    (set! after-render
+      (assoc after-render
+        key
+        (fn []
+          (set! after-render (dissoc after-render key))
+          (callback)
+          )))
+    this)
+
+  (run-slot! [^not-native this idx]
+    ;; when marked dirty run fn, otherwise just skip slot
+    (if-not (bit-test dirty-slots idx)
+      (set! current-idx (inc current-idx))
+
+      (let [slot-config
+            (-> (.-slots config) (aget idx))
+
+            prev-val
+            (aget slot-values idx)]
+
+        ;; not using binding because we don't need previous value capture
+        ;; it is an error if this ever runs nested
+
+        (set! *component* this)
+        (set! *env* component-env)
+        (set! *slot-idx* idx)
+        (set! *slot-value* prev-val)
+        (set! *claimed* false)
+        (set! *ready* true)
+
+        (try
+          (let [val (.run slot-config this)]
+
+            (aset slot-values idx val)
+
+            ;; FIXME: suspense should really be tracked elsewhere
+            ;; stops processing slots until invalidated and resuming
+            (if-not *ready*
+              (.suspend! this idx)
+              ;; clear dirty bit
+              (do (set! dirty-slots (bit-clear dirty-slots idx))
+
+                  ;; make others dirty if actually updated
+                  (when (not= val prev-val)
+                    (set! updated-slots (bit-set updated-slots idx))
+
+                    (set! dirty-slots (bit-or dirty-slots (.-affects slot-config)))
+
+                    (when (bit-test (.-render-deps config) idx)
+                      (set! needs-render? true)))
+
+                  (set! current-idx (inc current-idx))
+                  )))
+
+          (finally
+            (set! *component* nil)
+            (set! *ready* true)
+            (set! *env* nil)
+            (set! *slot-idx* nil)
+            (set! *slot-value* ::undefined)
+            (set! *claimed* false)))))
+
+    js/undefined)
 
   (run-next! [^not-native this]
-    #_(js/console.log "Component:run-next!"
-        (.-component-name config)
-        current-idx
-        (alength (.-hooks config))
-        dirty-hooks
-        (bit-test dirty-hooks current-idx)
-        this)
-    (if (identical? current-idx (alength (.-hooks config)))
-      ;; all hooks done
+    (if (identical? current-idx (alength (.-slots config)))
+      ;; all slots done
       (.component-render! this)
+      (.run-slot! this current-idx))
 
-      ;; process hooks in order, starting at the lowest index invalidated
-      (let [hook (aget hooks current-idx)]
-        ;; (js/console.log "Component:run-next!" current-idx (:component-name config) (pr-str (type hook)) this)
-
-        (cond
-          ;; doesn't exist, create it
-          (not hook)
-          (let [^function run-fn (-> (.-hooks config) (aget current-idx) (.-run))
-                handle (ComponentHookHandle. this current-idx)
-                val (run-fn this)
-                hook (maybe-wrap-val val)]
-
-            ;; (js/console.log "Component:init-hook!" (:component-name config) current-idx val hook)
-
-            (aset hooks current-idx hook)
-
-            (gp/hook-init! hook handle)
-
-            ;; previous hook may have marked hook as dirty since it used data
-            ;; but hook may have not been constructed yet, constructing must clear dirty bit
-            (set! dirty-hooks (bit-clear dirty-hooks current-idx))
-            ;; construction counts as updated since value became available for first time
-            (set! updated-hooks (bit-set updated-hooks current-idx))
-
-            (when (bit-test (.-render-deps config) current-idx)
-              (set! needs-render? true))
-
-            (when (satisfies? gp/IHookDomEffect hook)
-              (.push hooks-with-effects hook))
-
-            (if (gp/hook-ready? hook)
-              (set! current-idx (inc current-idx))
-              (.suspend! this current-idx)))
-
-          ;; marked dirty, update it
-          ;; make others dirty if actually updated
-          (bit-test dirty-hooks current-idx)
-          (let [hook-config (aget (.-hooks config) current-idx)
-
-                deps-updated?
-                ;; dirty hooks this depends-on should trigger an update
-                ;; or changed args used by this should trigger
-                (or (pos? (bit-and (.-depends-on hook-config) updated-hooks))
-                    (bit-test dirty-from-args current-idx))
-
-                ^function run (.-run hook-config)
-
-                next-hook
-                (maybe-wrap-val (run this))
-
-                _ (when-not (identical? (type hook) (type next-hook))
-                    (throw (ex-info "illegal hook value, type cannot change" {:old hook :new next-hook})))
-
-                did-update? ;; checks if hook deps changed as well, calling init again
-                (if deps-updated?
-                  (gp/hook-deps-update! hook next-hook)
-                  (gp/hook-update! hook))]
-
-            #_(js/console.log "Component:hook-update!"
-                (:component-name config)
-                current-idx
-                deps-updated?
-                did-update?
-                hook)
-
-            (set! dirty-hooks (bit-clear dirty-hooks current-idx))
-
-            (when did-update?
-              (set! updated-hooks (bit-set updated-hooks current-idx))
-              (set! dirty-hooks (bit-or dirty-hooks (.-affects hook-config)))
-
-              (when (bit-test (.-render-deps config) current-idx)
-                (set! needs-render? true)))
-
-            (if (gp/hook-ready? hook)
-              (set! current-idx (inc current-idx))
-              (.suspend! this current-idx)))
-
-          :else
-          (set! current-idx (inc current-idx))))))
+    js/undefined)
 
   (work-pending? [this]
     (and (not destroyed?)
          (not suspended?)
          (not error?)
-         (or (pos? dirty-hooks)
+         (or (pos? dirty-slots)
              needs-render?
-             (>= (alength (.-hooks config)) current-idx))))
+             (>= (alength (.-slots config)) current-idx))))
 
   (suspend! [this hook-causing-suspend]
     ;; (js/console.log "suspending" hook-causing-suspend this)
@@ -541,9 +488,9 @@
     (gp/unschedule! scheduler this))
 
   (component-render! [^ManagedComponent this]
-    (assert (zero? dirty-hooks) "Got to render while hooks are dirty")
-    ;; (js/console.log "Component:render!" (.-component-name config) updated-hooks needs-render? suspended? destroyed? this)
-    (set! updated-hooks (int 0))
+    (assert (zero? dirty-slots) "Got to render while slots are dirty")
+    ;; (js/console.log "Component:render!" (.-component-name config) updated-slots needs-render? suspended? destroyed? this)
+    (set! updated-slots (int 0))
     (set! dirty-from-args (int 0))
 
     (let [did-render? needs-render?]
@@ -566,9 +513,8 @@
     (.unschedule! this))
 
   (did-update! [this did-render?]
-    (.forEach hooks-with-effects
-      (fn [^not-native item]
-        (gp/hook-did-update! item did-render?)))))
+    (run-callback-map after-render)
+    nil))
 
 ;; FIXME: no clue why I can't put this in ManagedComponent directly
 ;; compiler complains with undeclared var ManagedComponent
@@ -621,28 +567,35 @@
 (defn component-init? [x]
   (instance? ComponentInit x))
 
-(deftype HookConfig [depends-on affects run])
+(deftype SlotConfig [depends-on affects run])
 
-(defn make-hook-config
+(defn make-slot-config
   "used by defc macro, do not use directly"
   [depends-on affects run]
   {:pre [(nat-int? depends-on)
          (nat-int? affects)
          (fn? run)]}
-  (HookConfig. depends-on affects run))
+  (SlotConfig. depends-on affects run))
+
+(defn make-dirty-bits [mask n]
+  (if (zero? n)
+    mask
+    (recur
+      (bit-or (bit-shift-left mask 1) 1)
+      (dec n))))
 
 (defn make-component-config
   "used by defc macro, do not use directly"
   [component-name
-   hooks
+   slots
    opts
    check-args-fn
    render-deps
    render-fn
    events]
   {:pre [(string? component-name)
-         (array? hooks)
-         (every? #(instance? HookConfig %) hooks)
+         (array? slots)
+         (every? #(instance? SlotConfig %) slots)
          (map? opts)
          (fn? check-args-fn)
          (nat-int? render-deps)
@@ -652,7 +605,8 @@
   (let [cfg
         (gp/ComponentConfig.
           component-name
-          hooks
+          slots
+          (make-dirty-bits 0 (alength slots))
           opts
           check-args-fn
           render-deps
@@ -673,14 +627,14 @@
 (defn check-args! [^ManagedComponent comp new-args expected]
   (assert (>= (count new-args) expected) (str "component " (. ^ComponentConfig (. comp -config) -component-name) " expected at least " expected " arguments")))
 
-(defn arg-triggers-hooks! [^ManagedComponent comp idx dirty-bits]
+(defn arg-triggers-slots! [^ManagedComponent comp idx dirty-bits]
   (.mark-dirty-from-args! comp dirty-bits))
 
 (defn arg-triggers-render! [^ManagedComponent comp idx]
   (.set-render-required! comp))
 
-(defn get-hook-value [^ManagedComponent comp idx]
-  (.get-hook-value comp idx))
+(defn get-slot-value [^ManagedComponent comp idx]
+  (.get-slot-value comp idx))
 
 (defn get-events [^ManagedComponent comp]
   ;; FIXME: ... loses typehints?
@@ -692,3 +646,134 @@
 (defn get-component-name [^ManagedComponent comp]
   (. ^clj (. comp -config) -component-name))
 
+(defn claim-bind! [claim-id]
+  (when-not *component*
+    (throw (ex-info "can only be used in component bind" {})))
+
+  (if-not *claimed*
+    (set! *claimed* claim-id)
+    (throw (ex-info "slot already claimed" {:idx *slot-idx* :claimed *claimed* :attempt claim-id})))
+
+  (.get-slot-ref *component* *slot-idx*))
+
+(defn set-cleanup! [ref callback]
+  (when-not *component*
+    (throw (ex-info "can only be used in component bind" {})))
+
+  (.set-slot-cleanup! *component* ref callback))
+
+(defn slot-effect [deps callback]
+  (let [ref (claim-bind! ::slot-effect)]
+
+    (case deps
+      :render
+      ;; ref used as key, so we update the callback when called again
+      (.add-after-render-effect *component* ref callback)
+
+      :mount
+      (when-not @ref
+        (.add-after-render-effect-once *component* ref callback)
+        (reset! ref :mount))
+
+      ;; else
+      (let [prev-deps @ref]
+        (when (not= prev-deps deps)
+          (.add-after-render-effect-once *component* ref callback))
+        ))
+
+    nil))
+
+(defn env-watch [key-to-atom path-in-atom default]
+  (let [ref
+        (claim-bind! ::env-watch)
+
+        {prev-atom :the-atom :as state}
+        @ref
+
+        the-atom
+        (get *env* key-to-atom)]
+
+    (set-cleanup! ref
+      (fn [{:keys [the-atom]}]
+        (remove-watch the-atom ref)))
+
+    (when-not the-atom
+      (throw (ex-info "couldn't find to watch in env" {:key key-to-atom})))
+
+    (when (identical? the-atom prev-atom)
+      (when prev-atom
+        (remove-watch prev-atom ref))
+
+      (add-watch the-atom ref
+        (fn [_ _ old new]
+          ;; use latest ref values, they may have changed
+          (let [{:keys [path-in-atom default] :as state} @ref
+                oval (get-in old path-in-atom default)
+                nval (get-in new path-in-atom default)]
+
+            (when (not= oval nval)
+              ;; swap triggers component watch and invalidates
+              ;; on next run we only return the new value unless other args changed
+              ;; :value never actually used, just acts as invalidator
+              (swap! ref assoc :value nval)))))
+
+      (swap! ref assoc :the-atom the-atom))
+
+    ;; always update these so the watch above has the latest
+    ;; env-watch is only called again when something changes
+    (swap! ref assoc :path-in-atom path-in-atom :default default)
+
+    (get-in @the-atom path-in-atom default)
+    ))
+
+(defn atom-watch [the-atom access-fn]
+  (let [ref
+        (claim-bind! ::atom-watch)
+
+        {prev-atom :the-atom :as state}
+        @ref]
+
+    (set-cleanup! ref
+      (fn [{:keys [the-atom]}]
+        (remove-watch the-atom ref)))
+
+    (when (identical? the-atom prev-atom)
+      (when prev-atom
+        (remove-watch prev-atom ref))
+
+      (add-watch the-atom ref
+        (fn [_ _ old new]
+          ;; use latest ref values, they may have changed
+          (let [{:keys [access-fn]} @ref
+                oval (access-fn old)
+                nval (access-fn new)]
+
+            (when (not= oval nval)
+              ;; swap triggers component watch and invalidates
+              ;; on next run we only return the new value unless other args changed
+              ;; :value never actually used, just acts as invalidator
+              (swap! ref assoc :value nval)))))
+
+      (swap! ref assoc :the-atom the-atom))
+
+    ;; always update these so the watch above has the latest
+    ;; atom-watch is only called again when something changes
+    (swap! ref assoc :access-fn access-fn)
+
+    (access-fn @the-atom)
+    ))
+
+(defn track-change
+  [val trigger-fn]
+  (let [ref
+        (claim-bind! ::track-change)
+
+        {prev-val :val
+         prev-result :result}
+        @ref]
+
+    (if (= prev-val val)
+      prev-result
+      (let [result (trigger-fn *env* prev-val val)]
+        (swap! ref assoc :val val :result result)
+        result))))
