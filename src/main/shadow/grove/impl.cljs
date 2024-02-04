@@ -423,7 +423,8 @@
         ;; avoid modifying result since that messes with identical? checks
         (cond
           (keyword-identical? result :db/loading)
-          (:default config {})
+          (do (set! comp/*ready* false)
+              (:default config {}))
 
           (and ident query)
           (get result ident)
