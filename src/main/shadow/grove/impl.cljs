@@ -348,19 +348,11 @@
 
           (:return result))))))
 
-(defn slot-query [ident query config]
-  {:pre [(or (nil? ident) (db/ident? ident))
-         (or (nil? query) (vector? query))
-         (map? config)]}
+(defn slot-db-read [read-fn]
+  {:pre [(ifn? read-fn)]}
 
   (let [ref
-        (comp/claim-bind! ::hook-query)
-
-        {prev-ident :ident
-         prev-query :query
-         prev-config :config
-         prev-query-id :query-id
-         :as state} @ref
+        (comp/claim-bind! ::slot-db-read)
 
         rt-ref
         (::rt/runtime-ref comp/*env*)
@@ -368,79 +360,72 @@
         {::rt/keys [active-queries-map] :as query-env}
         @rt-ref]
 
-    (comp/set-cleanup! ref
-      (fn [{:keys [query-id read-keys] :as last-state}]
-        (unindex-query @rt-ref query-id read-keys)
-        ))
-
-    ;; if anything changed, clean up previous
-    (when (or (not= ident prev-ident)
-              (not= query prev-query)
-              (not= config prev-config))
-
-      ;; just throw away old
-      (when prev-query-id
-        (unindex-query query-env prev-query-id (:read-keys state))
-        (.delete active-queries-map prev-query-id))
+    ;; setup only once
+    (when (nil? @ref)
+      (comp/set-cleanup! ref
+        (fn [{:keys [query-id read-keys] :as last-state}]
+          (unindex-query @rt-ref query-id read-keys)
+          (.delete active-queries-map query-id)
+          ))
 
       (let [query-id (rt/next-id)]
+        (swap! ref assoc :query-id query-id)
 
         (.set active-queries-map query-id
           (fn []
             ;; called by invalidate-keys! to signal that the keys read by a query where updated
             ;; not actually performing query now, just triggering a component update by touching atom
-            (swap! ref assoc :pending? true)))
+            (swap! ref assoc :pending? true)))))
 
-        (swap! ref assoc :ident ident :query query :config config :query-id query-id :read-count 0)
-        ))
-
-    (swap! ref (fn [state]
-                 (-> state
-                     (assoc :pending? false)
-                     (update :read-count inc))))
+    (swap! ref assoc :pending? false)
 
     ;; perform query
     (let [db
           @(::rt/data-ref query-env)
 
-          {:keys [query-id read-count read-keys]}
+          {:keys [query-id read-keys]}
           @ref]
 
-      (if (and ident (nil? query))
-        ;; shortcut for just getting data for an ident
-        ;; don't need all the query stuff for those
-        (let [result (get db ident)
-              new-keys #{ident}]
+      (let [observed-data
+            (db/observed db)
 
-          ;; only need to index once
-          (when (= 1 read-count)
-            (index-query query-env query-id read-keys new-keys))
+            ;; FIXME: should the env used here be the component env or a fresh dedicated env?
+            ;; FIXME: should this expose an update function to update db?
+            ;; FIXME: should this expose a transact! function similar to fx?
+            read-env
+            comp/*env*
 
-          (swap! ref assoc :read-keys new-keys)
+            result (read-fn read-env observed-data)
+            new-keys (db/observed-keys observed-data)]
 
-          ;; FIXME: restore suspense support
-          (if (keyword-identical? result :db/loading)
-            (assoc (:default config {}) ::sg/loading-state :loading)
-            result))
+        (index-query query-env query-id read-keys new-keys)
 
-        ;; query env is not the component env
-        (let [observed-data (db/observed db)
-              db-query (if ident [{ident query}] query)
-              result (eql/query query-env observed-data db-query)
-              new-keys (db/observed-keys observed-data)]
+        (swap! ref assoc :read-keys new-keys)
 
-          (index-query query-env query-id read-keys new-keys)
+        (when (keyword-identical? result :db/loading)
+          (set! comp/*ready* false))
 
-          (swap! ref assoc :read-keys new-keys)
+        result
+        ))))
 
-          (if (keyword-identical? result :db/loading)
-            ;; FIXME: this is sort of dirty to get suspense behavior back
-            (do (set! comp/*ready* false)
-                (assoc (:default config {}) ::sg/loading-state :loading))
+(defn slot-query [ident query config]
+  (slot-db-read
+    (fn [env db]
+      (let [result
+            (if (and ident (nil? query))
+              ;; shortcut for just getting data for an ident
+              ;; don't need all the query stuff for those
+              (get db ident)
 
-            (-> (if ident (get result ident) result)
-                (assoc ::sg/loading-state :ready))
-            ))))))
+              (let [db-query (if ident [{ident query}] query)]
+                (eql/query env db db-query)))]
+
+        (if (keyword-identical? result :db/loading)
+          (assoc (:default config {}) ::sg/loading-state :loading)
+
+          (-> (if ident (get result ident) result)
+              (assoc ::sg/loading-state :ready))
+          )))))
 
 (defonce direct-queries-ref
   (atom {}))
