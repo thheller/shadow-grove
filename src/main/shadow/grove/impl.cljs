@@ -420,11 +420,16 @@
               (let [db-query (if ident [{ident query}] query)]
                 (eql/query env db db-query)))]
 
-        (if (keyword-identical? result :db/loading)
-          (assoc (:default config {}) ::sg/loading-state :loading)
+        ;; avoid modifying result since that messes with identical? checks
+        (cond
+          (keyword-identical? result :db/loading)
+          (:default config {})
 
-          (-> (if ident (get result ident) result)
-              (assoc ::sg/loading-state :ready))
+          (and ident query)
+          (get result ident)
+
+          :else
+          result
           )))))
 
 (defn slot-state [init-state merge-fn]
