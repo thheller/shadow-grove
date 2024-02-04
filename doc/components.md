@@ -56,9 +56,52 @@ For example the functionality behind the [sg/watch](https://github.com/thheller/
 
 The return value returned by the slot fn will be used as the value for the `bind` slot. If the value is equal to the previous returned value the component may decide to skip re-rendering the component and/or updating other dependent slots.
 
-A `bind` slot can only be claimed once, since its return value is used for the `bind` name.
-
 To be continued ...
+
+
+## claim once or more?
+
+A `bind` slot can only be claimed once currently. Technically there is nothing stopping us from allowing multiple claims (and as such multiple refs).
+
+```clojure
+(bind x
+  {:foo (sg/query-root [:foo])
+   :bar (sg/query-root [:bar])})
+```
+
+This is currently not allowed and would need to be
+
+```clojure
+(bind foo (sg/query-root [:foo]))
+(bind bar (sg/query-root [:bar]))
+```
+
+Which for this case even looks more pleasant, but this limitation might hurt the ability to compose things together.
+
+The problem with variant one above is that it always runs both queries again, even if only one invalidated/changed. With two `bind` the component takes care to only run the actual query that invalidated.
+
+react hooks compose better by not having that limitation. However, it means much more manual care must be taken to ensure only the minimal amount of code needs to run each cycle.
+
+This limitation however also prevents some developer "errors". react hooks always need to execute in the exact same order and thus cannot be conditional.
+
+```clojure
+(bind x
+  (when y
+    (do-something y)))
+```
+
+This is technically ok now, but sort of "leaky". Say `y` toggles true-ish once and `do-something` performs something that claims the bind, such as running a db query. If `y` then turns `false` `do-something` does not run again, but it also doesn't clean up what was previously used. So the query it ran is still "active" and may invalidate to run the slot again. If `y` is still `false` it still doesn't do anything, but it might be better to have the query cleaned up.
+
+So, the things I'm undecided on are:
+
+- should once previous claims be cleaned up if not claimed again?
+- should multiple claims be ok? if so can we do it without the hooks limitations?
+
+I have been thinking about this for way too long, and decided to only allow "claim once" for now and seeing how often this becomes a problem in actual code.
+
+There is an argument to be made that if we allow multiple claims we don't need `bind` or the entire `defc` abstraction at all. Could just work exactly like react hooks.
+
+This could still be just an alternate implementation for those who want it.
 
 ## Previous Implementation
 
