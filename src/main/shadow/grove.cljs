@@ -59,10 +59,10 @@
 
 (defn use-state
   ([]
-   (impl/slot-state {} merge))
+   (impl/slot-state {} nil))
   ([init-state]
    {:pre [(satisfies? IMeta init-state)]}
-   (impl/slot-state init-state merge))
+   (impl/slot-state init-state nil))
   ([init-state merge-fn]
    {:pre [(satisfies? IMeta init-state)
           (fn? merge-fn)]}

@@ -437,7 +437,7 @@
           ;; hack to prevent users from swapping something that can't hold meta
           (set! ref -validator (fn [x] (satisfies? IMeta x))))
 
-      (not= init-state (::init-state (meta state)))
+      (and merge-fn (not= init-state (::init-state (meta state))))
       (swap! ref (fn [state]
                    (-> state
                        (merge-fn init-state)
