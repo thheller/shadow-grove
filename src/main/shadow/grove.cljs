@@ -57,6 +57,25 @@
   [read-fn]
   (impl/slot-db-read read-fn))
 
+(defn use-state
+  ([]
+   (impl/slot-state {} merge))
+  ([init-state]
+   {:pre [(satisfies? IMeta init-state)]}
+   (impl/slot-state init-state merge))
+  ([init-state merge-fn]
+   {:pre [(satisfies? IMeta init-state)
+          (fn? merge-fn)]}
+   (impl/slot-state init-state merge-fn)))
+
+(defn swap-state! [state update-fn & args]
+  (let [ref (::impl/ref (meta state))]
+    (when-not ref
+      (throw (ex-info "can only swap-state! things created via use-state" {:thing state})))
+    (swap! ref
+      (fn [state]
+        (apply update-fn state args)))))
+
 (defn run-tx
   [{::rt/keys [runtime-ref] :as env} tx]
   (impl/process-event runtime-ref tx env))

@@ -427,6 +427,26 @@
               (assoc ::sg/loading-state :ready))
           )))))
 
+(defn slot-state [init-state merge-fn]
+  (let [ref (comp/claim-bind! ::slot-state)
+        state @ref]
+
+    (cond
+      (nil? state)
+      (do (reset! ref (vary-meta init-state assoc ::ref ref ::init-state init-state))
+          ;; hack to prevent users from swapping something that can't hold meta
+          (set! ref -validator (fn [x] (satisfies? IMeta x))))
+
+      (not= init-state (::init-state (meta state)))
+      (swap! ref (fn [state]
+                   (-> state
+                       (merge-fn init-state)
+                       ;; just in case the merge-fn dropped these
+                       (vary-meta assoc ::ref ref ::init-state init-state)))))
+
+    @ref
+    ))
+
 (defonce direct-queries-ref
   (atom {}))
 
