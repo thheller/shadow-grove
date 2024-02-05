@@ -120,10 +120,10 @@
       idx
       (recur (bit-shift-right search 1) (inc idx)))))
 
-(defn run-callback-map [m]
+(defn run-callback-map [m env]
   (reduce-kv
     (fn [_ key callback]
-      (callback))
+      (callback env))
     nil
     m))
 
@@ -405,9 +405,9 @@
     (set! after-render
       (assoc after-render
         key
-        (fn []
+        (fn [env]
           (set! after-render (dissoc after-render key))
-          (callback)
+          (callback env)
           )))
     this)
 
@@ -523,7 +523,7 @@
     (.unschedule! this))
 
   (did-update! [this did-render?]
-    (run-callback-map after-render)
+    (run-callback-map after-render component-env)
     nil))
 
 ;; FIXME: no clue why I can't put this in ManagedComponent directly
