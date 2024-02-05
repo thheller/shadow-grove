@@ -100,6 +100,10 @@
   ([the-atom]
    (watch the-atom identity))
   ([the-atom path-or-fn]
+   ;; more relaxed check than (instance? Atom the-atom), to support custom types
+   ;; impl calls add-watch/remove-watch and does a deref
+   {:pre [(satisfies? IWatchable the-atom)
+          (satisfies? IDeref the-atom)]}
    (if (vector? path-or-fn)
      (comp/atom-watch the-atom (fn [old new] (get-in new path-or-fn)))
      (comp/atom-watch the-atom path-or-fn))))
