@@ -120,12 +120,7 @@
       idx
       (recur (bit-shift-right search 1) (inc idx)))))
 
-(defn run-callback-map [m env]
-  (reduce-kv
-    (fn [_ key callback]
-      (callback env))
-    nil
-    m))
+
 
 (defclass ManagedComponent
   (field ^not-native scheduler)
@@ -139,7 +134,8 @@
 
   ;; lifecycle actions
   (field ^not-native on-destroy {})
-  (field ^not-native after-render {})
+  (field ^not-native after-render  {})
+  (field ^not-native after-render-cleanup {})
   (field ^not-native before-render {})
 
   (field ^array slot-values)
@@ -259,6 +255,13 @@
         (callback @ref))
       nil
       slot-cleanup)
+
+    ;; cleanup fns returned by sg/effect fns
+    (reduce-kv
+      (fn [_ ref callback]
+        (callback))
+      nil
+      after-render-cleanup)
 
     (ap/destroy! root dom-remove?))
 
@@ -405,8 +408,7 @@
         key
         (fn [env]
           (set! after-render (dissoc after-render key))
-          (callback env)
-          )))
+          (callback env))))
     this)
 
   (run-slot! [^not-native this idx]
@@ -521,8 +523,21 @@
     (.unschedule! this))
 
   (did-update! [this did-render?]
-    (run-callback-map after-render component-env)
-    nil))
+    (reduce-kv
+      (fn [_ key callback]
+        (when-some [^function x (get after-render-cleanup key)]
+          (x)
+          (set! after-render-cleanup (dissoc after-render-cleanup key)))
+
+        (let [result (callback component-env)]
+          (when (fn? result)
+            (set! after-render-cleanup (assoc after-render-cleanup key result))))
+
+        nil)
+      nil
+      after-render)
+
+    js/undefined))
 
 ;; FIXME: no clue why I can't put this in ManagedComponent directly
 ;; compiler complains with undeclared var ManagedComponent
