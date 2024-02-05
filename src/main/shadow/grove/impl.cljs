@@ -392,11 +392,11 @@
             ;; FIXME: should the env used here be the component env or a fresh dedicated env?
             ;; FIXME: should this expose an update function to update db?
             ;; FIXME: should this expose a transact! function similar to fx?
-            read-env
-            comp/*env*
+            result
+            (read-fn query-env observed-data)
 
-            result (read-fn read-env observed-data)
-            new-keys (db/observed-keys observed-data)]
+            new-keys
+            (db/observed-keys observed-data)]
 
         (index-query query-env query-id read-keys new-keys)
 
