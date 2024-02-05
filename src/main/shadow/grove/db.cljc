@@ -241,17 +241,25 @@
     (Transaction.
       data-before
       keys-new
-      (conj! keys-updated key)
+      ;; new keys are only recorded as new, not modified in the same tx
+      (if (contains? keys-new key)
+        keys-updated
+        (conj! keys-updated key))
       keys-removed
       completed-ref))
 
   (tx-log-removed [this key]
-    (Transaction.
-      data-before
-      keys-new
-      keys-updated
-      (conj! keys-removed key)
-      completed-ref))
+    (let [was-added-in-tx? (contains? keys-new key)]
+      (Transaction.
+        data-before
+        ;; removal means the key is no longer new or modified
+        (disj! keys-new key)
+        (disj! keys-updated key)
+        ;; if created and removed in same tx, just don't record it at all
+        (if was-added-in-tx?
+          keys-removed
+          (conj! keys-removed key))
+        completed-ref)))
 
   ITransactableCommit
   (tx-commit! [this]
@@ -304,57 +312,43 @@
            (throw (ex-info "nil key not allowed" {:value value})))
 
          ;; FIXME: should it really check each write if anything changed?
-         (let [prev-val
-               (.valAt data key ::not-found)
+         (let [prev-val (.valAt data key ::not-found)]
 
-               is-ident-update?
-               (ident? key)]
-
-           (if (identical? prev-val value)
+           (cond
+             (identical? prev-val value)
              this
-             (if (= ::not-found prev-val)
-               ;; new
-               (if-not is-ident-update?
-                 ;; new non-ident key
-                 (GroveDB.
-                   schema
-                   (assoc data key value)
-                   (when tx
-                     (tx-log-new tx key)))
 
-                 ;; new ident
-                 (GroveDB.
-                   schema
-                   (-> data
-                       (assoc key value)
-                       (update (coll-key key) set-conj key))
-                   (when tx
-                     (-> tx
-                         (tx-log-new key)
-                         (tx-log-modified (coll-key key))))))
+             ;; new
+             (= ::not-found prev-val)
+             (if-not (ident? key)
+               ;; new non-ident key
+               (GroveDB.
+                 schema
+                 (assoc data key value)
+                 (when tx
+                   (tx-log-new tx key)))
 
-               ;; update, non-ident key
-               (if-not is-ident-update?
-                 (GroveDB.
-                   schema
-                   (assoc data key value)
-                   (when tx
-                     (-> tx
-                         (tx-log-new key)
-                         (tx-log-modified key))))
+               ;; new ident
+               (GroveDB.
+                 schema
+                 (-> data
+                     (assoc key value)
+                     (update (coll-key key) set-conj key))
+                 (when tx
+                   (-> tx
+                       (tx-log-new key)
+                       (tx-log-modified (coll-key key))))))
 
-                 ;; FIXME: no need to track (ident-key key) since it should be present?
-                 (GroveDB.
-                   schema
-                   (.assoc data key value)
-                   (when tx
-                     (-> tx
-                         (tx-log-modified key)
-                         ;; need to update the entity-type collection since some queries might change if one in the list changes
-                         ;; FIXME: this makes any update potentially expensive, maybe should leave this to the user?
+             ;; update
+             :else-is-update
+             (GroveDB.
+               schema
+               (assoc data key value)
+               (when tx
+                 (tx-log-modified tx key)))
+             )))
 
-                         (tx-log-modified (coll-key key))))))))))
-
+       ;; FIXME: whats the difference between assoc and assocEx again?
        (assocEx [this key value]
          (when tx
            (tx-check-completed! tx))
@@ -362,53 +356,41 @@
          (when (nil? key)
            (throw (ex-info "nil key not allowed" {:value value})))
 
-         (let [prev-val
-               (.valAt data key ::not-found)
+         (let [prev-val (.valAt data key ::not-found)]
 
-               is-ident-update?
-               (ident? key)]
-
-           (if (identical? prev-val value)
+           (cond
+             (identical? prev-val value)
              this
-             (if (= ::not-found prev-val)
-               ;; new
-               (if-not is-ident-update?
-                 ;; new non-ident key
-                 (GroveDB.
-                   schema
-                   (.assocEx data key value)
-                   (when tx
-                     (tx-log-new tx key)))
 
-                 ;; new ident
-                 (GroveDB.
-                   schema
-                   (-> data
-                       (.assocEx key value)
-                       (update (coll-key key) set-conj key))
-                   (when tx
-                     (-> tx
-                         (tx-log-new key)
-                         (tx-log-modified (coll-key key))))))
+             ;; new
+             (= ::not-found prev-val)
+             (if-not (ident? key)
+               ;; new non-ident key
+               (GroveDB.
+                 schema
+                 (.assocEx data key value)
+                 (when tx
+                   (tx-log-new tx key)))
 
-               ;; update, non-ident key
-               (if-not is-ident-update?
-                 (GroveDB.
-                   schema
-                   (.assocEx data key value)
-                   (tx-log-modified tx key))
+               ;; new ident
+               (GroveDB.
+                 schema
+                 (-> data
+                     (.assocEx key value)
+                     (update (coll-key key) set-conj key))
+                 (when tx
+                   (-> tx
+                       (tx-log-new key)
+                       (tx-log-modified (coll-key key))))))
 
-                 ;; FIXME: no need to track (ident-key key) since it should be present?
-                 (GroveDB.
-                   schema
-                   (.assocEx data key value)
-                   (when tx
-                     (-> tx
-                         (tx-log-modified key)
-                         ;; need to update the entity-type collection since some queries might change if one in the list changes
-                         ;; FIXME: this makes any update potentially expensive, maybe should leave this to the user?
-                         (tx-log-modified (coll-key key))))
-                   ))))))
+             ;; update, non-ident key
+             :else-is-update
+             (GroveDB.
+               schema
+               (.assocEx data key value)
+               (when tx
+                 (tx-log-modified tx key)))
+             )))
 
        (without [this key]
          (when tx
@@ -488,52 +470,41 @@
 
          ;; FIXME: should it really check each write if anything changed?
          ;; FIXME: enforce that ident keys have a map value with ::ident key?
-         (let [prev-val
-               (-lookup data key ::not-found)
+         (let [prev-val (-lookup data key ::not-found)]
 
-               is-ident-update?
-               (ident? key)]
-
-           (if (identical? prev-val value)
+           (cond
+             (identical? prev-val value)
              this
-             (if (= ::not-found prev-val)
-               ;; new
-               (if-not is-ident-update?
-                 ;; new non-ident key
-                 (GroveDB.
-                   schema
-                   (-assoc data key value)
-                   (when tx
-                     (tx-log-modified tx key)))
 
-                 ;; new ident
-                 (GroveDB.
-                   schema
-                   (-> data
-                       (-assoc key value)
-                       (update (coll-key key) set-conj key))
-                   (when tx
-                     (-> tx
-                         (tx-log-new key)
-                         (tx-log-modified (coll-key key))))))
+             ;; new
+             (= ::not-found prev-val)
+             (if-not (ident? key)
+               ;; new non-ident key
+               (GroveDB.
+                 schema
+                 (-assoc data key value)
+                 (when tx
+                   (tx-log-modified tx key)))
 
-               ;; update, non-ident key
-               (if-not is-ident-update?
-                 (GroveDB.
-                   schema
-                   (-assoc data key value)
-                   (when tx
-                     (tx-log-modified tx key)))
+               ;; new ident
+               (GroveDB.
+                 schema
+                 (-> data
+                     (-assoc key value)
+                     (update (coll-key key) set-conj key))
+                 (when tx
+                   (-> tx
+                       (tx-log-new key)
+                       (tx-log-modified (coll-key key))))))
 
-                 ;; FIXME: no need to track (ident-key key) since it should be present?
-                 (GroveDB.
-                   schema
-                   (-assoc data key value)
-                   (when tx
-                     (-> tx
-                         (tx-log-modified key)
-                         (tx-log-modified (coll-key key))))
-                   ))))))
+             ;; update, non-ident key
+             :else-is-update
+             (GroveDB.
+               schema
+               (-assoc data key value)
+               (when tx
+                 (tx-log-modified tx key)))
+             )))
 
        ICollection
        (-conj [coll ^not-native entry]

@@ -86,9 +86,11 @@
         {:keys [keys-updated keys-new keys-removed data] :as tx}
         (-> (db/transacted db)
             (assoc :foo "bar")
+            ;; update after add should mean the key is still new, not updated
+            (assoc :foo "baz")
             (db/tx-commit!))]
 
-    (is (= "bar" (get data :foo)))
+    (is (= "baz" (get data :foo)))
     (is (= #{:foo} keys-new))
     (is (= #{} keys-removed))
     (is (= #{} keys-updated))
@@ -103,6 +105,7 @@
 
         {:keys [keys-updated keys-new keys-removed data] :as tx}
         (-> (db/transacted db)
+            (assoc :foo "baz")
             (dissoc :foo)
             (db/tx-commit!))]
 
@@ -128,11 +131,13 @@
         {:keys [keys-updated keys-new keys-removed data] :as tx}
         (-> (db/transacted db)
             (assoc ident {:foo "bar"})
+            (update ident assoc :foo "baz")
             (db/tx-commit!))]
 
-    (is (= {:foo "bar"} (get data ident)))
+    (is (= {:foo "baz"} (get data ident)))
     (is (= #{ident} keys-new))
     (is (= #{} keys-removed))
+    ;; update after add does not count as updated, only added
     (is (= #{[::db/all :foo]} keys-updated))
     ))
 
@@ -155,6 +160,7 @@
 
         {:keys [keys-updated keys-new keys-removed data] :as tx}
         (-> (db/transacted db)
+            (update ident assoc :foo "baz")
             (dissoc ident)
             (db/tx-commit!))]
 
