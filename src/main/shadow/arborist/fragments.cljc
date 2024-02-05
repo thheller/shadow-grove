@@ -664,60 +664,59 @@
   (let [exports-sym (gensym "exports")
         env-sym (gensym "env")
         oldv-sym (gensym "oldv")
-        dom-remove-sym (with-meta (gensym "dom_remove") {:tag 'boolean})
-        first-op (:op (first ast))]
+        dom-remove-sym (with-meta (gensym "dom_remove") {:tag 'boolean})]
 
-    (if (and (= 1 (count ast)) (or (= :text first-op) (= :element first-op)))
-      `shadow.arborist.fragments/frag-single-dom-destroy
-      (let [destroy-calls
-            (reduce
-              (fn step-fn [calls {:keys [op sym] :as ast}]
-                (case op
-                  (:text :element)
-                  (-> calls
-                      (cond->
-                        ;; can skip removing nodes when the parent is already removed
-                        (nil? (:parent ast))
-                        (conj `(when ~dom-remove-sym (dom-remove (aget ~exports-sym ~(get sym->idx sym))))))
-                      (reduce-> step-fn (:attrs ast))
-                      (reduce-> step-fn (:children ast)))
+    ;; FIXME: can we frag-single-dom-destroy easily?
+    ;; there may be a single dom root node, but nested code-refs or attributes that need cleanup
+    (let [destroy-calls
+          (reduce
+            (fn step-fn [calls {:keys [op sym] :as ast}]
+              (case op
+                (:text :element)
+                (-> calls
+                    (cond->
+                      ;; can skip removing nodes when the parent is already removed
+                      (nil? (:parent ast))
+                      (conj `(when ~dom-remove-sym (dom-remove (aget ~exports-sym ~(get sym->idx sym))))))
+                    (reduce-> step-fn (:attrs ast))
+                    (reduce-> step-fn (:children ast)))
 
-                  :code-ref
-                  (-> calls
-                      (conj `(managed-remove
-                               (aget ~exports-sym ~(get sym->idx sym))
-                               ~(if (:parent ast)
-                                  false
-                                  dom-remove-sym)))
-                      (reduce-> step-fn (:children ast)))
+                :code-ref
+                (-> calls
+                    (conj `(managed-remove
+                             (aget ~exports-sym ~(get sym->idx sym))
+                             ~(if (:parent ast)
+                                false
+                                dom-remove-sym)))
+                    (reduce-> step-fn (:children ast)))
 
-                  ;; only clean up qualified keywords
-                  :static-attr
-                  (if-not (qualified-keyword? (:attr ast))
-                    calls
-                    (-> calls
-                        (conj
-                          `(clear-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) ~(:value ast))
-                          )))
-
-                  :event-attr
+                ;; only clean up qualified keywords
+                :static-attr
+                (if-not (qualified-keyword? (:attr ast))
                   calls
+                  (-> calls
+                      (conj
+                        `(clear-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) ~(:value ast))
+                        )))
 
-                  :dynamic-attr
-                  (if-not (qualified-keyword? (:attr ast))
-                    calls
-                    (-> calls
-                        (conj
-                          `(clear-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) (aget ~oldv-sym ~(-> ast :value :ref-id)))
-                          )))
+                :event-attr
+                calls
 
-                  calls))
-              []
-              ast)]
+                :dynamic-attr
+                (if-not (qualified-keyword? (:attr ast))
+                  calls
+                  (-> calls
+                      (conj
+                        `(clear-attr ~env-sym ~exports-sym ~(get sym->idx sym) ~(:attr ast) (aget ~oldv-sym ~(-> ast :value :ref-id)))
+                        )))
 
-        `(fn [~env-sym ~exports-sym ~oldv-sym ~dom-remove-sym]
-           ~@destroy-calls
-           js/undefined)))))
+                calls))
+            []
+            ast)]
+
+      `(fn [~env-sym ~exports-sym ~oldv-sym ~dom-remove-sym]
+         ~@destroy-calls
+         js/undefined))))
 
 (defn make-template-string [{:keys [op] :as ast}]
   (case op
