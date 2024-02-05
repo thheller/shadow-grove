@@ -704,7 +704,7 @@
     (when-not the-atom
       (throw (ex-info "couldn't find to watch in env" {:key key-to-atom})))
 
-    (when (identical? the-atom prev-atom)
+    (when-not (identical? the-atom prev-atom)
       (when prev-atom
         (remove-watch prev-atom ref))
 
