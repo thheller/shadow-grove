@@ -741,7 +741,7 @@
       (fn [{:keys [the-atom]}]
         (remove-watch the-atom ref)))
 
-    (when (identical? the-atom prev-atom)
+    (when-not (identical? the-atom prev-atom)
       (when prev-atom
         (remove-watch prev-atom ref))
 
