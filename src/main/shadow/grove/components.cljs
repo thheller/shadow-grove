@@ -267,12 +267,10 @@
   gp/IHandleEvents
   (handle-event! [this {ev-id :e :as ev-map} e origin]
     (let [handler
-          (cond
-            (qualified-keyword? ev-id)
+          (if (keyword? ev-id)
             (or (get (.-events config) ev-id)
                 (get (.-opts config) ev-id))
 
-            :else
             (throw (ex-info "unknown event" {:event ev-map})))]
 
       (if handler
