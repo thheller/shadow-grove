@@ -16,7 +16,7 @@
 
 (def ^function
   work-queue-task!
-  (if js/window.requestIdleCallback
+  (if (and (exists? js/window) js/window.requestIdleCallback)
     (fn [work-task]
       (js/window.requestIdleCallback work-task))
     (fn [^function work-task]
@@ -35,7 +35,7 @@
 
 (def ^function
   work-queue-cancel!
-  (if js/window.cancelIdleCallback
+  (if (and (exists? js/window) js/window.cancelIdleCallback)
     (fn [id]
       (js/window.cancelIdleCallback id))
     (fn [id]
