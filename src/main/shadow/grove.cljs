@@ -128,7 +128,17 @@
   (sc/keyed-seq coll key-fn render-fn))
 
 (defn track-change
-  "only calls trigger-fn if val has changed, even if trigger-fn itself may have changed"
+  "(bind x
+     (sg/track-change val
+       (fn [env old new prev-result]
+         ...))
+
+   only calls trigger-fn if val has changed, even if trigger-fn itself may have changed
+   calls (trigger-fn env nil val) on mount
+   return value is used for bind (i.e. x above)
+   calls (trigger-fn env prev-val val prev-result) when val changed between renders
+
+   env is component environment"
   [val trigger-fn]
   (comp/track-change val trigger-fn))
 
