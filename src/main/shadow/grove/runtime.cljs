@@ -1,7 +1,4 @@
-(ns shadow.grove.runtime
-  (:require
-    [goog.async.nextTick]
-    [shadow.grove.protocols :as gp]))
+(ns shadow.grove.runtime)
 
 (defonce known-runtimes-ref (atom {}))
 
@@ -9,11 +6,12 @@
   (and (atom x)
        (::rt @x)))
 
-(defonce id-seq (atom 0))
+(defonce id-seq (volatile! 0))
 
 (defn next-id []
-  (swap! id-seq inc))
+  (vswap! id-seq inc))
+
+(defonce ticker (js/Promise.resolve nil))
 
 (defn next-tick [callback]
-  ;; FIXME: should be smarter about when/where to schedule
-  (js/goog.async.nextTick callback))
+  (.then ticker callback))
