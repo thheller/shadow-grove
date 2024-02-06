@@ -1,4 +1,4 @@
-(ns shadow.arborist.fragments-test
+(ns shadow.grove-test
   (:require
     ["jsdom" :refer (JSDOM)]
     [cljs.test :as ct :refer (deftest is async)]
