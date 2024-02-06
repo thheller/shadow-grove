@@ -199,7 +199,7 @@
         (and (not (false? (:with-credentials opts)))
              (not (false? (:with-credentials config)))))
 
-      (when body?
+      (when content-type
         (.setRequestHeader xhr-req "content-type" content-type))
 
       (if body?
