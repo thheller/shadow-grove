@@ -30,7 +30,7 @@
 
     (let [test-frag
           (fn [val]
-            (<< [:div {::test val} "foo"]))]
+            (<< [:div {::test val} val]))]
 
       (sg/render rt-ref root (test-frag "foo"))
       (is (= "<div>foo</div>" (.-innerHTML root)))
@@ -39,7 +39,7 @@
       (is (= nil (:oval @rt-ref)))
 
       (sg/render rt-ref root (test-frag "bar"))
-      (is (= "<div>foo</div>" (.-innerHTML root)))
+      (is (= "<div>bar</div>" (.-innerHTML root)))
 
       (is (= "bar" (:nval @rt-ref)))
       (is (= "foo" (:oval @rt-ref)))

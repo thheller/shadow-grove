@@ -786,11 +786,13 @@
         (claim-bind! ::track-change)
 
         {prev-val :val
-         prev-result :result}
+         prev-result :result
+         :as state}
         @ref]
 
-    (if (= prev-val val)
+    (if (and (not (nil? state))
+             (= prev-val val))
       prev-result
-      (let [result (trigger-fn *env* prev-val val)]
+      (let [result (trigger-fn *env* prev-val val prev-result)]
         (swap! ref assoc :val val :result result)
         result))))
