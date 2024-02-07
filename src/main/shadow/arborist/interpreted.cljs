@@ -287,31 +287,6 @@
       (common/dom-marker env)
       false)))
 
-(deftype ManagedComponent
-  [env
-   ^:mutable type
-   ^not-native ^:mutable delegate]
-
-  p/IManaged
-  (dom-first [this]
-    (p/dom-first delegate))
-
-  (dom-insert [this parent anchor]
-    (p/dom-insert delegate parent anchor))
-
-  (dom-entered! [this]
-    (p/dom-entered! delegate))
-
-  (supports? [this next]
-    (identical? type (nth next 0)))
-
-  (dom-sync! [this next]
-    (let [res (apply type (subvec next 1))]
-      (p/dom-sync! delegate res)))
-
-  (destroy! [this ^boolean dom-remove?]
-    (p/destroy! delegate dom-remove?)))
-
 (extend-type cljs.core/PersistentVector
   p/IConstruct
   (as-managed [this env]
@@ -320,11 +295,8 @@
         (keyword-identical? tag-kw :<>)
         (as-managed-fragment this env)
 
-        (keyword? tag-kw)
+        (simple-keyword? tag-kw)
         (as-managed-vector this env)
 
-        :else ;; FIXME: don't blindly assume callable, check
-        (let [res (apply tag-kw (subvec this 1))
-              ;; FIXME: variant 2, res could be a function which we need to call
-              man (p/as-managed res env)]
-          (ManagedComponent. env tag-kw man))))))
+        :else
+        (throw (ex-info "invalid hiccup form" {:form this}))))))
