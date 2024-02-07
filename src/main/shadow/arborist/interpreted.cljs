@@ -4,6 +4,7 @@
     [shadow.arborist.fragments :as frag]
     [shadow.arborist.attributes :as a]
     [shadow.arborist.protocols :as p]
+    [shadow.arborist.dom-scheduler :as ds]
     [clojure.string :as str]
     [shadow.arborist.common :as common]))
 
@@ -69,6 +70,9 @@
 
     [tag attrs children]))
 
+(defn text? [x]
+  (or (nil? x) (string? x) (number? x)))
+
 (deftype ManagedVector
   [env
    ^:mutable form
@@ -91,7 +95,11 @@
 
   (supports? [this next]
     (and (vector? next)
-         (keyword-identical? tag-kw (get next 0))))
+         ;; nth on form because we know it is a non-empty vector
+         ;; get on next because it might be empty
+         ;; DO NOT USE tag-kw, that is the desugared element keyword
+         ;; :div but other might still be :div.container
+         (keyword-identical? (nth form 0) (get next 0))))
 
   (dom-sync! [this [_ next-attrs :as next]]
     ;; only compare identical? to allow skipping some diffs
@@ -103,52 +111,78 @@
 
         (a/merge-attrs env node attrs next-attrs)
 
-        (let [oc (count children)
-              nc (count next-nodes)
+        (set! form next)
+        (set! attrs next-attrs)
 
-              ;; update previous children
-              next-children
-              (reduce-kv
-                (fn [c idx ^not-native child]
-                  (if (>= idx nc)
-                    (do (p/destroy! child true)
-                        c)
-                    (let [next (nth next-nodes idx)]
-                      (if (p/supports? child next)
-                        (do (p/dom-sync! child next)
-                            (conj! c child))
-                        (let [first (p/dom-first child)
-                              new-managed (p/as-managed next env)]
-                          (p/dom-insert new-managed node first)
-                          (p/destroy! child true)
+        (let [oc (count children)
+              nc (count next-nodes)]
+
+          (if (and (= nc 1) (= oc 1))
+            (let [nc (first next-nodes)
+                  oc (first children)]
+              (if (and (text? nc) (text? oc))
+                (when (not= oc nc)
+                  (set! children [nc])
+                  (set! node -textContent (str nc)))
+
+                (if (p/supports? oc nc)
+                  (p/dom-sync! oc nc)
+                  (let [first (p/dom-first oc)
+                        new-managed (p/as-managed nc env)]
+                    (p/dom-insert new-managed node first)
+                    (p/destroy! oc true)
+                    (when entered?
+                      (p/dom-entered! new-managed))
+                    (set! children [new-managed])
+                    ))))
+
+            ;; update previous children
+            (let [next-children
+                  (reduce-kv
+                    (fn [c idx ^not-native child]
+                      (if (>= idx nc)
+                        (do (p/destroy! child true)
+                            c)
+                        (let [next (nth next-nodes idx)]
+                          (if (p/supports? child next)
+                            (do (p/dom-sync! child next)
+                                (conj! c child))
+                            (let [first (p/dom-first child)
+                                  new-managed (p/as-managed next env)]
+                              (p/dom-insert new-managed node first)
+                              (p/destroy! child true)
+                              (when entered?
+                                (p/dom-entered! new-managed))
+                              (conj! c new-managed))))))
+                    (transient [])
+                    children)
+
+                  ;; append if there were more children
+                  next-children
+                  (if-not (> nc oc)
+                    next-children
+                    (reduce
+                      (fn [c el]
+                        (let [new-managed (p/as-managed el env)]
+                          (p/dom-insert new-managed node nil)
                           (when entered?
                             (p/dom-entered! new-managed))
-                          (conj! c new-managed))))))
-                (transient [])
-                children)
+                          (conj! c new-managed)))
+                      next-children
+                      (subvec next-nodes oc)))]
 
-              ;; append if there were more children
-              next-children
-              (if-not (> nc oc)
-                next-children
-                (reduce
-                  (fn [c el]
-                    (let [new-managed (p/as-managed el env)]
-                      (p/dom-insert new-managed node nil)
-                      (when entered?
-                        (p/dom-entered! new-managed))
-                      (conj! c new-managed)))
-                  next-children
-                  (subvec next-nodes oc)))]
+              (set! children (persistent! next-children))))
 
-          (set! form next)
-          (set! children (persistent! next-children))
-          (set! attrs next-attrs)))))
+          ))))
 
   (destroy! [this ^boolean dom-remove?]
     (when dom-remove?
-      (.remove node))
-    (run! #(p/destroy! % dom-remove?) children)))
+      (ds/write!
+        ;; remove causes a reflow, which we want to batch together
+        ;; so that 3 removals don't cause 3 separate reflows
+        ;; microtask still runs before next paint, so no visual difference
+        (.remove node)))
+    (run! #(p/destroy! % false) children)))
 
 (defn as-managed-vector [this env]
   (let [[tag-kw attrs children]
