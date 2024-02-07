@@ -1,11 +1,10 @@
 (ns shadow.arborist.interpreted
-  "EXTREMELY SLOW! DO NOT USE!"
   (:require
+    [clojure.string :as str]
     [shadow.arborist.fragments :as frag]
     [shadow.arborist.attributes :as a]
     [shadow.arborist.protocols :as p]
     [shadow.arborist.dom-scheduler :as ds]
-    [clojure.string :as str]
     [shadow.arborist.common :as common]))
 
 (defn parse-tag* [spec]
@@ -79,6 +78,7 @@
    ^:mutable node
    ^:mutable tag-kw
    ^:mutable attrs
+   ^:mutable text-content
    ^:mutable children
    ^:mutable entered?]
 
@@ -101,11 +101,10 @@
          ;; :div but other might still be :div.container
          (keyword-identical? (nth form 0) (get next 0))))
 
-  (dom-sync! [this [_ next-attrs :as next]]
+  (dom-sync! [this next]
     ;; only compare identical? to allow skipping some diffs
     ;; must not call = since something is likely different
     ;; but that might be deeply nested leading to a lot of wasted comparisons
-
     (when-not (identical? form next)
       (let [[_ next-attrs next-nodes] (desugar next)]
 
@@ -114,27 +113,23 @@
         (set! form next)
         (set! attrs next-attrs)
 
-        (let [oc (count children)
-              nc (count next-nodes)]
+        ;; optimization where all children are text-ish
+        ;; much faster to just set -textContent instead of going through
+        ;; sync different children
+        (if (and text-content (every? text? next-nodes))
+          (let [text (apply str next-nodes)]
+            (when (not= text-content text)
+              (set! text-content text)
+              (set! node -textContent text)))
 
-          (if (and (= nc 1) (= oc 1))
-            (let [nc (first next-nodes)
-                  oc (first children)]
-              (if (and (text? nc) (text? oc))
-                (when (not= oc nc)
-                  (set! children [nc])
-                  (set! node -textContent (str nc)))
+          (let [oc (count children)
+                nc (count next-nodes)]
 
-                (if (p/supports? oc nc)
-                  (p/dom-sync! oc nc)
-                  (let [first (p/dom-first oc)
-                        new-managed (p/as-managed nc env)]
-                    (p/dom-insert new-managed node first)
-                    (p/destroy! oc true)
-                    (when entered?
-                      (p/dom-entered! new-managed))
-                    (set! children [new-managed])
-                    ))))
+            ;; could be syncing a text-only body with something that no longer is
+            ;; wipe all text, replace with regular managed children
+            (when text-content
+              (set! node -textContent "")
+              (set! text-content nil))
 
             ;; update previous children
             (let [next-children
@@ -171,9 +166,8 @@
                       next-children
                       (subvec next-nodes oc)))]
 
-              (set! children (persistent! next-children))))
-
-          ))))
+              (set! children (persistent! next-children)))
+            )))))
 
   (destroy! [this ^boolean dom-remove?]
     (when dom-remove?
@@ -189,10 +183,7 @@
         (desugar this)
 
         node
-        (js/document.createElement (name tag-kw))
-
-        children
-        (into [] (map #(p/as-managed % env)) children)]
+        (js/document.createElement (name tag-kw))]
 
     (reduce-kv
       (fn [_ key val]
@@ -200,7 +191,15 @@
       nil
       attrs)
 
-    (ManagedVector. env this node tag-kw attrs children false)))
+    (if (every? text? children)
+      (let [text (apply str children)]
+        (set! node -textContent text)
+        (ManagedVector. env this node tag-kw attrs text [] false))
+
+      (ManagedVector. env this node tag-kw attrs
+        nil
+        (into [] (map #(p/as-managed % env)) children)
+        false))))
 
 (deftype ManagedFragment
   [env
