@@ -31,6 +31,8 @@
     (ap/dom-entered! root))
 
   (destroy! [this ^boolean dom-remove?]
+    (when sub-fn
+      (flex/dispose! sub-fn))
     (ap/destroy! root dom-remove?))
 
   Object
