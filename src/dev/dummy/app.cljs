@@ -1,7 +1,6 @@
 (ns dummy.app
   (:require
     [shadow.grove :as sg :refer (<< defc css)]
-    [shadow.grove.ref-components :as rc]
     [shadow.grove.css-fx :as fx]))
 
 (def $fade
@@ -35,73 +34,27 @@
                    :class (css :fixed :inset-0 :bg-red-700)}
              "Hello World, click me"])))))
 
-(comment
-  (defc ui-root []
-    (bind state-ref
-      (atom false))
+(defc ui-root []
+  (bind state-ref
+    (atom false))
 
-    (bind visible?
-      (sg/watch state-ref))
+  (bind visible?
+    (sg/watch state-ref))
 
-    (event ::show! [env ev e]
-      (reset! state-ref true))
+  (event ::show! [env ev e]
+    (reset! state-ref true))
 
-    (event ::close! [env ev e]
-      (reset! state-ref false))
+  (event ::close! [env ev e]
+    (reset! state-ref false))
 
-    (render
-      (<< [:div
-           {:class (css :p-4 :text-lg :border)
-            :on-click ::show!}
-           "click me"]
+  (render
+    (<< [:div
+         {:class (css :p-4 :text-lg :border)
+          :on-click ::show!}
+         "click me"]
 
-          (when visible?
-            (ui-dialog))))))
-
-(comment
-  (defrc ui-root []
-    (ref clicks 0)
-    (ref clicks+1 (inc @clicks))
-    (render
-      (<< [:div {:on-click {:e ::click!}} "clicks: " @clicks " and " @clicks+1]))
-    (event ::click! [_]
-      (swap! clicks inc))
-    ))
-
-(def ui-root
-  (rc/ComponentConfig.
-    ;; check-args
-    (fn [])
-
-    ;; refs
-    #js [(rc/RefConfig. {} (fn [comp] 0))
-         (rc/RefConfig. {} (fn [comp]
-                             (let [clicks (rc/get-ref comp 0)]
-                               (inc @clicks))))]
-
-    ;; render
-    (fn render [comp]
-      (let [clicks (rc/get-ref comp 0)
-            clicks+1 (rc/get-ref comp 1)]
-        (<< [:div {:on-click {:e ::click!}} "clicks: " @clicks " and " @clicks+1])))
-
-    ;; events
-    {::click!
-     (fn [comp env ev e]
-       (let [clicks (rc/get-ref comp 0)]
-         (swap! clicks inc)
-         ))}
-
-    ;; effects
-    #js [(fn [comp]
-           ;; trigger is get-arg?
-           (let [arg (rc/get-arg comp 0)]
-             (js/console.log "only triggers when arg changes" arg)))
-         (fn [comp]
-           (let [foo (rc/get-ref comp 0)]
-             ;; trigger is actual deref, not `get-ref`
-             (js/console.log "only triggers when foo changes" @foo)))]
-    ))
+        (when visible?
+          (ui-dialog)))))
 
 (defonce root-el
   (js/document.getElementById "root"))

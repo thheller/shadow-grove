@@ -14,7 +14,11 @@
     "src/test"]
    :extra-deps
    {org.clojure/clojure {:mvn/version "1.11.1"}
-    org.clojure/clojurescript {:mvn/version "1.11.60"}}}
+    org.clojure/clojurescript {:mvn/version "1.11.60"}
+    ;;
+    town.lilac/flex {:git/url "https://github.com/lilactown/flex"
+                     :git/sha "25a96d6f6eb976e4ee2a8514743205db600a92d4"}
+    }}
 
   :server
   {:extra-deps {thheller/shadow-cljs {:mvn/version "2.26.5"}}
