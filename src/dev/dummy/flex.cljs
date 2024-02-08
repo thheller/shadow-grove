@@ -44,13 +44,20 @@
                      (ap/update! root new-val))))
     ))
 
+(defn as-managed-sink [src env]
+  (let [root (doto (common/managed-root env)
+               (ap/update! @src))]
+    (doto (ManagedSignalSink. env src root nil)
+      (.subscribe-now!))))
+
 (extend-protocol ap/IConstruct
   flex/SyncSource
   (as-managed [src env]
-    (let [root (doto (common/managed-root env)
-                 (ap/update! @src))]
-      (doto (ManagedSignalSink. env src root nil)
-        (.subscribe-now!)))))
+    (as-managed-sink src env))
+
+  flex/SyncSignal
+  (as-managed [src env]
+    (as-managed-sink src env)))
 
 (defn sig-listen [signal]
   (let [ref (comp/claim-bind! ::sig-listen)]
@@ -72,9 +79,11 @@
 ;; actual user code starts there
 
 (defc ui-example [counter]
-  (bind val (sig-listen counter))
+  (bind val (flex/signal (* @counter 2)))
   (render
-    (<< [:div "count from listening component: " val])))
+    (<< [:div
+         [:div "here's the counter: " counter]
+         [:div "and here's the counter twice: " val]])))
 
 (defn ui-root [counter]
   ;; placing the flex source directly into the DOM
