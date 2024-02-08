@@ -70,13 +70,66 @@
     [tag attrs children]))
 
 (defn text? [x]
-  (or (nil? x) (string? x) (number? x)))
+  ;; FIXME: should (nil? x) be in here?
+  ;; a probable case is nested hiccup, which leads to a non ideal path
+  ;; [:div "foo" (when some-condition [:div "other-nested-hiccup])]
+  ;; since on mount it might set textContent
+  ;; but on update it may reset that textContent and created the new children
+  ;; probably doesn't matter so keeping it for now
+  (or (string? x) (number? x) (nil? x)))
+
+;; not using (every? text? form) because it uses seq
+;; this is used in the hot path, so trying to keep allocations to a minimum
+;; I want the fastest way possible to just check if all items in a hiccup vector are text-ish
+;; knowing that we have a vector can speed this up a bit by going direct to -count and -nth
+(defn all-text? [offset ^not-native form]
+  (let [c (-count form)]
+    ;; no children, means no text
+    (when (> c offset)
+      (loop [idx offset]
+        (when (text? (-nth form idx))
+          (let [next (inc idx)]
+            (if (= next c)
+              true
+              (recur next))))))))
+
+(comment
+  (all-text? 1 [:div])
+  (all-text? 1 [:div "foo" nil])
+  (all-text? 2 [:div {:id "yo"}])
+  (all-text? 2 [:div {:id "yo"} "foo" :bar])
+  (all-text? 2 [:div {:id "yo"} :bar "foo"])
+  (all-text? 2 [:div {:id "yo"} "foo" "bar"])
+
+  ;; ~13ms
+  (time
+    (let [v [:div "foo" "bar"]]
+      (dotimes [x 1e5]
+        (all-text? 1 v)
+        )))
+
+  ;; ~36ms
+  (time
+    ;; using subvec since that is what children will be later
+    (let [v (subvec [:div "foo" "bar"] 1)]
+      (dotimes [x 1e5]
+        (every? text? v)
+        )))
+
+  ;; ~17ms
+  (time
+    ;; FIXME: turns out subvec makes this slow
+    ;; maybe get rid of subvec?
+    (let [v ["foo" "bar"]]
+      (dotimes [x 1e5]
+        (every? text? v)
+        )))
+  )
 
 (deftype ManagedVector
   [env
    ^:mutable form
-   ^:mutable node
-   ^:mutable tag-kw
+   node
    ^:mutable attrs
    ^:mutable text-content
    ^:mutable children
@@ -97,8 +150,6 @@
     (and (vector? next)
          ;; nth on form because we know it is a non-empty vector
          ;; get on next because it might be empty
-         ;; DO NOT USE tag-kw, that is the desugared element keyword
-         ;; :div but other might still be :div.container
          (keyword-identical? (nth form 0) (get next 0))))
 
   (dom-sync! [this next]
@@ -106,6 +157,9 @@
     ;; must not call = since something is likely different
     ;; but that might be deeply nested leading to a lot of wasted comparisons
     (when-not (identical? form next)
+      ;; FIXME: this can be sped up a bit by not using desugar
+      ;; class/id from tag kw are not changing, so no need to diff those
+      ;; but desugar puts them into a map
       (let [[_ next-attrs next-nodes] (desugar next)]
 
         (a/merge-attrs env node attrs next-attrs)
@@ -113,11 +167,9 @@
         (set! form next)
         (set! attrs next-attrs)
 
-        ;; optimization where all children are text-ish
-        ;; much faster to just set -textContent instead of going through
-        ;; sync different children
-        (if (and text-content (every? text? next-nodes))
-          (let [text (apply str next-nodes)]
+        ;; optimization where all children are text-ish, much faster to just set -textContent
+        (if (and text-content (all-text? (if (nil? next-attrs) 1 2) next-nodes))
+          (let [text (str/join next-nodes)]
             (when (not= text-content text)
               (set! text-content text)
               (set! node -textContent text)))
@@ -183,7 +235,7 @@
         (desugar this)
 
         node
-        (js/document.createElement (name tag-kw))]
+        (js/document.createElement tag-kw)]
 
     (reduce-kv
       (fn [_ key val]
@@ -191,12 +243,12 @@
       nil
       attrs)
 
-    (if (every? text? children)
-      (let [text (apply str children)]
+    (if (all-text? (if (nil? attrs) 1 2) children)
+      (let [text (str/join children)]
         (set! node -textContent text)
-        (ManagedVector. env this node tag-kw attrs text [] false))
+        (ManagedVector. env this node attrs text [] false))
 
-      (ManagedVector. env this node tag-kw attrs
+      (ManagedVector. env this node attrs
         nil
         (into [] (map #(p/as-managed % env)) children)
         false))))
