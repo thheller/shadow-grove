@@ -28,7 +28,8 @@
   3011 "examples/app/public"
   3013 "examples/ui"
   3014 "examples/dummy"
-  3015 "examples/flex"}
+  3015 "examples/flex"
+  3016 "examples/replicant"}
 
  :build-defaults
  {:compiler-options
@@ -53,6 +54,12 @@
    :output-dir "examples/flex/js"
    :asset-path "/js"
    :modules {:main {:init-fn dummy.flex/init}}}
+
+  :replicant
+  {:target :browser
+   :output-dir "examples/replicant/js"
+   :asset-path "/js"
+   :modules {:main {:init-fn dummy.replicant/init}}}
 
   :examples-bootstrap
   {:target :bootstrap
