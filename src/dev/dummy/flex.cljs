@@ -85,11 +85,21 @@
          [:div "here's the counter: " counter]
          [:div "and here's the counter twice: " val]])))
 
+(defc ui-example2 [counter]
+  (bind val (sig-listen counter))
+  (bind doubled (* val 2))
+  (render
+    (<< [:div
+         [:div "here's the counter: " val]
+         [:div "and here's the counter twice: " doubled]])))
+
+
 (defn ui-root [counter]
   ;; placing the flex source directly into the DOM
   (<< [:div "count: " counter]
       ;; or pass it to a component, to be used in bind
       (ui-example counter)
+      (ui-example2 counter)
       [:div {:on-click #(counter inc)} "click me"]
       ))
 
