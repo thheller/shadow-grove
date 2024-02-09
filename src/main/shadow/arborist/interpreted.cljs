@@ -1,139 +1,159 @@
 (ns shadow.arborist.interpreted
   (:require
     [clojure.string :as str]
+    [shadow.cljs.modern :refer (defclass)]
     [shadow.arborist.fragments :as frag]
     [shadow.arborist.attributes :as a]
     [shadow.arborist.protocols :as p]
     [shadow.arborist.dom-scheduler :as ds]
     [shadow.arborist.common :as common]))
 
+(deftype TagInfo [tag tag-id tag-class attr-class attrs child-offset]
+  Object
+  (with-form-info [this attr-class attrs child-offset]
+    (TagInfo. tag tag-id tag-class attr-class attrs child-offset)))
+
 (defn parse-tag* [spec]
   (let [spec (name spec)
         fdot (.indexOf spec ".")
         fhash (.indexOf spec "#")]
     (cond
-      (and (= -1 fdot) (= -1 fhash))
-      [spec nil nil]
+      (and (identical? -1 fdot) (identical? -1 fhash))
+      (->TagInfo spec nil nil nil nil nil)
 
-      (= -1 fhash)
-      [(subs spec 0 fdot)
-       nil
-       (str/replace (subs spec (inc fdot)) #"\." " ")]
+      (identical? -1 fhash)
+      (->TagInfo
+        (subs spec 0 fdot)
+        nil
+        (str/replace (subs spec (inc fdot)) #"\." " ")
+        nil
+        nil
+        nil)
 
-      (= -1 fdot)
-      [(subs spec 0 fhash)
-       (subs spec (inc fhash))
-       nil]
+      (identical? -1 fdot)
+      (->TagInfo
+        (subs spec 0 fhash)
+        (subs spec (inc fhash))
+        nil
+        nil
+        nil
+        nil)
 
       (> fhash fdot)
       (throw (str "cant have id after class?" spec))
 
       :else
-      [(subs spec 0 fhash)
-       (subs spec (inc fhash) fdot)
-       (str/replace (.substring spec (inc fdot)) #"\." " ")])))
-
-(defn maybe-css-join [{:keys [class] :as attrs} html-class]
-  (if-not class
-    (assoc attrs :class html-class)
-    (assoc attrs :class (frag/css-join html-class class))))
+      (->TagInfo
+        (subs spec 0 fhash)
+        (subs spec (inc fhash) fdot)
+        (str/replace (.substring spec (inc fdot)) #"\." " ")
+        nil
+        nil
+        nil))))
 
 (def tag-cache #js {})
 
-(defn parse-tag [^keyword spec]
+(defn parse-tag ^TagInfo [^keyword spec]
   (js* "(~{} || ~{})"
     (unchecked-get tag-cache (.-fqn spec))
     (unchecked-set tag-cache (.-fqn spec) (parse-tag* spec))))
 
-(defn merge-tag-attrs [tag-kw attrs]
-  (let [[tag html-id html-class]
-        (parse-tag tag-kw)]
+(defn desugar ^TagInfo [^not-native hiccup]
+  (let [tag-kw (-nth hiccup 0)
+        ^TagInfo tag-info (parse-tag tag-kw)
+        attrs (-lookup hiccup 1)]
 
-    [tag
-     (-> attrs
-         (cond->
-           html-id
-           (assoc :id html-id)
-
-           html-class
-           (maybe-css-join html-class)))]))
-
-(defn desugar [[tag-kw attrs :as form]]
-  (let [[attrs children]
-        (if (map? attrs)
-          [attrs (subvec form 2)]
-          [nil (subvec form 1)])
-
-        [tag attrs]
-        (merge-tag-attrs tag-kw attrs)]
-
-    [tag attrs children]))
+    (if (map? attrs)
+      (let [attr-class (:class attrs)]
+        (.with-form-info tag-info
+          attr-class
+          (if-not (nil? attr-class) attrs (dissoc attrs :class))
+          2))
+      (.with-form-info tag-info nil nil 1))))
 
 (defn text? [x]
-  ;; FIXME: should (nil? x) be in here?
-  ;; a probable case is nested hiccup, which leads to a non ideal path
-  ;; [:div "foo" (when some-condition [:div "other-nested-hiccup])]
-  ;; since on mount it might set textContent
-  ;; but on update it may reset that textContent and created the new children
-  ;; probably doesn't matter so keeping it for now
-  (or (string? x) (number? x) (nil? x)))
+  (or (string? x) (number? x)))
 
-;; not using (every? text? form) because it uses seq
-;; this is used in the hot path, so trying to keep allocations to a minimum
-;; I want the fastest way possible to just check if all items in a hiccup vector are text-ish
-;; knowing that we have a vector can speed this up a bit by going direct to -count and -nth
-(defn all-text? [offset ^not-native form]
-  (let [c (-count form)]
-    ;; no children, means no text
-    (when (> c offset)
-      (loop [idx offset]
-        (when (text? (-nth form idx))
-          (let [next (inc idx)]
-            (if (= next c)
-              true
-              (recur next))))))))
+(defn single-child [^not-native hiccup ^TagInfo tag-info]
+  (let [co (.-child-offset tag-info)]
+    (if (= (-count hiccup) (inc co))
+      (-nth hiccup co)
+      false)))
 
-(comment
-  (all-text? 1 [:div])
-  (all-text? 1 [:div "foo" nil])
-  (all-text? 2 [:div {:id "yo"}])
-  (all-text? 2 [:div {:id "yo"} "foo" :bar])
-  (all-text? 2 [:div {:id "yo"} :bar "foo"])
-  (all-text? 2 [:div {:id "yo"} "foo" "bar"])
+(defclass ManagedVector
+  (field ^not-native env)
+  (field ^not-native ^:mutable form)
+  (field ^js node)
+  (field ^TagInfo ^:mutable tag-info)
+  (field ^:mutable text-content nil)
+  (field ^not-native ^:mutable children)
+  (field ^boolean ^:mutable entered?)
 
-  ;; ~13ms
-  (time
-    (let [v [:div "foo" "bar"]]
-      (dotimes [x 1e5]
-        (all-text? 1 v)
-        )))
+  (constructor [this ^not-native parent-env ^not-native hiccup]
+    (set! this -env parent-env)
+    (set! this -form hiccup)
 
-  ;; ~36ms
-  (time
-    ;; using subvec since that is what children will be later
-    (let [v (subvec [:div "foo" "bar"] 1)]
-      (dotimes [x 1e5]
-        (every? text? v)
-        )))
+    (let [^TagInfo tag-info
+          (desugar hiccup)
 
-  ;; ~17ms
-  (time
-    ;; FIXME: turns out subvec makes this slow
-    ;; maybe get rid of subvec?
-    (let [v ["foo" "bar"]]
-      (dotimes [x 1e5]
-        (every? text? v)
-        )))
-  )
+          node
+          (js/document.createElement (.-tag tag-info))
 
-(deftype ManagedVector
-  [env
-   ^:mutable form
-   node
-   ^:mutable attrs
-   ^:mutable text-content
-   ^:mutable children
-   ^:mutable entered?]
+          tag-class
+          (.-tag-class tag-info)
+
+          attr-class
+          (.-attr-class tag-info)
+
+          children
+          (subvec hiccup (.-child-offset tag-info))]
+
+      (set! this -node node)
+      (set! this -tag-info tag-info)
+
+      (cond
+        ;; [:div.foo {:class "bar"}]
+        (and tag-class attr-class)
+        (frag/set-attr env node :class nil [tag-class attr-class])
+
+        ;; [:div.foo]
+        tag-class
+        (set! node -className tag-class)
+
+        ;; [:div {:class "foo"}]
+        attr-class
+        (frag/set-attr env node :class nil attr-class))
+
+      (when-some [tag-id (.-tag-id tag-info)]
+        (set! node -id tag-id))
+
+      (reduce-kv
+        (fn [_ key val]
+          (frag/set-attr env node key nil val))
+        nil
+        (.-attrs tag-info))
+
+      ;; optimize single text child pass
+      ;; textContent much faster than createText/appendChild
+      (let [child (single-child hiccup tag-info)]
+
+        (cond
+          (false? child)
+          (do (set! this -text-content nil)
+              (set! this -children (into [] (map #(p/as-managed % env)) children)))
+
+          (text? child)
+          (let [text (str child)]
+            (set! node -textContent text)
+            (set! this -children [])
+            (set! text-content text))
+
+          :else
+          (do (set! this -text-content nil)
+              (set! this -children [(p/as-managed child env)]))
+          )))
+
+    this)
 
   p/IManaged
   (dom-first [this] node)
@@ -150,76 +170,97 @@
     (and (vector? next)
          ;; nth on form because we know it is a non-empty vector
          ;; get on next because it might be empty
-         (keyword-identical? (nth form 0) (get next 0))))
+         (keyword-identical? (-nth form 0) (-lookup next 0))))
 
-  (dom-sync! [this next]
-    ;; only compare identical? to allow skipping some diffs
-    ;; must not call = since something is likely different
-    ;; but that might be deeply nested leading to a lot of wasted comparisons
-    (when-not (identical? form next)
-      ;; FIXME: this can be sped up a bit by not using desugar
-      ;; class/id from tag kw are not changing, so no need to diff those
-      ;; but desugar puts them into a map
-      (let [[_ next-attrs next-nodes] (desugar next)]
+  (dom-sync! [this ^not-native next]
+    ;; = performs a deep comparison, so for changes nested deeply this ends
+    ;; up comparing things over and over again
+    ;; identical? here saves a bit of work, but in practice is not the bottleneck
+    ;; = may also find the subtrees that have not changed, but are also not identical
+    ;; thus ending up faster for those cases
+    (when-not (= form next)
+      (let [^TagInfo next-info (desugar next)
 
-        (a/merge-attrs env node attrs next-attrs)
+            attrs (.-attrs tag-info)
+            next-attrs (.-attrs next-info)
+            next-nodes (subvec next (.-child-offset next-info))]
+
+        (when (not= (.-attr-class tag-info)
+                    (.-attr-class next-info))
+          (if (.-tag-class tag-info)
+            (a/set-attr env node :class
+              [(.-tag-class tag-info) (.-attr-class tag-info)]
+              [(.-tag-class next-info) (.-attr-class next-info)])
+            (a/set-attr env node :class
+              (.-attr-class tag-info)
+              (.-attr-class next-info))))
+
+        (when (not= attrs next-attrs)
+          (a/merge-attrs env node attrs next-attrs))
 
         (set! form next)
-        (set! attrs next-attrs)
+        (set! tag-info next-info)
 
-        ;; optimization where all children are text-ish, much faster to just set -textContent
-        (if (and text-content (all-text? (if (nil? next-attrs) 1 2) next-nodes))
-          (let [text (str/join next-nodes)]
-            (when (not= text-content text)
-              (set! text-content text)
-              (set! node -textContent text)))
+        ;; optimization where single child is text-ish, much faster to just set -textContent
+        ;; not checking multiple children since that ends up becoming more expensive
+        (let [child (single-child next next-info)]
 
-          (let [oc (count children)
-                nc (count next-nodes)]
+          ;; FIXME: cljs.core/and generates really ugly code for some reason
+          (if ^boolean (js* "(~{} && ~{})" (string? text-content) (text? child))
+            ;; can update single text
+            (let [text (str child)]
+              (when (not= text-content text)
+                (set! text-content text)
+                (set! node -textContent text)))
 
-            ;; could be syncing a text-only body with something that no longer is
-            ;; wipe all text, replace with regular managed children
-            (when text-content
-              (set! node -textContent "")
-              (set! text-content nil))
+            ;; sync children normally
+            (let [oc (-count children)
+                  nc (-count next-nodes)]
 
-            ;; update previous children
-            (let [next-children
-                  (reduce-kv
-                    (fn [c idx ^not-native child]
-                      (if (>= idx nc)
-                        (do (p/destroy! child true)
-                            c)
-                        (let [next (nth next-nodes idx)]
-                          (if (p/supports? child next)
-                            (do (p/dom-sync! child next)
-                                (conj! c child))
-                            (let [first (p/dom-first child)
-                                  new-managed (p/as-managed next env)]
-                              (p/dom-insert new-managed node first)
-                              (p/destroy! child true)
-                              (when entered?
-                                (p/dom-entered! new-managed))
-                              (conj! c new-managed))))))
-                    (transient [])
-                    children)
+              ;; could be syncing a text-only body with something that no longer is
+              ;; wipe all text, replace with regular managed children
+              (when text-content
+                (set! node -textContent "")
+                (set! text-content nil))
 
-                  ;; append if there were more children
-                  next-children
-                  (if-not (> nc oc)
+              ;; update previous children
+              (let [next-children
+                    (reduce-kv
+                      (fn [c idx ^not-native child]
+                        (if (>= idx nc)
+                          (do (p/destroy! child true)
+                              c)
+                          (let [next (nth next-nodes idx)]
+                            (if (p/supports? child next)
+                              (do (p/dom-sync! child next)
+                                  (conj! c child))
+                              (let [first (p/dom-first child)
+                                    new-managed (p/as-managed next env)]
+                                (p/dom-insert new-managed node first)
+                                (p/destroy! child true)
+                                (when entered?
+                                  (p/dom-entered! new-managed))
+                                (conj! c new-managed))))))
+                      (transient [])
+                      children)
+
+                    ;; append if there were more children
                     next-children
-                    (reduce
-                      (fn [c el]
-                        (let [new-managed (p/as-managed el env)]
-                          (p/dom-insert new-managed node nil)
-                          (when entered?
-                            (p/dom-entered! new-managed))
-                          (conj! c new-managed)))
+                    (if-not (> nc oc)
                       next-children
-                      (subvec next-nodes oc)))]
+                      (reduce
+                        (fn [c el]
+                          (let [new-managed (p/as-managed el env)]
+                            (p/dom-insert new-managed node nil)
+                            (when entered?
+                              (p/dom-entered! new-managed))
+                            (conj! c new-managed)))
+                        next-children
+                        (subvec next-nodes oc)))]
 
-              (set! children (persistent! next-children)))
-            )))))
+                (set! children (persistent! next-children))))
+            ))))
+    js/undefined)
 
   (destroy! [this ^boolean dom-remove?]
     (when dom-remove?
@@ -229,29 +270,6 @@
         ;; microtask still runs before next paint, so no visual difference
         (.remove node)))
     (run! #(p/destroy! % false) children)))
-
-(defn as-managed-vector [this env]
-  (let [[tag-kw attrs children]
-        (desugar this)
-
-        node
-        (js/document.createElement tag-kw)]
-
-    (reduce-kv
-      (fn [_ key val]
-        (frag/set-attr env node key nil val))
-      nil
-      attrs)
-
-    (if (all-text? (if (nil? attrs) 1 2) children)
-      (let [text (str/join children)]
-        (set! node -textContent text)
-        (ManagedVector. env this node attrs text [] false))
-
-      (ManagedVector. env this node attrs
-        nil
-        (into [] (map #(p/as-managed % env)) children)
-        false))))
 
 (deftype ManagedFragment
   [env
@@ -348,7 +366,7 @@
         (as-managed-fragment this env)
 
         (simple-keyword? tag-kw)
-        (as-managed-vector this env)
+        (ManagedVector. env this)
 
         :else
         (throw (ex-info "invalid hiccup form" {:form this}))))))
