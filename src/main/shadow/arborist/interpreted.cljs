@@ -61,14 +61,12 @@
 (defn desugar ^TagInfo [^not-native hiccup]
   (let [tag-kw (-nth hiccup 0)
         ^TagInfo tag-info (parse-tag tag-kw)
-        attrs (-lookup hiccup 1)]
+        ^not-native attrs (-lookup hiccup 1)]
 
     (if (map? attrs)
-      (let [attr-class (:class attrs)]
-        (.with-form-info tag-info
-          attr-class
-          (if-not (nil? attr-class) attrs (dissoc attrs :class))
-          2))
+      (if-some [class-attr (-find attrs :class)]
+        (.with-form-info tag-info (val class-attr) (dissoc attrs :class) 2)
+        (.with-form-info tag-info nil attrs 2))
       (.with-form-info tag-info nil nil 1))))
 
 (defn text? [x]
