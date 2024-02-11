@@ -1,6 +1,8 @@
 (ns shadow.arborist.interpreted
   (:require
     [clojure.string :as str]
+    [shadow.arborist.attributes :as attr]
+    [shadow.arborist.collections :as coll]
     [shadow.cljs.modern :refer (defclass)]
     [shadow.arborist.fragments :as frag]
     [shadow.arborist.attributes :as a]
@@ -137,7 +139,7 @@
 
         (cond
           (false? child)
-          (do (set! this -text-content nil)
+          (do (set! text-content nil)
               (set! this -children (into [] (map #(p/as-managed % env)) children)))
 
           (text? child)
@@ -147,7 +149,7 @@
             (set! text-content text))
 
           :else
-          (do (set! this -text-content nil)
+          (do (set! text-content nil)
               (set! this -children [(p/as-managed child env)]))
           )))
 
@@ -355,8 +357,30 @@
       (common/dom-marker env)
       false)))
 
-(extend-type cljs.core/PersistentVector
-  p/IConstruct
+(attr/add-attr :dom/key
+  ;; never needs to be added to the dom
+  (fn [env node oval nval]))
+
+(defn get-dom-key [hiccup]
+  (let [attrs (get hiccup 1)]
+    (when (map? attrs)
+      (:dom/key attrs))))
+
+(defn construct-hiccup-seq [env the-seq]
+  (if (zero? (bounded-count 1 the-seq))
+    (common/managed-text env nil)
+    (let [head (first the-seq)]
+      (if-not (vector? head)
+        (throw (ex-info "cannot construct non-hiccup lazy seq" {:seq the-seq}))
+        (if (get-dom-key head)
+          ;; first item has key, assume all do
+          (coll/construct-keyed-seq env (vec the-seq) get-dom-key identity)
+          ;; no key, assume simple-seq
+          (coll/construct-simple-seq env (vec the-seq) identity)
+          )))))
+
+(extend-protocol p/IConstruct
+  cljs.core/PersistentVector
   (as-managed [this env]
     (let [tag-kw (nth this 0)]
       (cond
@@ -367,4 +391,8 @@
         (ManagedVector. env this)
 
         :else
-        (throw (ex-info "invalid hiccup form" {:form this}))))))
+        (throw (ex-info "invalid hiccup form" {:form this})))))
+
+  cljs.core/LazySeq
+  (as-managed [this env]
+    (construct-hiccup-seq env this)))

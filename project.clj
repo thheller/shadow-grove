@@ -10,7 +10,7 @@
 
   :dependencies
   [[org.clojure/clojure "1.11.1" :scope "provided"]
-   [org.clojure/clojurescript "1.11.60" :scope "provided"]
+   [org.clojure/clojurescript "1.11.132" :scope "provided"]
    [com.thheller/shadow-css "0.4.5"]]
 
   :resource-paths

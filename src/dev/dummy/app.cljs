@@ -1,6 +1,7 @@
 (ns dummy.app
   (:require
     [shadow.grove :as sg :refer (<< defc css)]
+    [shadow.arborist.interpreted]
     [shadow.grove.css-fx :as fx]))
 
 (def $fade
@@ -34,6 +35,16 @@
                    :class (css :fixed :inset-0 :bg-red-700)}
              "Hello World, click me"])))))
 
+(def some-hiccup
+  [:<>
+   [:h1 "Hello Hiccup!"]
+   [:ul
+    (for [x ["hello" "simple" "seq"]]
+      [:li x])]
+   [:ul
+    (for [x ["hello" "keyed" "seq"]]
+      [:li {:dom/key x} x])]])
+
 (defc ui-root []
   (bind state-ref
     (atom false))
@@ -52,6 +63,8 @@
          {:class (css :p-4 :text-lg :border)
           :on-click ::show!}
          "click me"]
+
+        some-hiccup
 
         (when visible?
           (ui-dialog)))))

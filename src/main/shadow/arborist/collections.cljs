@@ -231,46 +231,49 @@
       (fn [item]
         (p/destroy! ^not-native (.-managed item) false)))))
 
+(defn construct-keyed-seq [env coll key-fn render-fn]
+  (let [len (count coll)
+        marker-before (common/dom-marker env "keyed-seq-start")
+        marker-after (common/dom-marker env "keyed-seq-end")
+
+        kfn (common/ifn1-wrap key-fn)
+        rfn (common/ifn3-wrap render-fn)
+
+        items (js/Array. len)
+
+        ;; {<key> <item>}, same instance as in array
+        keys
+        (persistent!
+          (reduce-kv
+            (fn [keys idx val]
+              (let [key (kfn val)
+                    rendered (rfn val idx key)
+                    managed (p/as-managed rendered env)
+                    item (KeyedItem. key val managed false)]
+
+                (aset items idx item)
+                (assoc! keys key item)))
+            (transient {})
+            coll))]
+
+    (when (not= (count keys) len)
+      (throw (ex-info "collection contains duplicated keys" {})))
+
+    (KeyedCollection.
+      env
+      coll
+      key-fn
+      render-fn
+      items
+      keys
+      marker-before
+      marker-after
+      false)))
+
 (deftype KeyedCollectionInit [coll key-fn render-fn]
   p/IConstruct
   (as-managed [this env]
-    (let [len (count coll)
-          marker-before (common/dom-marker env "coll-start")
-          marker-after (common/dom-marker env "coll-end")
-
-          kfn (common/ifn1-wrap key-fn)
-          rfn (common/ifn3-wrap render-fn)
-
-          items (js/Array. len)
-
-          ;; {<key> <item>}, same instance as in array
-          keys
-          (persistent!
-            (reduce-kv
-              (fn [keys idx val]
-                (let [key (kfn val)
-                      rendered (rfn val idx key)
-                      managed (p/as-managed rendered env)
-                      item (KeyedItem. key val managed false)]
-
-                  (aset items idx item)
-                  (assoc! keys key item)))
-              (transient {})
-              coll))]
-
-      (when (not= (count keys) len)
-        (throw (ex-info "collection contains duplicated keys" {})))
-
-      (KeyedCollection.
-        env
-        coll
-        key-fn
-        render-fn
-        items
-        keys
-        marker-before
-        marker-after
-        false)))
+    (construct-keyed-seq env coll key-fn render-fn))
 
   IEquiv
   (-equiv [this ^KeyedCollectionInit other]
@@ -408,21 +411,24 @@
         (p/destroy! ^not-native (.-managed item) false)))
     ))
 
+(defn construct-simple-seq [env coll render-fn]
+  (let [marker-before (common/dom-marker env "simple-seq-start")
+        marker-after (common/dom-marker env "simple-seq-end")
+        arr (js/Array. (count coll))
+        rfn (common/ifn2-wrap render-fn)]
+
+    (reduce-kv
+      (fn [_ idx data]
+        (aset arr idx (SimpleItem. data (p/as-managed (rfn data idx) env))))
+      nil
+      coll)
+
+    (SimpleCollection. env coll render-fn arr marker-before marker-after false)))
+
 (deftype SimpleCollectionInit [coll render-fn]
   p/IConstruct
   (as-managed [this env]
-    (let [marker-before (common/dom-marker env "coll-start")
-          marker-after (common/dom-marker env "coll-end")
-          arr (js/Array. (count coll))
-          rfn (common/ifn2-wrap render-fn)]
-
-      (reduce-kv
-        (fn [_ idx data]
-          (aset arr idx (SimpleItem. data (p/as-managed (rfn data idx) env))))
-        nil
-        coll)
-
-      (SimpleCollection. env coll render-fn arr marker-before marker-after false)))
+    (construct-simple-seq env coll render-fn))
 
   IEquiv
   (-equiv [this ^SimpleCollectionInit other]
