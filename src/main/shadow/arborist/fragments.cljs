@@ -101,8 +101,16 @@
 
   Object
   (handle-event [this event ev-value dom-event]
-    (if (fn? ev-value)
+    (cond
+      ;; might have :on-click (when x :foo!)
+      ;; should do nothing x is false
+      (nil? ev-value)
+      nil
+
+      (fn? ev-value)
       (ev-value dom-event)
+
+      :else
       (let [^not-native ev-handler (::p/dom-event-handler env)]
 
         (when-not ev-handler
