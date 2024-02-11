@@ -290,7 +290,7 @@
          (ifn? key-fn)
          (ifn? render-fn)]}
   ;; handling nil and empty colls, can skip a lot of work
-  (when (empty? coll)
+  (when-not (empty? coll)
     ;; we always need compatible collections, it should already be a vector in most cases
     ;; it must not allow lazy sequences since the sequence may not be used immediately
     ;; some item may suspend and whatever the lazy seq did will happen in totally different phases
@@ -443,6 +443,6 @@
   {:pre [(or (nil? coll) (sequential? coll))
          (ifn? render-fn)]}
   ;; skip work if no coll or empty coll
-  (when (empty? coll)
+  (when-not (empty? coll)
     ;; forced vec, eliminates lazy seqs and allows skipping checks later
     (SimpleCollectionInit. (vec coll) render-fn)))
