@@ -27,13 +27,13 @@
 
 ;; FIXME: maybe take document from env, easier to mock out later
 (defn svg-element-fn [^Keyword type]
-  (js/document.createElementNS svg-ns (.-name type)))
+  (js/document.createElementNS p/svg-ns (.-name type)))
 
 (defn dom-element-fn [^Keyword type]
   (js/document.createElement (.-name type)))
 
 (defn get-element-fn [env element-ns]
-  (if (identical? element-ns svg-ns)
+  (if (identical? element-ns p/svg-ns)
     svg-element-fn
     dom-element-fn))
 

@@ -847,7 +847,7 @@
         ;; FIXME: mathml? still don't know what that is ... but seems to be a standard?
         ns-hint
         (when (::svg macro-env)
-          `svg-ns)
+          'shadow.arborist.protocols/svg-ns)
 
         ;; this needs to be unique enough to not have collisions when using caching
         ;; just code-id isn't unique enough since multiple namespaces may end up with

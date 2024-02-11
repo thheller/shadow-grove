@@ -1,5 +1,7 @@
 (ns shadow.arborist.protocols)
 
+(def svg-ns "http://www.w3.org/2000/svg")
+
 (defprotocol IManaged
   (^boolean supports? [this next])
   (dom-sync! [this next])

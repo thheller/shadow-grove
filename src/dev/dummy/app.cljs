@@ -58,13 +58,35 @@
   (event ::close! [env ev e]
     (reset! state-ref false))
 
+  (bind test-ref (atom 0))
+
+  (event ::inc! [_ _ _]
+    (swap! test-ref inc))
+
+  (bind test (sg/watch test-ref))
+
   (render
     (<< [:div
          {:class (css :p-4 :text-lg :border)
           :on-click ::show!}
          "click me"]
 
+        [:div {:on-click ::inc!
+               :data-test (zero? (mod test 3))} "test-inc: " test " - " (mod test 3)]
+
         some-hiccup
+
+        [:div {:x "foo"}]
+        [:svg
+         [:g {:x "foo"}]]
+
+        [:form#test
+         {:on-submit (fn [e]
+                       (js/console.log e)
+                       (.preventDefault e))}
+         [:div "form test"]]
+
+        [:button {:form "test" :type "submit"} "button outside form"]
 
         (when visible?
           (ui-dialog)))))

@@ -1,6 +1,5 @@
 (ns shadow.arborist.attributes
   (:require
-    [goog.object :as gobj]
     [goog.string :as gstr]
     [goog.functions :as gfn]
     [clojure.string :as str]
@@ -42,7 +41,7 @@
 (defn add-attr [^Keyword kw handler]
   {:pre [(keyword? kw)
          (fn? handler)]}
-  (gobj/set attr-handlers (.-fqn kw) handler))
+  (unchecked-set attr-handlers (.-fqn kw) handler))
 
 (defn dom-attribute? [name]
   (or (str/starts-with? name "data-")
@@ -111,16 +110,16 @@
     ;; FIXME: need to track if once already happened. otherwise may re-attach and actually fire more than once
     ;; but it should be unlikely to have a changing val with :e/once?
     (when once
-      (gobj/set ev-opts "once" true))
+      (unchecked-set ev-opts "once" true))
 
     (when passive
-      (gobj/set ev-opts "passive" true))
+      (unchecked-set ev-opts "passive" true))
 
     (when capture
-      (gobj/set ev-opts "capture" true))
+      (unchecked-set ev-opts "capture" true))
 
     (when signal
-      (gobj/set ev-opts "signal" true))
+      (unchecked-set ev-opts "signal" true))
 
     ;; FIXME: should these be exclusive?
     (cond-> ev-fn
@@ -172,7 +171,7 @@
             ev-key (str "__shadow$" event)]
 
         (fn [env node oval nval]
-          (when-let [ev-fn (gobj/get node ev-key)]
+          (when-let [ev-fn (unchecked-get node ev-key)]
             (.removeEventListener node event ev-fn))
 
           ;; FIXME: should maybe allow to just use a function as value
@@ -205,7 +204,7 @@
                 ;; closure lib probably has something to handle that
                 (.addEventListener node event ev-fn ev-opts)
 
-                (gobj/set node ev-key ev-fn))))))
+                (unchecked-set node ev-key ev-fn))))))
 
       :else
       (let [prop (gstr/toCamelCase prop-name)]
@@ -213,9 +212,9 @@
           ;; FIXME: must all attributes in svg elements go with setAttribute?
           ;; can you make web components for svg elements?
           ;; seems to break if we try to go with node.width=24 instead of .setAttribute
-          (if ^boolean (:dom/svg env)
+          (if (identical? p/svg-ns (.-namespaceURI node))
             (set-dom-attribute node (.-name key) nval)
-            (gobj/set node prop nval)
+            (unchecked-set node prop nval)
             ))))))
 
 ;; quasi multi-method. not using multi-method because it does too much stuff I don't accidentally
@@ -223,14 +222,14 @@
 ;; it may also blow up badly. also this is less code in :advanced.
 (defn set-attr [env ^js node ^Keyword key oval nval]
   {:pre [(keyword? key)]}
-  (let [^function handler (gobj/get attr-handlers (.-fqn key))]
+  (let [^function handler (unchecked-get attr-handlers (.-fqn key))]
     (if ^boolean handler
       (handler env node oval nval)
 
       ;; create and store attr handler for later
       ;; avoids doing the same kind of work over and over to figure out what a key meant
       (let [^function handler (make-attr-handler key)]
-        (gobj/set attr-handlers (.-fqn key) handler)
+        (unchecked-set attr-handlers (.-fqn key) handler)
         (handler env node oval nval)
         ))))
 
