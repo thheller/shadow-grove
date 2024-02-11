@@ -1,4 +1,5 @@
 (ns shadow.grove.css-fx
+  "DEPRECATED: use Web Animations API directly instead"
   (:require
     [shadow.cljs.modern :refer (defclass)]
     [shadow.arborist.attributes :as sa]
