@@ -14,16 +14,14 @@
         (.-finished)
         (.then #(sg/dispatch-up! env {:e ::close!}))))
 
-  (hook
-    (sg/mount-effect
-      (fn []
-        (.animate @node-ref
-          (clj->js
-            [{:opacity "0"
-              :transform "scale(0.9)"}
-             {:opacity "1"
-              :transform "scale(1) translateX(0)"}])
-          1000))))
+  (effect :mount [_]
+    (.animate @node-ref
+      (clj->js
+        [{:opacity "0"
+          :transform "scale(0.9)"}
+         {:opacity "1"
+          :transform "scale(1) translateX(0)"}])
+      1000))
 
   (render
     (sg/portal
