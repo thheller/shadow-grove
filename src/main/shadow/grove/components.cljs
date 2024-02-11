@@ -682,6 +682,8 @@
 (defn slot-effect [deps callback]
   (let [ref (claim-bind! ::slot-effect)]
 
+    ;; FIXME: should this check and bail if deps keywords changed?
+    ;; cannot go from :mount to :render
     (case deps
       :render
       ;; ref used as key, so we update the callback when called again
@@ -691,6 +693,10 @@
       (when-not @ref
         (.add-after-render-effect-once *component* ref callback)
         (reset! ref :mount))
+
+      ;; slot only called again if callback used bindings that changed
+      :auto
+      (.add-after-render-effect-once *component* ref callback)
 
       ;; else
       (let [prev-deps @ref]

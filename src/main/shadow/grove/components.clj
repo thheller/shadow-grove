@@ -373,6 +373,18 @@
 
   (add-data-binding state body))
 
+(defmethod analyze-slot 'effect [state {:keys [body]}]
+  ;; (effect :mount [env] ...)
+  ;; much better than
+  ;; (hook (sg/effect :mount (fn [env] ...))
+
+  (let [[when args & rest] body]
+    (when-not (and (vector? args) (= 1 (count args)))
+      (throw (ex-info "effect requires an arg vector" {:body body})))
+
+    (add-data-binding state
+      `[~'_ (slot-effect ~when (fn ~args ~@rest))])))
+
 (defmethod analyze-slot 'hook [state {:keys [body]}]
   ;; (hook (some-hook-without-output))
 
@@ -619,6 +631,9 @@
          (event ::some-event handled-elsewhere!)
 
          (bind a (hello-hook 5 [:shadow a]))
+
+         (effect :mount [env]
+           (js/console.log "here be mounted"))
 
          (render
            [:div a [:h1 d]])))))
