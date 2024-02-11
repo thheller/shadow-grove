@@ -243,6 +243,10 @@
   (fn [env ^js node oval nval]
     (set-dom-attribute node "form" nval)))
 
+(add-attr :list
+  (fn [env ^js node oval nval]
+    (set-dom-attribute node "list" nval)))
+
 (add-attr :style
   (fn [env ^js node oval nval]
     (cond
