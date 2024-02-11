@@ -15,3 +15,9 @@
 
 (defn next-tick [callback]
   (.then ticker callback))
+
+;; better name,
+;; next-tick is misleading, since all microtasks complete before frame starts
+;; even if scheduled by other microtask
+(defn microtask [callback]
+  (.then ticker callback))

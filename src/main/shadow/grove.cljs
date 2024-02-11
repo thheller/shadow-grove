@@ -249,7 +249,7 @@
 
     (when-not update-pending?
       (set! update-pending? true)
-      (rt/next-tick #(.process-work! this))))
+      (rt/microtask #(.process-work! this))))
 
   (unschedule! [this work-task]
     (.delete work-set work-task))
@@ -289,7 +289,7 @@
 
     (when-not update-pending?
       (set! update-pending? true)
-      (rt/next-tick
+      (rt/microtask
         (fn []
           (js/console.group (str trigger))
           (try

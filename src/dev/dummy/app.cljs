@@ -1,39 +1,42 @@
 (ns dummy.app
   (:require
     [shadow.grove :as sg :refer (<< defc css)]
-    [shadow.arborist.interpreted]
-    [shadow.grove.css-fx :as fx]))
-
-(def $fade
-  (css
-    ["&-enter"
-     {:opacity "0"
-      :transform "scale(0.9)"}]
-    ["&-enter-active"
-     {:opacity "1"
-      :transform "translateX(0)"
-      :transition "opacity 300ms, transform 300ms"}]
-    ["&-exit"
-     {:opacity "1"}]
-    ["&-exit-active"
-     {:opacity "0"
-      :transform "scale(0.9)"
-      :transition "opacity 300ms, transform 300ms"}]))
+    [shadow.arborist.interpreted]))
 
 (defc ui-dialog []
+  (bind node-ref (sg/ref))
+
   (event ::out! [env ev e origin]
-    (fx/trigger-out! origin
+    (-> @node-ref
+        (.animate
+          #js {:opacity "0" :transform "scale(0.9)"}
+          1000)
+        (.-finished)
+        (.then #(sg/dispatch-up! env {:e ::close!}))))
+
+  (hook
+    (sg/mount-effect
       (fn []
-        (sg/dispatch-up! env {:e ::close!})
-        )))
+        (.animate @node-ref
+          (clj->js
+            [{:opacity "0"
+              :transform "scale(0.9)"}
+             {:opacity "1"
+              :transform "scale(1) translateX(0)"}])
+          1000))))
 
   (render
     (sg/portal
-      (fx/transition-group
-        {:class $fade :timeout 300}
-        (<< [:div {:on-click ::out!
-                   :class (css :fixed :inset-0 :bg-red-700)}
-             "Hello World, click me"])))))
+      (<< [:div {:on-click ::out!
+                 :dom/ref node-ref
+                 :style {:position "fixed"
+                         :top 0
+                         :left 0
+                         :width "100%"
+                         :height "100%"
+                         :background-color "red"}}
+           "Hello World, click me"])
+      )))
 
 (def some-hiccup
   [:<>

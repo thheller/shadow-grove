@@ -293,7 +293,7 @@
 
           ;; dispatching async so render can get to it sooner
           ;; dispatching these async since they can never do anything that affects the current render right?
-          (rt/next-tick
+          (rt/microtask
             (fn []
               (doseq [[fx-key value] (::rt/fx result)]
                 (let [fx-fn (get fx-config fx-key)
@@ -321,7 +321,7 @@
           (when-some [tx-reporter (::rt/tx-reporter env)]
             ;; dispatch tx-reporter async so it doesn't hold up rendering
             ;; the only purpose of this is debugging anyways
-            (rt/next-tick
+            (rt/microtask
               (fn []
                 (let [report
                       {:event ev
