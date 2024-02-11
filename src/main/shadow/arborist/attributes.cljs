@@ -239,6 +239,11 @@
   (fn [env ^js node oval nval]
     (set! node -htmlFor nval)))
 
+;; can only be set via setAttribute. x.form is only a getter
+(add-attr :form
+  (fn [env ^js node oval nval]
+    (set-dom-attribute node "form" nval)))
+
 (add-attr :style
   (fn [env ^js node oval nval]
     (cond
