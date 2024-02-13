@@ -148,6 +148,7 @@
 (defn ref []
   (volatile! nil))
 
+
 (defn effect
   "calls (callback env) after render when provided deps argument changes
    callback can return a function which will be called if cleanup is required"
@@ -386,3 +387,44 @@
 (defn reg-fx [rt-ref fx-id handler-fn]
   (swap! rt-ref assoc-in [::rt/fx-config fx-id] handler-fn)
   rt-ref)
+
+
+(defn add-animation-callbacks [anim callbacks]
+  (reduce-kv
+    (fn [_ key val]
+      (case key
+        :on-finish
+        (.addEventListener anim "finish" val)
+
+        :on-cancel
+        (.addEventListener anim "cancel" val)
+
+        :on-remove
+        (.addEventListener anim "remove" val)
+
+        (throw (ex-info (str "unknown animate callback " key) {:key key :val val}))
+        ))
+    nil
+    callbacks)
+  anim)
+
+(defn animate
+  "helper for Element.animate Web Animations API, saves manually repeating clj->js"
+  ([^js node keyframes options]
+   (animate node keyframes options nil))
+  ([^js node keyframes options callbacks]
+   (doto (.animate node (clj->js keyframes) (clj->js options))
+     (add-animation-callbacks callbacks))))
+
+(deftype PreparedAnimation [keyframes options]
+  cljs.core/IFn
+  (-invoke [this node]
+    (.animate node keyframes options))
+  (-invoke [this node callbacks]
+    (doto (.animate node keyframes options)
+      (add-animation-callbacks callbacks))))
+
+;; JS doesn't allow "prepping" an animation without a node reference
+;; I prefer an API that lets me def an animation and then apply it to a node on demand
+(defn prepare-animation [keyframes options]
+  (->PreparedAnimation (clj->js keyframes) (clj->js options)))

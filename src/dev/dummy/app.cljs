@@ -3,25 +3,27 @@
     [shadow.grove :as sg :refer (<< defc css)]
     [shadow.arborist.interpreted]))
 
+(def dialog-in
+  (sg/prepare-animation
+    [{:opacity "0"
+      :transform "scale(0.9)"}
+     {:opacity "1"
+      :transform "scale(1) translateX(0)"}]
+    1000))
+
+(def dialog-out
+  (sg/prepare-animation
+    {:opacity "0" :transform "scale(0.9)"}
+    1000))
+
 (defc ui-dialog []
   (bind node-ref (sg/ref))
 
   (event ::out! [env ev e origin]
-    (-> @node-ref
-        (.animate
-          #js {:opacity "0" :transform "scale(0.9)"}
-          1000)
-        (.-finished)
-        (.then #(sg/dispatch-up! env {:e ::close!}))))
+    (dialog-out @node-ref {:on-finish #(sg/dispatch-up! env {:e ::close!})}))
 
   (effect :mount [_]
-    (.animate @node-ref
-      (clj->js
-        [{:opacity "0"
-          :transform "scale(0.9)"}
-         {:opacity "1"
-          :transform "scale(1) translateX(0)"}])
-      1000))
+    (dialog-in @node-ref))
 
   (render
     (sg/portal
