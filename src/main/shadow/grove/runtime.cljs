@@ -1,4 +1,5 @@
-(ns shadow.grove.runtime)
+(ns shadow.grove.runtime
+  (:require [goog.async.nextTick]))
 
 (defonce known-runtimes-ref (atom {}))
 
@@ -14,10 +15,7 @@
 (defonce ticker (js/Promise.resolve nil))
 
 (defn next-tick [callback]
-  (.then ticker callback))
+  (js/goog.async.nextTick callback))
 
-;; better name,
-;; next-tick is misleading, since all microtasks complete before frame starts
-;; even if scheduled by other microtask
 (defn microtask [callback]
   (.then ticker callback))
