@@ -16,6 +16,11 @@
     {:opacity "0" :transform "scale(0.9)"}
     1000))
 
+(def shake
+  (sg/prepare-animation
+    {:transform ["translateX(0)" "translateX(-5px)" "translateX(5px)" "translateX(0)"]}
+    250))
+
 (defc ui-dialog []
   (bind node-ref (sg/ref))
 
@@ -68,14 +73,26 @@
 
   (bind test (sg/watch test-ref))
 
+  (bind num-ref (sg/ref))
+
+  ;; triggers when `test` or `num-ref` change
+  ;; `num-ref` never changes, so actually only `test`
+  ;; doing this in effect to ensure it happens after render
+  (effect :auto [_]
+    (when (pos? test)
+      (shake @num-ref)))
+
   (render
-    (<< [:div
+    (<< [:button
          {:class (css :p-4 :text-lg :border)
           :on-click ::show!}
-         "click me"]
+         "click me to open dialog"]
 
-        [:div {:on-click ::inc!
-               :data-test (zero? (mod test 3))} "test-inc: " test " - " (mod test 3)]
+        [:div {:style/margin-top "10px"}
+
+         [:button {:on-click ::inc! :data-test (zero? (mod test 3))} "click me to inc"]
+         [:div {:style/padding "10px"}
+          [:div {:dom/ref num-ref} test " - " (mod test 3)]]]
 
         some-hiccup
 

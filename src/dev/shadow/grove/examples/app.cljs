@@ -12,6 +12,7 @@
     [shadow.cljs.bootstrap.browser :as boot]
     [shadow.arborist :as sa]
     [shadow.arborist.fragments :as frag]
+    [shadow.arborist.interpreted]
     [shadow.grove :as sg :refer (<< defc css)]
     [shadow.grove.events :as ev]
     [shadow.grove.transit :as transit]
@@ -50,30 +51,29 @@
   (bind example-div
     (sg/ref))
 
-  (hook
-    (sg/effect [example-ns]
-      (fn [env]
-        (when example-ns
-          (let [example-fn (js/goog.getObjectByName (comp/munge (str example-ns "/example")))
-                init-fn (js/goog.getObjectByName (comp/munge (str example-ns "/init")))]
+  (effect example-ns
+    [env]
+    (when example-ns
+      (let [example-fn (js/goog.getObjectByName (comp/munge (str example-ns "/example")))
+            init-fn (js/goog.getObjectByName (comp/munge (str example-ns "/init")))]
 
-            (cond
-              ;; full custom render
-              (and init-fn (fn? init-fn))
-              (do (init-fn) ;; expected to mount to #root el
-                  (fn example-cleanup []
-                    ;; FIXME: only expects sg/render to render into div
-                    (sg/unmount-root @example-div)))
+        (cond
+          ;; full custom render
+          (and init-fn (fn? init-fn))
+          (do (init-fn) ;; expected to mount to #root el
+              (fn example-cleanup []
+                ;; FIXME: only expects sg/render to render into div
+                (sg/unmount-root @example-div)))
 
-              ;; simple example without any schema or custom env
-              (and example-fn (fn? example-fn))
-              (let [rt-ref (sg/prepare {} (atom {}) ::example)]
-                (sg/render rt-ref @example-div (example-fn))
-                (fn example-cleanup []
-                  (sg/unmount-root @example-div)))
+          ;; simple example without any schema or custom env
+          (and example-fn (fn? example-fn))
+          (let [rt-ref (sg/prepare {} (atom {}) ::example)]
+            (sg/render rt-ref @example-div (example-fn))
+            (fn example-cleanup []
+              (sg/unmount-root @example-div)))
 
-              :else
-              (js/console.log "TBD, no example or render?")))))))
+          :else
+          (js/console.log "TBD, no example or render?")))))
 
   (render
     (<< [:div {:class (css :inset-0 :fixed :flex :flex-col)}
@@ -196,17 +196,17 @@
   (fn [env {:keys [formatted-source ns]}]
 
 
-    (let [{:keys [outputs] :as result}
+    (let [{:keys [chunks] :as result}
           (-> env/css-base
               (cb/index-source (get-in env [:db ::m/example-code]))
               (cb/generate {:example {:include ['*]}}))
 
           css
-          (->> outputs
+          (->> (vals chunks)
                (map :css)
                (str/join "\n"))]
 
-      (doseq [{:keys [warnings]} outputs
+      (doseq [{:keys [warnings]} chunks
               warn warnings]
         (js/console.warn "CSS" (name (:warning-type warn)) (:alias warn) warn))
 

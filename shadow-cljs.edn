@@ -8,7 +8,7 @@
   "../shadow-css/src/main"]
 
  :version
- "2.26.5"
+ "2.27.4"
 
  :jvm-opts
  ["-XX:-OmitStackTraceInFastThrow"]
@@ -75,7 +75,9 @@
              shadow.grove.keyboard
              shadow.grove.local
              shadow.grove.css-fx
-             shadow.grove.ui.testing]
+             shadow.arborist.interpreted
+             ;; shadow.grove.ui.testing
+             ]
    :compiler-options {:output-feature-set :es-next}
    :macros []}
 
@@ -89,7 +91,7 @@
    :compiler-options
    {:optimizations :simple
     :output-wrapper false
-    :output-feature-set :es6}
+    :output-feature-set :es-next}
 
    :js-options
    {:js-package-dirs ["packages/examples/node_modules"]}}
