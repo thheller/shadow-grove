@@ -54,8 +54,22 @@
    (impl/slot-query nil query config)))
 
 (defn db-read
-  [read-fn]
-  (impl/slot-db-read read-fn))
+  [what]
+  (cond
+    (fn? what)
+    (impl/slot-db-read what)
+
+    (db/ident? what)
+    (impl/slot-db-read (fn [env db] (get db what)))
+
+    (keyword? what)
+    (impl/slot-db-read (fn [env db] (get db what)))
+
+    (vector? what)
+    (impl/slot-db-read (fn [env db] (get-in db what)))
+
+    :else
+    (throw (ex-info "unrecognized db-read argument" {:what what}))))
 
 (defn use-state
   ([]
