@@ -372,18 +372,21 @@
           )))
 
   (invalidate-slot! [this idx]
-    ;; (js/console.log "invalidate-slot!" idx current-idx (.-component-name config) this)
+    (when-not destroyed?
+      ;; (js/console.log "invalidate-slot!" idx current-idx (.-component-name config) this)
 
-    (set! dirty-slots (bit-set dirty-slots idx))
+      (set! dirty-slots (bit-set dirty-slots idx))
 
-    ;; don't set higher when currently at lower index, would otherwise skip work
-    (set! current-idx (js/Math.min idx current-idx))
+      ;; don't set higher when currently at lower index, would otherwise skip work
+      (set! current-idx (js/Math.min idx current-idx))
 
-    ;; always need to resume so the invalidated slots can do work
-    ;; could check if actually suspended but no need
-    (set! suspended? false)
+      ;; always need to resume so the invalidated slots can do work
+      ;; could check if actually suspended but no need
+      (set! suspended? false)
 
-    (.schedule! this ::slot-invalidate!))
+      (.schedule! this ::slot-invalidate!))
+
+    js/undefined)
 
   (mark-slots-dirty! [this dirty-bits]
     (set! dirty-slots (bit-or dirty-slots dirty-bits))

@@ -19,6 +19,7 @@
     [shadow.arborist.attributes :as a]
     [shadow.grove.db :as db]
     [shadow.grove.impl :as impl]
+    [shadow.grove.operator :as op]
     [shadow.css] ;; used in macro ns
     ))
 
@@ -111,16 +112,16 @@
 
    (watch the-atom [:foo])
    (watch the-atom (fn [old new] ...))"
-  ([the-atom]
-   (watch the-atom identity))
-  ([the-atom path-or-fn]
+  ([watchable]
+   (watch watchable identity))
+  ([watchable path-or-fn]
    ;; more relaxed check than (instance? Atom the-atom), to support custom types
    ;; impl calls add-watch/remove-watch and does a deref
-   {:pre [(satisfies? IWatchable the-atom)
-          (satisfies? IDeref the-atom)]}
+   {:pre [(satisfies? IWatchable watchable)
+          (satisfies? IDeref watchable)]}
    (if (vector? path-or-fn)
-     (comp/atom-watch the-atom (fn [old new] (get-in new path-or-fn)))
-     (comp/atom-watch the-atom path-or-fn))))
+     (comp/atom-watch watchable (fn [old new] (get-in new path-or-fn)))
+     (comp/atom-watch watchable path-or-fn))))
 
 (defn env-watch
   ([key-to-atom]
@@ -351,6 +352,10 @@
 
 (goog-define TRACE false)
 
+(defn perform-gc! [rt-ref]
+  (op/perform-gc! rt-ref)
+  )
+
 (defn prepare
   ([data-ref runtime-id]
    (prepare {} data-ref runtime-id))
@@ -364,7 +369,12 @@
          (atom nil)
 
          active-queries-map
-         (js/Map.)]
+         (js/Map.)
+
+         gc-interval
+         (js/setInterval
+           #(perform-gc! rt-ref)
+           60000)]
 
      (reset! rt-ref
        (assoc init
@@ -372,6 +382,7 @@
          ::rt/scheduler root-scheduler
          ::rt/runtime-id runtime-id
          ::rt/data-ref data-ref
+         ::rt/gc-interval gc-interval
          ::rt/event-config {}
          ::rt/fx-config {}
          ::rt/active-queries-map active-queries-map
