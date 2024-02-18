@@ -91,7 +91,7 @@
   (-call [this call-id call-args]
     (let [callback (get call-handlers call-id)]
       (when-not callback
-        (throw (ex-info "operator does not handle call" {:op this :call-id call-id :call-args call-args})))
+        (throw (ex-info (str "operator does not handle call " call-id) {:op this :call-id call-id :call-args call-args})))
       
       (when DEBUG
         (.push log [:call call-id call-args]))
@@ -338,13 +338,24 @@
 
 ;; things to be called at runtime
 
+(defn get-other
+  ([origin-op op-def]
+   (get-other origin-op op-def ::default))
+  ([^Operator origin-op op-def op-val]
+   ;; FIXME: abstraction leak, others should only get LinkedOperators
+   ;; but this op is specifically for creating an unlinked one?
+   ;; should there be a UnlinkedOperator guard?
+   ;; probably fine to just return this as is
+   (get-or-create (.-rt-ref origin-op) op-def op-val)
+   ))
+
 (defn link-other
   ([origin-op op-def]
    (link-other origin-op op-def ::default))
   ([^Operator origin-op op-def op-val]
    {:pre [(operator? origin-op)
           (operator-definition? op-def)]}
-   (let [^Operator other-op (get-or-create (.-rt-ref origin-op) op-def op-val)]
+   (let [^Operator other-op (get-other origin-op op-def op-val)]
 
      ;; need to remember who we are linked to, so we can clean up later
      (.add-dependent other-op origin-op)
