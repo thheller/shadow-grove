@@ -75,7 +75,7 @@
       (fn [ev]
         (js/console.log "bar got event" op ev)
         (swap! op update :count inc)
-        (op/call foo-op :foo-event! {:from-bar "true"})
+        (foo-op :foo-event! {:from-bar "true"})
         ))
 
     (op/init-state op {:hello "world" :count 0})
@@ -122,8 +122,8 @@
           :on-click ::show!}
          "click me to open dialog"]
 
-        [:div {:on-click #(op/call bar1-op :bar-event!)} "bar1: " (pr-str bar1)]
-        [:div {:on-click #(op/call bar2-op :bar-event!)} "bar2: " (pr-str bar2)]
+        [:div {:on-click #(bar1-op :bar-event!)} "bar1: " (pr-str bar1)]
+        [:div {:on-click #(bar2-op :bar-event!)} "bar2: " (pr-str bar2)]
 
         [:div {:style/margin-top "10px"}
 
