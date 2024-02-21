@@ -696,7 +696,7 @@
 (defn get-component-name [^ManagedComponent comp]
   (. ^clj (. comp -config) -component-name))
 
-(defn ^not-native claim-bind! [claim-id]
+(defn claim-bind! [claim-id]
   (when-not *component*
     (throw (ex-info "can only be used in component bind" {})))
 
