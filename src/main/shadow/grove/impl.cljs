@@ -354,9 +354,6 @@
   (let [ref
         (comp/claim-bind! ::slot-db-read)
 
-        invalidate!
-        (comp/get-invalidate-fn!)
-
         rt-ref
         (::rt/runtime-ref comp/*env*)
 
@@ -374,7 +371,7 @@
       (let [query-id (rt/next-id)]
         (swap! ref assoc :query-id query-id)
 
-        (.set active-queries-map query-id invalidate!)))
+        (.set active-queries-map query-id #(comp/invalidate! ref))))
 
     ;; perform query
     (let [db

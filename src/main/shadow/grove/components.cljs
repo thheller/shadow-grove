@@ -15,6 +15,9 @@
   DEBUG
   (js/goog.define "shadow.grove.components.DEBUG" js/goog.DEBUG))
 
+(defprotocol IInvalidateSlot
+  (invalidate! [ref]))
+
 ;; this file is an exercise in writing the least idiomatic clojure code possible
 ;; shield your eyes and beware!
 
@@ -120,6 +123,43 @@
       idx
       (recur (bit-shift-right search 1) (inc idx)))))
 
+
+(deftype ComponentSlotRef
+  [component
+   idx
+   ^:mutable state]
+
+  IInvalidateSlot
+  (invalidate! [this]
+    (.invalidate-slot! component idx))
+
+  cljs.core/IDeref
+  (-deref [this]
+    state)
+
+  cljs.core/IReset
+  (-reset! [this nval]
+    (let [oval state]
+      (when (not= oval nval)
+        (set! state nval)
+
+        ;; don't invalidate when slot-fn itself is modifying ref
+        (when-not (identical? *component* component)
+          (when-not (identical? idx *slot-idx*)
+            (invalidate! this)))
+        ))
+
+    nval)
+
+  cljs.core/ISwap
+  (-swap! [this f]
+    (-reset! this (f state)))
+  (-swap! [this f a]
+    (-reset! this (f state a)))
+  (-swap! [this f a b]
+    (-reset! this (f state a b)))
+  (-swap! [this f a b xs]
+    (-reset! this (apply f state a b xs))))
 
 
 (defclass ManagedComponent
@@ -356,17 +396,7 @@
 
   (get-slot-ref [this idx]
     (or (get slot-refs idx)
-        ;; FIXME: maybe custom atom type that links back to component?
-        (let [ref (atom nil)]
-          ;; watch atom so that any update will cause the slot to run again
-          ;; and potentially re-render the component
-          (add-watch ref this
-            (fn [_ _ old new]
-              ;; only actually invalidate when the slot isn't currently running
-              (when (not= *slot-idx* idx)
-                (when (not= old new)
-                  (.invalidate-slot! this idx)
-                  ))))
+        (let [ref (ComponentSlotRef. this idx nil)]
           (set! slot-refs (assoc slot-refs idx ref))
           ref
           )))
@@ -666,7 +696,7 @@
 (defn get-component-name [^ManagedComponent comp]
   (. ^clj (. comp -config) -component-name))
 
-(defn claim-bind! [claim-id]
+(defn ^not-native claim-bind! [claim-id]
   (when-not *component*
     (throw (ex-info "can only be used in component bind" {})))
 
@@ -675,11 +705,6 @@
     (throw (ex-info "slot already claimed" {:idx *slot-idx* :claimed *claimed* :attempt claim-id})))
 
   (.get-slot-ref *component* *slot-idx*))
-
-(defn get-invalidate-fn! []
-  (let [component *component*
-        slot-idx *slot-idx*]
-    #(.invalidate-slot! component slot-idx)))
 
 (defn set-cleanup! [ref callback]
   (when-not *component*
@@ -718,9 +743,6 @@
   (let [ref
         (claim-bind! ::env-watch)
 
-        invalidate!
-        (get-invalidate-fn!)
-
         {prev-atom :the-atom :as state}
         @ref
 
@@ -746,7 +768,7 @@
                 nval (get-in new path-in-atom default)]
 
             (when (not= oval nval)
-              (invalidate!)))))
+              (invalidate! ref)))))
 
       (swap! ref assoc :the-atom the-atom))
 
@@ -760,9 +782,6 @@
 (defn atom-watch [the-atom access-fn]
   (let [ref
         (claim-bind! ::atom-watch)
-
-        invalidate!
-        (get-invalidate-fn!)
 
         {prev-atom :the-atom :as state}
         @ref]
@@ -783,7 +802,7 @@
                 nval (access-fn new)]
 
             (when (not= oval nval)
-              (invalidate!)))))
+              (invalidate! ref)))))
 
       (swap! ref assoc :the-atom the-atom))
 

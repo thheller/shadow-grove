@@ -284,8 +284,7 @@
   ([op action action-data]
    {:pre [(operator? op)
           (keyword? action)]}
-   (let [ref (comp/claim-bind! ::use-call)
-         invalidate! (comp/get-invalidate-fn!)]
+   (let [ref (comp/claim-bind! ::use-call)]
 
      (when-not @ref
        (comp/set-cleanup! ref
@@ -295,7 +294,7 @@
        (add-watch op ref
          (fn [_ _ _ _]
            ;; schedules up to eventually run the call again
-           (invalidate!)))
+           (comp/invalidate! ref)))
 
        (reset! ref {:op op :ref ref}))
 
