@@ -1,5 +1,8 @@
 # Why Operators?
 
+
+**I no longer believe these are a good idea. Basically all they create is mutable objects all over the place. While that may have its uses its certainly not very clojure-ish.**
+
 Everything here is a rough shape and will most certainly change, or be completely removed without replacement. **Beware, while I figure this out.**
 
 This is about ideas that have been bouncing around in my head for many years, with never enough time to actually think about them. Trying to write up all my notes into some kind of coherent story, and actually write some code.
@@ -70,13 +73,17 @@ Everything can refer to any Operator, but when accessed with the same parameters
 
 ### Goal: Lifecycle
 
-An Operator is initialized **once** when first referenced, then remains alive while something references it. It may respond to events while alive. Once the last reference is removed it may be "garbage collected", after calling its cleanup method. Lifecycle doesn't mean they are always long-lived, a short term reference may be fine.
+An Operator is initialized **once** when first referenced, then remains alive while something references it. It may respond to events while alive. Once the last reference is removed it may be "garbage collected". Lifecycle doesn't mean they are always long-lived, a short term reference may be fine.
+
+
+**Never actually implemented the following.**
 
 Optionally an Operator may want to stay alive for a certain amount of time, even if nothing is referencing it. As sort of cache, it may want to stay around for 5 minutes. A user may revisit the product previously looked at, no need to load everything all over again. Only because the UI temporarily lost interest doesn't mean we should throw everything away immediately
 
 Optionally they may also do kind of suspend/resume? Store their state in localStorage or so, and pick it up again when "revived".
 
 ### Goal: Reference Tracking
+
 
 Sort of required for the above, but I think it could also be useful for dev tooling. Knowing what references what and visualizing that in some way.
 
@@ -92,11 +99,15 @@ Handlers may return promises, letting others wait for their completion. Async se
 
 ### Goal: Operator Linking
 
+**Ended up using WeakRef, with no actualized linking, since otherwise cleaning up is a mess. Circular relationships will be common, and if things "link" and then don't properly "unlink" themselves things get messy quickly.**
+
 One operator may depend on other operators. An operator cannot be cleaned up while others depend on it. There may need to be a thing like weak references though.
 
 Not yet sure if cycling linking is absolutely required, but seems useful. Easy way to get into endless loops though.
 
 ### Goal: DB Linking
+
+**Removed: Can't have the same state living in two places. The extra `add-watch` this required ends up eating all the performance. With 10000 rows in the benchmark this means 10000 watches that execute on every update.**
 
 Operators could act as "lenses/cursors", where the data they manage is linked to a place in a shared "app-db" atom. This could act as a bridge, since I'm not sure Operators are useful for everything and shared app-db also has its perks.
 
@@ -186,16 +197,16 @@ Operators themselves implement `ISwap/IReset`, so you may modify their "public" 
 
 When others `@foo-op` they get whatever the current value is.
 
-#### Linking to Others
+#### Getting Others
 
-Commonly operators may need to reference data from others. They can link together, and deref or watch them. `link-other` doesn't return the actual operator, but a `LinkedOperator` instance. This is meant to limit the things one operator can do to another. I want to restrict this, so that one operator cannot just `swap!` anothers data.
+Commonly operators may need to reference data from others.
 
 ```clojure
 (defn &bar [op val]
   ...)
 
 (defn &foo [op val]
-  (let [bar-op (op/link-other op &bar)
+  (let [bar-op (op/get-other op &bar)
         bar @bar-op]
     
     ;; deref at any point, or watch
@@ -208,7 +219,7 @@ Commonly operators may need to reference data from others. They can link togethe
 
 #### Actions/Events
 
-Others may trigger actions in the operator, such as `(op/call foo-op :some-action :with "arguments")`. A callback to decide what to do can be added via `op/handle`.
+Others may trigger actions in the operator, such as `(foo-op :some-action :with "arguments")`. A callback to decide what to do can be added via `op/handle`.
 
 ```clojure
 (defn &foo [op val]
@@ -219,17 +230,6 @@ Others may trigger actions in the operator, such as `(op/call foo-op :some-actio
 ```
 
 The caller gets whatever the callback returns.
-
-#### DB Linking
-
-```clojure
-(defn &foo [op val]
-  (op/db-link op [:foo val]))
-```
-
-The shared app-db atom can still be useful. Probably not all data needs to live inside operators. An operator can assume management of a specific place in the DB, meaning that its value is directly linked to that place. Changing one will also change the other. Of course the idea is that only the operator will change it, but this is useful as a bridge if things still want to work on app-db instead.
-
-It is also useful for hot-reload purposes, since otherwise hot-reload loses all operator state.
 
 #### Local State
 
@@ -254,8 +254,6 @@ Could be used as an indicator that the operator is maybe still loading some data
 
 ```clojure
 (defn &product [op id]
-  (op/db-link op [:product val])
-
   ;; a util method could handle the :loading? of course
   (op/set-attr op :loading? true)
   (js-await [data (fetch-from-server {:product id})]
@@ -270,7 +268,7 @@ Could be used to expose other non-data things, that shouldn't be mixed with the 
 
 ```clojure
 (defn &foo [op id]
-  (let [bar (op/link-other op &bar)]
+  (let [bar (op/get-other op &bar)]
     (op/set-attr op :bar bar))
   ...)
 ```
