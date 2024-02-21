@@ -19,7 +19,6 @@
     [shadow.arborist.attributes :as a]
     [shadow.grove.db :as db]
     [shadow.grove.impl :as impl]
-    [shadow.grove.operator :as op]
     [shadow.css] ;; used in macro ns
     ))
 
@@ -352,10 +351,6 @@
 
 (goog-define TRACE false)
 
-(defn perform-gc! [rt-ref]
-  (op/perform-gc! rt-ref)
-  )
-
 (defn prepare
   ([data-ref runtime-id]
    (prepare {} data-ref runtime-id))
@@ -369,12 +364,7 @@
          (atom nil)
 
          active-queries-map
-         (js/Map.)
-
-         gc-interval
-         (js/setInterval
-           #(perform-gc! rt-ref)
-           60000)]
+         (js/Map.)]
 
      (reset! rt-ref
        (assoc init
@@ -382,7 +372,6 @@
          ::rt/scheduler root-scheduler
          ::rt/runtime-id runtime-id
          ::rt/data-ref data-ref
-         ::rt/gc-interval gc-interval
          ::rt/event-config {}
          ::rt/fx-config {}
          ::rt/active-queries-map active-queries-map

@@ -56,7 +56,7 @@
       [:li {:dom/key x} x])]])
 
 (defn &bar [op id]
-  (let [foo-op (op/link-other op ops/&foo {})]
+  (let [foo-op (op/get-other op ops/&foo {})]
 
     (op/set-attr op :foo foo-op)
 

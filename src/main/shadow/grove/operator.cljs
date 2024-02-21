@@ -2,7 +2,6 @@
   (:refer-clojure :exclude (use))
   (:require
     [shadow.grove.components :as comp]
-    [shadow.grove.impl :as impl]
     [shadow.grove.runtime :as rt]
     ))
 
@@ -14,10 +13,38 @@
 (def ^:dynamic *current* nil)
 
 (defonce ops-ref (atom {}))
-(defonce ops-set (js/Set.))
 
 (defprotocol IOperate
   (-op-key [this]))
+
+(declare Operator)
+
+(defn operator? [x]
+  (instance? Operator x))
+
+(defn perform-gc! []
+  (swap! ops-ref
+    (fn [state]
+      (reduce-kv
+        (fn [m op-def instances]
+          (assoc m
+            op-def
+            (reduce-kv
+              (fn [instances op-key weak-ref]
+                (if (.deref weak-ref)
+                  instances
+                  (dissoc instances op-key)))
+              instances
+              instances)))
+        state
+        state))))
+
+;; super low priority
+;; only cleaning up dead weakrefs, where the op has been gc'd
+;; will accumulate a lot of {op-def {op-key dead-reference}} entries otherwise
+;; which is probably never an issue, but also kinda waste bunch of a potential large op-keys
+(defonce gc-interval
+  (js/setInterval #(perform-gc!) 60000))
 
 (deftype Operator
   [op-def
@@ -26,22 +53,10 @@
    ^:mutable ^not-native attrs
    ^:mutable state
    ^:mutable call-handlers
-   ;; time for GC purposes
-   ^:mutable last-action
    ;; gc action
    ^:mutable cleanup
-   ;; for db-link
-   ^:mutable link-path
    ;; watch listeners
-   ^:mutable listeners
-   ;; other operators this is linked to
-   linked
-   ;; others may have a live reference to this
-   ;; cannot clean until they remove themselves
-   dependents
-
-   ;; DEBUG-only array, to log what happens in the life of an operator
-   log]
+   ^:mutable listeners]
 
   IOperate
   (-op-key [this]
@@ -66,30 +81,11 @@
     (let [oval state]
       (set! state nval)
 
-      (when DEBUG (.push log [:changed oval state]))
-
       ;; don't notify about updates when in internal stuff, e.g. init
       (when-not (identical? this *current*)
         ;; FIXME: should batch these together intelligently
         ;; changes may trigger other changes
-        (.trigger-change-listeners! this oval nval))
-
-      (when-not (nil? link-path)
-        (let [data-ref (::rt/data-ref @rt-ref)
-              sentinel (js/Object.)
-              prev-val (get-in @data-ref link-path sentinel)
-              db-key (first link-path)]
-
-          (binding [*current* this]
-            (swap! data-ref assoc-in link-path nval))
-
-          (rt/microtask
-            (fn []
-              ;; added or updated
-              (if (identical? prev-val sentinel)
-                (impl/invalidate-keys! @rt-ref #{db-key} #{} #{})
-                (impl/invalidate-keys! @rt-ref #{} #{} #{db-key})
-                ))))))
+        (.trigger-change-listeners! this oval nval)))
 
     ;; reset! supposed to return new value
     nval)
@@ -97,23 +93,18 @@
   cljs.core/IFn
   (-invoke [this call-id]
     (let [callback (.get-callback this call-id)]
-      (when DEBUG (.push log [:call call-id]))
       (callback)))
   (-invoke [this call-id a1]
     (let [callback (.get-callback this call-id)]
-      (when DEBUG (.push log [:call call-id a1]))
       (callback a1)))
   (-invoke [this call-id a1 a2]
     (let [callback (.get-callback this call-id)]
-      (when DEBUG (.push log [:call call-id a1 a2]))
       (callback a1 a2)))
   (-invoke [this call-id a1 a2 a3]
     (let [callback (.get-callback this call-id)]
-      (when DEBUG (.push log [:call call-id a1 a2 a3]))
       (callback a1 a2 a3)))
   (-invoke [this call-id a1 a2 a3 a4]
     (let [callback (.get-callback this call-id)]
-      (when DEBUG (.push log [:call call-id a1 a2 a3 a4]))
       (callback a1 a2 a3 a4)))
   ;; FIXME: add more
 
@@ -135,13 +126,10 @@
       (fn [old-val new-val]
         (f this key old-val new-val))))
   (-remove-watch [this key]
-    (.remove-change-listener this key))
+    (.remove-change-listener this key)
+    key)
 
   Object
-  (touch [this]
-    (set! last-action (js/Date.now))
-    this)
-
   (get-callback [this call-id]
     (let [callback (get call-handlers call-id)]
       (when-not callback
@@ -149,9 +137,7 @@
       callback))
 
   (set-attr [this attr val]
-    (when DEBUG (.push log [:set attr val]))
-
-    (set! attrs (assoc attrs attr val))
+    (set! attrs (-assoc attrs attr val))
     this)
 
   (trigger-change-listeners! [this oval nval]
@@ -165,89 +151,24 @@
 
     this)
 
-  (db-link [this path]
-    (when link-path
-      (throw (ex-info "can only be linked once" {:path path :link-path link-path :op this})))
-
-    (let [data-ref (::rt/data-ref @rt-ref)]
-
-      ;; get initial state from db
-      (set! state (get-in @data-ref path))
-
-      (set! link-path path)
-
-      (when DEBUG (.push log [:db-link path state]))
-
-      (add-watch data-ref [this path]
-        (fn [_ _ old new]
-          ;; don't trigger if we did that update
-          (when-not (identical? *current* this)
-            (let [oldv state
-                  newv (get-in new path)]
-              (when (not= oldv newv)
-                (when DEBUG (.push log [:db-change oldv newv]))
-
-                (set! state newv)
-                (.trigger-change-listeners! this oldv newv))
-              )))))
-
-    this)
-
   (add-call-handler [this key callback]
-    (set! call-handlers (assoc call-handlers key callback))
+    (set! call-handlers (-assoc call-handlers key callback))
     this)
 
   (add-change-listener [this key callback]
-    (set! listeners (assoc listeners key callback))
+    (set! listeners (-assoc listeners key callback))
     this)
 
   (remove-change-listener [this key]
-    (set! listeners (dissoc listeners key))
-    this)
-
-  (add-dependent [this other]
-    (when DEBUG
-      (.push log [:add-dependent other]))
-    (.add dependents other)
-    this)
-
-  (remove-dependent [this other]
-    (when DEBUG
-      (.push log [:remove-dependent other]))
-    (.delete dependents other)
-
-    ;; FIXME: auto cleanup once last dependent is removed?
-    this)
-
-  (add-linked [this other]
-    (when DEBUG
-      (.push log [:add-linked other]))
-
-    (.add linked other)
-    this)
-
-  (remove-linked [this other]
-    (when DEBUG
-      (.push log [:remove-linked other]))
-
-    (.delete linked other)
+    (set! listeners (-dissoc listeners key))
     this)
 
   (set-cleanup! [this callback]
     (set! cleanup callback)
     this))
 
-(defn operator? [x]
-  (instance? Operator x))
-
 (defn op-key [x]
   (-op-key x))
-
-(defn perform-gc! [rt-ref]
-  ;; FIXME: actually clean up unused operators
-  ;; as in operators that have no dependents
-  ;; (js/console.log "ops gc" @ops-ref)
-  )
 
 (defn operator-definition? [x]
   (or (fn? x)
@@ -256,12 +177,23 @@
       ;; a spec/schema to validate the state?
       (and (map? x) (fn? (:init x)))))
 
+;; this must not be used externally
+;; creating an operator must link it to something
+;; otherwise nothing will ever clean it up until GC is implemented
 (defn get-or-create [rt-ref op-def op-key]
   {:pre [rt-ref
          (operator-definition? op-def)]}
-  (let [op-path [op-def op-key]]
+  (let [op-path
+        [op-def op-key]
 
-    (or (get-in @ops-ref op-path)
+        weak-ref
+        (get-in @ops-ref op-path)
+
+        op
+        (when weak-ref
+          (.deref weak-ref))]
+
+    (or op
         (let [^function init-fn
               (if (fn? op-def)
                 op-def
@@ -274,28 +206,19 @@
                 rt-ref
                 {} ;; attrs
                 nil ;; init state, should be nil
-                nil ;; action-handlers
-                (js/Date.now) ;; last-action
+                {} ;; action-handlers
                 nil ;; cleanup
-                nil ;; link-path
-                nil ;; listeners
-                (js/Set.) ;; linked
-                (js/Set.) ;; dependents
-                (when DEBUG
-                  (js/Array.))
-                )]
+                {} ;; listeners
+                )
 
-          ;; immediately register, dunno about cyclic links yet, but they seem necessary
-          (swap! ops-ref assoc-in op-path new-op)
+              weak-ref
+              (js/WeakRef. new-op)]
+
+          ;; store as weak reference, so it can get cleaned up when no longer referenced
+          (swap! ops-ref assoc-in op-path weak-ref)
 
           (binding [*current* new-op]
             (init-fn new-op op-key))
-
-          ;; js/Set maintains insertion order, and we add this after the fact
-          ;; so that links established during init are added first
-          ;; so that at least as best effort operators with no dependents
-          ;; are listed after those with
-          (.add ops-set new-op)
 
           new-op
           ))))
@@ -307,18 +230,6 @@
     (when-not (identical? *current* op)
       (throw (ex-info "can only called in op/init!" {:op op :current *current*}))))
   js/undefined)
-
-;; for compatibility until I figure out if this is actually any better than the normalized db
-;; hard links the value of this operator to a place in the data-ref db
-;; reset!-ing the op will also set the value in the db
-;; if the db changes from elsewhere the op value is updated accordingly
-(defn db-link [^Operator op path]
-  {:pre [(instance? Operator op)
-         (vector? path)]}
-  (init-only! op)
-  (.db-link op path)
-  (.touch op)
-  op)
 
 (defn cleanup! [^Operator op callback]
   {:pre [(operator? op)
@@ -339,37 +250,13 @@
   (.set-attr op attr val))
 
 ;; things to be called at runtime
-
 (defn get-other
   ([origin-op op-def]
    (get-other origin-op op-def ::default))
   ([^Operator origin-op op-def op-key]
-   (get-or-create (.-rt-ref origin-op) op-def op-key)))
-
-(defn link-other
-  ([origin-op op-def]
-   (link-other origin-op op-def ::default))
-  ([^Operator origin-op op-def op-key]
    {:pre [(operator? origin-op)
           (operator-definition? op-def)]}
-   (let [^Operator other-op (get-other origin-op op-def op-key)]
-
-     ;; need to remember who we are linked to, so we can clean up later
-     (.add-dependent other-op origin-op)
-     (.add-linked origin-op other-op)
-
-     (.touch origin-op)
-     (.touch other-op)
-
-     other-op)))
-
-(defn unlink-other [^Operator origin-op ^Operator other-op]
-  (.touch origin-op)
-  (.touch other-op)
-
-  (.remove-dependent other-op origin-op)
-  (.remove-linked origin-op other-op)
-  origin-op)
+   (get-or-create (.-rt-ref origin-op) op-def op-key)))
 
 (defn handle [^Operator op action-id callback]
   {:pre [(operator? op)
@@ -407,27 +294,14 @@
      (when-not (and (identical? op-def prev-op-def)
                     (= op-key prev-op-key))
 
-       (when prev-op
-         (.remove-dependent prev-op ref)
-         (.touch prev-op))
-
-       (comp/set-cleanup! ref
-         (fn [{:keys [^Operator op]}]
-           (.remove-dependent op ref)
-           (.touch op)
-           ))
-
        (let [{::rt/keys [runtime-ref]} comp/*env*
              ^Operator op (get-or-create runtime-ref op-def op-key)]
-
-         (.add-dependent op ref)
-         (.touch op)
 
          (reset! ref {:updates 0 :op-def op-def :op-key op-key :op op})))
 
      (:op @ref))))
 
-(defn use-query
+(defn use-call
   "trigger a call to an operator, do that again if the operator changes
    useful for getting \"views\" of the operators data, without getting all of it
 
@@ -436,7 +310,7 @@
 
    exposes less data to the component, which may be desirable"
   ([op action]
-   (use-query op action {}))
+   (use-call op action {}))
   ([op action action-data]
    {:pre [(operator? op)
           (keyword? action)]}
