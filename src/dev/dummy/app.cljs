@@ -60,8 +60,6 @@
 
     (op/set-attr op :foo foo-op)
 
-    (op/db-link op [:bar id])
-
     (op/timeout op 1000
       (fn timeout-fn []
         (js/console.warn "one sec after bar init")
@@ -78,7 +76,7 @@
         (foo-op :foo-event! {:from-bar "true"})
         ))
 
-    (op/init-state op {:hello "world" :count 0})
+    (reset! op {:hello "world" :count 0})
     ))
 
 (defc ui-root []

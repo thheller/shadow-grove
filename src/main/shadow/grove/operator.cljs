@@ -53,9 +53,6 @@
    ^:mutable ^not-native attrs
    ^:mutable state
    ^:mutable call-handlers
-   ;; gc action
-   ^:mutable cleanup
-   ;; watch listeners
    ^:mutable listeners]
 
   IOperate
@@ -161,21 +158,13 @@
 
   (remove-change-listener [this key]
     (set! listeners (-dissoc listeners key))
-    this)
-
-  (set-cleanup! [this callback]
-    (set! cleanup callback)
     this))
 
 (defn op-key [x]
   (-op-key x))
 
 (defn operator-definition? [x]
-  (or (fn? x)
-      ;; FIXME: I think a map could be useful for extra stuff
-      ;; is it? could put a spec in there to valid the op-key?
-      ;; a spec/schema to validate the state?
-      (and (map? x) (fn? (:init x)))))
+  (fn? x))
 
 ;; this must not be used externally
 ;; creating an operator must link it to something
@@ -194,12 +183,7 @@
           (.deref weak-ref))]
 
     (or op
-        (let [^function init-fn
-              (if (fn? op-def)
-                op-def
-                (:init op-def))
-
-              new-op
+        (let [new-op
               (->Operator
                 op-def
                 op-key
@@ -207,7 +191,6 @@
                 {} ;; attrs
                 nil ;; init state, should be nil
                 {} ;; action-handlers
-                nil ;; cleanup
                 {} ;; listeners
                 )
 
@@ -218,7 +201,7 @@
           (swap! ops-ref assoc-in op-path weak-ref)
 
           (binding [*current* new-op]
-            (init-fn new-op op-key))
+            (op-def new-op op-key))
 
           new-op
           ))))
@@ -230,19 +213,6 @@
     (when-not (identical? *current* op)
       (throw (ex-info "can only called in op/init!" {:op op :current *current*}))))
   js/undefined)
-
-(defn cleanup! [^Operator op callback]
-  {:pre [(operator? op)
-         (fn? callback)]}
-  (init-only! op)
-  (.set-cleanup! op callback)
-  op)
-
-(defn init-state [^Operator op init-state]
-  (init-only! op)
-  (when (nil? @op)
-
-    (reset! op init-state)))
 
 (defn set-attr [^Operator op attr val]
   {:pre [(operator? op)
@@ -314,7 +284,8 @@
   ([op action action-data]
    {:pre [(operator? op)
           (keyword? action)]}
-   (let [ref (comp/claim-bind! ::use-call)]
+   (let [ref (comp/claim-bind! ::use-call)
+         invalidate! (comp/get-invalidate-fn!)]
 
      (when-not @ref
        (comp/set-cleanup! ref
@@ -324,7 +295,7 @@
        (add-watch op ref
          (fn [_ _ _ _]
            ;; schedules up to eventually run the call again
-           (swap! ref update :updates inc)))
+           (invalidate!)))
 
        (reset! ref {:op op :ref ref}))
 

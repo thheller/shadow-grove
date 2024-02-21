@@ -354,6 +354,9 @@
   (let [ref
         (comp/claim-bind! ::slot-db-read)
 
+        invalidate!
+        (comp/get-invalidate-fn!)
+
         rt-ref
         (::rt/runtime-ref comp/*env*)
 
@@ -371,13 +374,7 @@
       (let [query-id (rt/next-id)]
         (swap! ref assoc :query-id query-id)
 
-        (.set active-queries-map query-id
-          (fn []
-            ;; called by invalidate-keys! to signal that the keys read by a query where updated
-            ;; not actually performing query now, just triggering a component update by touching atom
-            (swap! ref assoc :pending? true)))))
-
-    (swap! ref assoc :pending? false)
+        (.set active-queries-map query-id invalidate!)))
 
     ;; perform query
     (let [db

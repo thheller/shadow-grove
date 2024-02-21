@@ -676,6 +676,11 @@
 
   (.get-slot-ref *component* *slot-idx*))
 
+(defn get-invalidate-fn! []
+  (let [component *component*
+        slot-idx *slot-idx*]
+    #(.invalidate-slot! component slot-idx)))
+
 (defn set-cleanup! [ref callback]
   (when-not *component*
     (throw (ex-info "can only be used in component bind" {})))
@@ -713,6 +718,9 @@
   (let [ref
         (claim-bind! ::env-watch)
 
+        invalidate!
+        (get-invalidate-fn!)
+
         {prev-atom :the-atom :as state}
         @ref
 
@@ -738,10 +746,7 @@
                 nval (get-in new path-in-atom default)]
 
             (when (not= oval nval)
-              ;; swap triggers component watch and invalidates
-              ;; on next run we only return the new value unless other args changed
-              ;; :value never actually used, just acts as invalidator
-              (swap! ref assoc :value nval)))))
+              (invalidate!)))))
 
       (swap! ref assoc :the-atom the-atom))
 
@@ -755,6 +760,9 @@
 (defn atom-watch [the-atom access-fn]
   (let [ref
         (claim-bind! ::atom-watch)
+
+        invalidate!
+        (get-invalidate-fn!)
 
         {prev-atom :the-atom :as state}
         @ref]
@@ -775,10 +783,7 @@
                 nval (access-fn new)]
 
             (when (not= oval nval)
-              ;; swap triggers component watch and invalidates
-              ;; on next run we only return the new value unless other args changed
-              ;; :value never actually used, just acts as invalidator
-              (swap! ref assoc :value nval)))))
+              (invalidate!)))))
 
       (swap! ref assoc :the-atom the-atom))
 
