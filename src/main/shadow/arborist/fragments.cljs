@@ -213,7 +213,12 @@
   (.remove node))
 
 (defn css-join [from-el from-attrs]
-  [from-el from-attrs])
+  (cond
+    (string? from-attrs)
+    [from-el from-attrs]
+
+    (vector? from-attrs)
+    (into [from-el] from-attrs)))
 
 ;; function used by fragment macro
 ;;
