@@ -214,11 +214,20 @@
 
 (defn css-join [from-el from-attrs]
   (cond
+    (nil? from-attrs)
+    from-el
+
     (string? from-attrs)
     [from-el from-attrs]
 
     (vector? from-attrs)
-    (into [from-el] from-attrs)))
+    (into [from-el] from-attrs)
+
+    (map? from-attrs)
+    (assoc from-attrs from-el true)
+
+    :else
+    (throw (ex-info "failed to join css class from element and attributes" {:from-el from-el :from-attrs from-attrs}))))
 
 ;; function used by fragment macro
 ;;
