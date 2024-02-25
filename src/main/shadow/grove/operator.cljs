@@ -105,16 +105,6 @@
       (callback a1 a2 a3 a4)))
   ;; FIXME: add more
 
-  cljs.core/ISwap
-  (-swap! [this f]
-    (-reset! this (f state)))
-  (-swap! [this f a]
-    (-reset! this (f state a)))
-  (-swap! [this f a b]
-    (-reset! this (f state a b)))
-  (-swap! [this f a b xs]
-    (-reset! this (apply f state a b xs)))
-
   cljs.core/IWatchable
   (-notify-watches [this oldval newval]
     (throw (ex-info "why is this here?" {})))
@@ -234,6 +224,20 @@
          (fn? callback)]}
   (.add-call-handler op action-id callback)
   op)
+
+(defn update!
+  ([^Operator op f]
+   (-reset! op (f @op)))
+  ([^Operator op f a]
+   (-reset! op (f @op a)))
+  ([^Operator op f a b]
+   (-reset! op (f @op a b)))
+  ([^Operator op f a b c]
+   (-reset! op (f @op a b c)))
+  ([^Operator op f a b c d]
+   (-reset! op (f @op a b c d)))
+  ([^Operator op f a b c d & more]
+   (-reset! op (apply f @op a b c d more))))
 
 (defonce timeouts-ref (atom {}))
 
