@@ -396,9 +396,6 @@
 
         (swap! ref assoc :read-keys new-keys)
 
-        (when (keyword-identical? result :db/loading)
-          (set! comp/*ready* false))
-
         result
         ))))
 
@@ -417,8 +414,10 @@
         ;; avoid modifying result since that messes with identical? checks
         (cond
           (keyword-identical? result :db/loading)
-          (do (set! comp/*ready* false)
-              (:default config {}))
+          (if (false? (:suspend config))
+            :db/loading
+            (do (set! comp/*ready* false)
+                (:default config {})))
 
           (and ident query)
           (get result ident)
