@@ -166,6 +166,11 @@
             (if (not= type :slot)
               #{} ;; args are tracked elsewhere, this is only for slots depending on other slots
               #{idx}))
+          :debug-info {:type :destructure
+                       :name (str binding-name)
+                       :from (str ref-name)
+                       :column (:column (meta binding-name))
+                       :line (:line (meta binding-name))}
           :provides binding-name
           :run
           `(fn [~comp-sym]
@@ -267,7 +272,7 @@
 
     (map? binding)
     (let [{:keys [as]} binding
-          arg-name (or as (gensym (str "arg_" idx "_")))
+          arg-name (or as (symbol (str "__arg$" idx)))
           ;; allow both?
           ;; ^:stable {:keys [foo bar] :as x}
           ;; {:keys [foo bar] :as ^:stable x}
@@ -283,7 +288,7 @@
 
           arg-name
           (if-not (seq v)
-            (gensym (str "arg_" idx "_"))
+            (symbol (str "__arg$" idx))
             ;; :as followed by symbol only
             (do (when-not (simple-symbol? sym)
                   (throw (ex-info "invalid data binding" {:binding binding})))
@@ -346,6 +351,10 @@
           {:all-deps deps
            :depends-on (bindings-indexes-of-type state deps :slot)
            :provides binding-name
+           :debug-info {:type :bind
+                        :name (str binding-name)
+                        :column (:column (meta binding))
+                        :line (:line (meta binding))}
            :run
            (if (empty? deps)
              `(fn [~comp-sym]
@@ -567,11 +576,12 @@
          ~(str *ns* "/" comp-name)
          (cljs.core/array
            ~@(->> (:slots state)
-                  (map (fn [{:keys [depends-on affects run]}]
+                  (map (fn [{:keys [depends-on affects run debug-info]}]
                          `(make-slot-config
                             ~(reduce bit-set 0 depends-on)
                             ~(reduce bit-set 0 affects)
-                            ~run)))))
+                            ~run
+                            ~debug-info)))))
          ~(make-dirty-bits 0 (count (:slots state)))
          ~(or opts {})
          ;; fn that checks args and invalidates slots or sets render-required
@@ -590,12 +600,12 @@
                       [`(arg-triggers-render! ~comp-sym ~idx)])
                   ~@(when affects-slots?
                       [`(arg-triggers-slots! ~comp-sym ~idx ~(reduce bit-set 0 affects))])))
-           ;; trailing nil so the above isn't turned into an expression which results in ? : ...
-           ;; dunno if there is a way to tell CLJS that this function has no return value
-           nil)
+           ;; drops return value in :advanced
+           js/undefined)
          ~(reduce bit-set 0 render-deps)
          ~render-fn
          ~(:events state)
+         {:args ~(->> (:args state) (map :name) (mapv str))}
          ))))
 
 (comment

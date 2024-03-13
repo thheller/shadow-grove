@@ -248,6 +248,8 @@
     (let [new-env (make-root-env rt-ref root-el)
           new-root (sa/dom-root root-el new-env)]
       (sa/update! new-root root-node)
+      (when ^boolean js/goog.DEBUG
+        (.setAttribute root-el "data-grove-root" ""))
       (set! (.-sg$root root-el) new-root)
       (set! (.-sg$env root-el) new-env)
       ::started)))

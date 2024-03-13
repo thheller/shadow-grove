@@ -23,7 +23,10 @@
   ["src/test"]
 
   :profiles
-  {:dev
+  {:provided
+   {:source-paths
+    ["src/ui-release"]}
+   :dev
    {:source-paths ["src/dev"]
     :dependencies
     []}

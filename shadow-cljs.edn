@@ -3,6 +3,7 @@
  ["src/dev"
   "src/main"
   "src/test"
+  "src/gen"
   ;; for easier testing with the example app
   "../grove-todo/src/main"
   "../shadow-css/src/main"]
@@ -42,6 +43,14 @@
   {:target :browser
    :output-dir "examples/ui/js"
    :modules {:main {:init-fn dummy.ui/init}}}
+
+  :devtools
+  {:target :esm
+   :output-dir "src/ui-release/shadow/grove/devtools/dist/js"
+   :dev {:output-dir "src/gen/shadow/grove/devtools/dist/js"}
+   :devtools {:watch-dir "src/ui-release"
+              :watch-path "/classpath"}
+   :modules {:main {:init-fn shadow.grove.devtools/init}}}
 
   :dummy
   {:target :browser

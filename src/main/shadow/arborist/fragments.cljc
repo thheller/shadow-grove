@@ -868,7 +868,10 @@
            ~(make-build-impl ast sym->idx)
            ~(make-mount-impl ast sym->idx)
            ~(make-update-impl ast sym->idx)
-           ~(make-destroy-impl ast sym->idx))]
+           ~(make-destroy-impl ast sym->idx)
+           {:ns ~(str *ns*)
+            :line ~(:line (meta macro-form))
+            :column ~(:column (meta macro-form))})]
 
     ;;(clojure.pprint/pprint ast)
     ;; (clojure.pprint/pprint sym->idx)

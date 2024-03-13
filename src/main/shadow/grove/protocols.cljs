@@ -39,4 +39,5 @@
    check-args-fn
    render-deps
    render-fn
-   events])
+   events
+   debug-info])

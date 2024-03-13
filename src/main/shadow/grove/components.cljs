@@ -22,7 +22,7 @@
 ;; shield your eyes and beware!
 
 (defonce components-ref (atom {}))
-(defonce instances-ref (atom #{}))
+(defonce instances-ref (atom {}))
 
 (set! *warn-on-infer* false)
 
@@ -40,7 +40,7 @@
         all
         (conj all instance)))
     []
-    @instances-ref))
+    (vals @instances-ref)))
 
 (defn debug-component-seq
   ([]
@@ -67,7 +67,7 @@
 ;; otherwise components may decide to skip rendering and preventing nested UI updates
 ;; will be stripped in release builds
 (defn mark-all-dirty! []
-  (doseq [^ManagedComponent comp @instances-ref]
+  (doseq [^ManagedComponent comp (vals @instances-ref)]
     (.set-render-required! comp)))
 
 (declare ^{:arglists '([x])} component-init?)
@@ -217,7 +217,9 @@
 
     ;; marks component boundaries in dev mode for easier inspect
     (when DEBUG
-      (swap! instances-ref conj this)
+      (let [id (str (random-uuid))]
+        (set! this -instance-id id)
+        (swap! instances-ref assoc id this))
       (set! (.-marker-before this)
         (doto (js/document.createComment (str "component: " (.-component-name config)))
           (set! -shadow$instance this)))
@@ -279,7 +281,7 @@
   (destroy! [this ^boolean dom-remove?]
     (.unschedule! this)
     (when DEBUG
-      (swap! instances-ref disj this)
+      (swap! instances-ref dissoc (.-instance-id this))
 
       (when-some [parent (::parent component-env)]
         (.. parent -child-components (delete this)))
@@ -623,15 +625,15 @@
 (defn component-init? [x]
   (instance? ComponentInit x))
 
-(deftype SlotConfig [depends-on affects run])
+(deftype SlotConfig [depends-on affects run debug-info])
 
 (defn make-slot-config
   "used by defc macro, do not use directly"
-  [depends-on affects run]
+  [depends-on affects run debug-info]
   {:pre [(nat-int? depends-on)
          (nat-int? affects)
          (fn? run)]}
-  (SlotConfig. depends-on affects run))
+  (SlotConfig. depends-on affects run debug-info))
 
 (defn make-component-config
   "used by defc macro, do not use directly"
@@ -642,7 +644,8 @@
    check-args-fn
    render-deps
    render-fn
-   events]
+   events
+   debug-info]
   {:pre [(string? component-name)
          (array? slots)
          (every? #(instance? SlotConfig %) slots)
@@ -661,7 +664,8 @@
           check-args-fn
           render-deps
           render-fn
-          events)]
+          events
+          debug-info)]
 
     (when ^boolean js/goog.DEBUG
       (swap! components-ref assoc component-name cfg))
