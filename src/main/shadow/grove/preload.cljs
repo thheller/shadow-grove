@@ -321,6 +321,12 @@
 
 (defonce devtools-ref (atom nil))
 
+(defn extension-info []
+  (doto (client-env/devtools-info)
+    (unchecked-set "client_id" (shared/get-client-id (:runtime @devtools-ref)))
+    ))
+
+
 (defn runtime-notify [svc {:keys [event-op client-id client-info] :as msg}]
   (case event-op
     :client-connect

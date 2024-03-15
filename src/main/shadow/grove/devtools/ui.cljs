@@ -57,37 +57,41 @@
 
   (render
     (let [{:keys [preview edn]} value]
-      (<< [:tr {:class (css :mb-2 {:border "1px solid #ddd"})
-                :on-click #(swap! expanded-ref not)}
-           [:td {:class (css :p-1 :pr-2 :font-semibold :whitespace-nowrap)} name]
-           [:td {:class (css :w-full)}
-            [:div {:class (css :font-mono :overflow-auto)
-                   :style/max-height (when-not expanded "140px")}
-             (if preview
-               (<< [:div {:class (css :font-bold :p-2)} "FIXME: value too large to print"]
-                   [:div {:class (css :p-2 :truncate :whitespace-nowrap)} preview])
-               (edn/render-edn-str edn))]
-            ]]))))
+      (<< #_[:tr {:class (css :mb-2 {:border "1px solid #ddd"})
+                  }]
+        [:div {:class (css :py-0.5 :pr-2 :font-semibold :whitespace-nowrap :border-t)} name]
+        [:div {:class (css :py-0.5 :font-mono :overflow-auto :border-t :truncate)
+               :style/max-height (when-not expanded "142px")
+               :on-click #(swap! expanded-ref not)}
+         (if preview
+           (<< [:div
+                [:div {:class (css :font-bold :p-2)} "FIXME: value too large to print"]
+                [:div {:class (css :p-2 :truncate :whitespace-nowrap)} preview]])
+           (edn/render-edn-str edn))]
+        ))))
 
 (defc ui-detail [{:keys [name args slots] :as item}]
   (render
-    (let [$section-label (css :font-semibold :text-sm)]
-      (<< [:div {:class (css :text-xs :flex-1 :px-2 :pb-2 {:border-left "10px solid #eee"})}
+    (let [$section-label (css :font-semibold :text-sm)
+          $section-grid (css :overflow-hidden
+                          {:display "grid"
+                           :grid-template-columns "min-content minmax(25%, auto)"
+                           :grid-row-gap "0"
+                           ;; :grid-column-gap ".5rem"
+                           })]
+      (<< [:div {:class (css :text-xs :pl-2 :py-2 {:border-left "6px solid #eee"})}
            ;; [:div {:class (css :py-2 :font-bold :text-2xl)} name]
            (when (seq args)
              (<< [:div {:class (css :pb-2)}
                   [:div {:class $section-label} "Arguments"]
-                  [:table {:class (css :w-full)}
-                   [:tbody
-                    (sg/simple-seq args ui-slot)]]]))
+                  [:div {:class $section-grid}
+                   (sg/simple-seq args ui-slot)]]))
 
            (when (seq slots)
-             (<< [:div {:class (css :w-full)}
+             (<< [:div
                   [:div {:class $section-label} "Slots"]
-                  [:div {:class (css :overflow-auto {:border-right "1px solid #eee"})}
-                   [:table {:class (css :w-full {:border-right "0"})}
-                    [:tbody
-                     (sg/simple-seq slots ui-slot)]]]]))]))))
+                  [:div {:class $section-grid}
+                   (sg/simple-seq slots ui-slot)]]))]))))
 
 (declare ui-node)
 
@@ -105,7 +109,7 @@
         shadow.arborist/TreeRoot
         (<< [:div
              [:div {:class (css :font-mono)} (:container item)]
-             [:div {:class (css :pl-2)}
+             [:div
               (ui-node-children runtime-ident item)]])
 
         shadow.arborist.common/ManagedRoot
@@ -143,7 +147,7 @@
 
         shadow.grove.components/ManagedComponent
         (<< [:div
-             [:div {:class (css :font-semibold :cursor-pointer)
+             [:div {:class (css :font-semibold :cursor-pointer :whitespace-nowrap)
                     :on-click {:e ::select! :item (:instance-id item)}
                     :on-mouseout {:e ::remove-highlight! :runtime runtime-ident :item (:instance-id item)}
                     :on-mouseenter {:e ::highlight! :runtime runtime-ident :item (:instance-id item)}}
@@ -184,8 +188,14 @@
     (sg/run-tx env
       {:e :form/set-attr
        :a ::m/selected
-       :v (if (contains? selected item)
+       :v (cond
+            (contains? selected item)
             (disj selected item)
+
+            (false? (.-ctrlKey e))
+            #{item}
+
+            :else
             (conj selected item))}))
 
   (event ::deselect! [env ev e]
@@ -200,7 +210,7 @@
          [:div {:class (css :bg-white :p-4)}
           [:button {:class (css :cursor-pointer :text-lg :block :border :px-4 :rounded :whitespace-nowrap :bg-blue-200 [:hover :bg-blue-400])
                     :on-click ::load-snapshot!} "Update Snapshot"]]
-         [:div {:class (css :text-sm :px-4)}
+         [:div {:class (css :text-sm :pl-2)}
           (sg/simple-seq snapshot #(ui-node runtime-ident %1))]])))
 
 (attrs/add-attr :form/value

@@ -45,7 +45,7 @@
             (js/console.log "[WS]" (-> report :event :msg :op) (-> report :event :msg) report)
             (js/console.log e report))))))
 
-  (when-some [search js/document.location.hash]
+  (when-some [search js/document.location.search]
     (let [params (js/URLSearchParams. search)]
       (when-some [rt-id (.get params "runtime")]
         (let [ident (db/make-ident ::m/runtime (js/parseInt rt-id 10))]
