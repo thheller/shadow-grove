@@ -10,7 +10,7 @@
 
 (defprotocol ITransactable
   (tx-begin [this])
-  (tx-get [this])
+  (tx-snapshot [this])
   (db-schema [this]))
 
 (defprotocol ITransactableCommit
@@ -543,8 +543,8 @@
   ITransactable
   (db-schema [this]
     schema)
-  (tx-get [this]
-    tx)
+  (tx-snapshot [this]
+    @tx)
   (tx-begin [this]
     (when tx
       (throw (ex-info "already in tx" {})))
