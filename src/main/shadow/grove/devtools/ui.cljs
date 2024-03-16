@@ -7,7 +7,7 @@
     [shadow.grove.events :as ev]
     [shadow.grove.devtools :as-alias m]
     [shadow.grove.devtools.relay-ws :as relay-ws]
-    [shadow.grove.devtools.edn :as edn]
+    [shadow.grove.ui.edn :as edn]
     [shadow.grove :as sg :refer (defc << css)]))
 
 (defn form-set-attr!
@@ -60,7 +60,7 @@
       (<< #_[:tr {:class (css :mb-2 {:border "1px solid #ddd"})
                   }]
         [:div {:class (css :py-0.5 :pr-2 :font-semibold :whitespace-nowrap :border-t)} name]
-        [:div {:class (css :py-0.5 :font-mono :overflow-auto :border-t :truncate)
+        [:div {:class (css :py-0.5 :font-mono :overflow-auto :border-t)
                :style/max-height (when-not expanded "142px")
                :on-click #(swap! expanded-ref not)}
          (if preview
@@ -72,33 +72,27 @@
 
 (defc ui-detail [{:keys [name args slots] :as item}]
   (render
-    (let [$section-label (css :font-semibold :text-sm)
-          $section-grid (css :overflow-hidden
-                          {:display "grid"
+    (let [$section-label (css :font-semibold :py-2 :text-sm {:grid-column "span 2"})]
+      (<< [:div {:class (css :text-sm :pl-2
+                          :overflow-hidden
+                          {:border-left "6px solid #eee"
+                           :display "grid"
                            :grid-template-columns "min-content minmax(25%, auto)"
-                           :grid-row-gap "0"
-                           ;; :grid-column-gap ".5rem"
-                           })]
-      (<< [:div {:class (css :text-xs :pl-2 :py-2 {:border-left "6px solid #eee"})}
-           ;; [:div {:class (css :py-2 :font-bold :text-2xl)} name]
+                           :grid-row-gap "0"})}
            (when (seq args)
-             (<< [:div {:class (css :pb-2)}
-                  [:div {:class $section-label} "Arguments"]
-                  [:div {:class $section-grid}
-                   (sg/simple-seq args ui-slot)]]))
+             (<< [:div {:class $section-label} "Arguments"]
+                 (sg/simple-seq args ui-slot)))
 
            (when (seq slots)
-             (<< [:div
-                  [:div {:class $section-label} "Slots"]
-                  [:div {:class $section-grid}
-                   (sg/simple-seq slots ui-slot)]]))]))))
+             (<< [:div {:class $section-label} "Slots"]
+                 (sg/simple-seq slots ui-slot)))]))))
 
 (declare ui-node)
 
-(defn ui-node-children [runtime-ident item]
-  (sg/simple-seq (:children item) #(ui-node runtime-ident %1)))
+(defn ui-node-children [ctx item]
+  (sg/simple-seq (:children item) #(ui-node ctx %1)))
 
-(defc ui-node [runtime-ident item]
+(defc ui-node [ctx item]
   (bind selected
     (sg/db-read ::m/selected))
 
@@ -107,58 +101,50 @@
       (<< [:div "nil"])
       (case (:type item)
         shadow.arborist/TreeRoot
-        (<< [:div
-             [:div {:class (css :font-mono)} (:container item)]
-             [:div
-              (ui-node-children runtime-ident item)]])
+        (<< [:div {:class (css :font-mono)} (:container item)]
+            (ui-node-children ctx item))
 
         shadow.arborist.common/ManagedRoot
-        (<< [:div
-             [:div "Managed Root"]
-             [:div {:class (css :pl-2)}
-              (ui-node-children runtime-ident item)]])
+        (<< [:div "Managed Root"]
+            [:div {:class (css :pl-2)}
+             (ui-node-children ctx item)])
 
         shadow.arborist.common/ManagedText
         nil
 
         shadow.arborist.collections/SimpleCollection
-        (<< [:div
-             [:div (str "simple-seq [" (count (:children item)) "]")]
-             [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
-              (ui-node-children runtime-ident item)]])
+        (<< [:div (str "simple-seq [" (count (:children item)) "]")]
+            [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
+             (ui-node-children ctx item)])
 
         shadow.arborist.collections/KeyedCollection
-        (<< [:div
-             [:div (str "keyed-seq [" (count (:children item)) "]")]
-             [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
-              (ui-node-children runtime-ident item)]])
+        (<< [:div (str "keyed-seq [" (count (:children item)) "]")]
+            [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
+             (ui-node-children ctx item)])
 
         shadow.grove.ui.suspense/SuspenseRoot
-        (<< [:div
-             [:div "Suspense Root"]
-             [:div {:class (css :pl-2)}
-              (ui-node-children runtime-ident item)]])
+        (<< [:div "Suspense Root"]
+            [:div {:class (css :pl-2)}
+             (ui-node-children ctx item)])
 
         shadow.grove.ui.portal/PortalNode
-        (<< [:div
-             [:div "Portal"]
-             [:div {:class (css :pl-2)}
-              (ui-node-children runtime-ident item)]])
+        (<< [:div "Portal"]
+            [:div {:class (css :pl-2)}
+             (ui-node-children ctx item)])
 
         shadow.grove.components/ManagedComponent
-        (<< [:div
-             [:div {:class (css :font-semibold :cursor-pointer :whitespace-nowrap)
-                    :on-click {:e ::select! :item (:instance-id item)}
-                    :on-mouseout {:e ::remove-highlight! :runtime runtime-ident :item (:instance-id item)}
-                    :on-mouseenter {:e ::highlight! :runtime runtime-ident :item (:instance-id item)}}
-              (:name item)]
-             (when (contains? selected (:instance-id item))
-               (ui-detail item))
-             [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
-              (ui-node-children runtime-ident item)]])
+        (<< [:div {:class (css :font-semibold :cursor-pointer :whitespace-nowrap)
+                   :on-click {:e ::select! :item (:instance-id item)}
+                   :on-mouseout {:e ::remove-highlight! :runtime (:runtime-ident ctx) :item (:instance-id item)}
+                   :on-mouseenter {:e ::highlight! :runtime (:runtime-ident ctx) :item (:instance-id item)}}
+             (:name item)]
+            (when (contains? selected (:instance-id item))
+              (ui-detail item))
+            [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
+             (ui-node-children ctx item)])
 
         shadow.arborist.fragments/ManagedFragment
-        (ui-node-children runtime-ident item)
+        (ui-node-children ctx item)
         #_(<< [:div
                [:div (str (:ns item) "/L" (:line item) "-C" (:column item))]
                (ui-node-children item)])
@@ -166,7 +152,7 @@
         (<< [:div (or (str (:type item)) (pr-str (dissoc item :children)))]
             (when (:children item)
               (<< [:div {:class (css :pl-2)}
-                   (ui-node-children runtime-ident item)]))
+                   (ui-node-children ctx item)]))
             )))))
 
 (defc ui-runtime [^:stable runtime-ident]
@@ -205,13 +191,17 @@
        :a [runtime-ident :selected]
        :v nil}))
 
+  (bind ctx
+    {:runtime-ident runtime-ident
+     :level 0})
+
   (render
     (<< [:div {:class (css :flex-1)}
          [:div {:class (css :bg-white :p-4)}
           [:button {:class (css :cursor-pointer :text-lg :block :border :px-4 :rounded :whitespace-nowrap :bg-blue-200 [:hover :bg-blue-400])
                     :on-click ::load-snapshot!} "Update Snapshot"]]
-         [:div {:class (css :text-sm :pl-2)}
-          (sg/simple-seq snapshot #(ui-node runtime-ident %1))]])))
+         [:div {:class (css :pl-2)}
+          (sg/simple-seq snapshot #(ui-node ctx %1))]])))
 
 (attrs/add-attr :form/value
   (fn [env ^js node oval nval]
@@ -252,15 +242,16 @@
         (.addEventListener node "change" ev-fn)
         ))))
 
+(defn suitable-runtimes [env db]
+  (->> (db/all-of db ::m/runtime)
+       (filter #(contains? (:supported-ops %) :shadow.grove.preload/take-snapshot))
+       (remove :disconnected)
+       (sort-by :client-id)
+       (vec)))
+
 (defc ui-root []
   (bind runtimes
-    (sg/db-read
-      (fn [env db]
-        (->> (db/all-of db ::m/runtime)
-             (filter #(contains? (:supported-ops %) :shadow.grove.preload/take-snapshot))
-             (remove :disconnected)
-             (sort-by :client-id)
-             (vec)))))
+    (sg/db-read suitable-runtimes))
 
   (bind selected
     (sg/db-read ::m/selected-runtime))

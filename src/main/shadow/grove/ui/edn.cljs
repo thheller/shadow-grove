@@ -1,8 +1,42 @@
-(ns shadow.grove.devtools.edn
+(ns shadow.grove.ui.edn
   (:require
     [cljs.tools.reader.edn :as reader]
-    [shadow.grove :as sg :refer (defc << css)]
-    [shadow.remote.runtime.obj-support :as obj-support]))
+    [shadow.grove :as sg :refer (defc << css)]))
+
+(def rank-predicates
+  [nil?
+   boolean?
+   number?
+   string?
+   keyword?
+   symbol?
+   vector?
+   map?
+   list?])
+
+(defn rank-val [val]
+  (reduce-kv
+    (fn [res idx pred]
+      (if (pred val)
+        (reduced idx)
+        res))
+    -1
+    rank-predicates))
+
+(defn smart-comp [a b]
+  (try
+    (compare a b)
+    (catch :default e
+      (let [ar (rank-val a)
+            br (rank-val b)]
+        (compare ar br)))))
+
+(defn attempt-to-sort [coll]
+  (vec
+    (try
+      (sort smart-comp coll)
+      (catch :default e
+        coll))))
 
 (declare render-edn)
 
@@ -11,7 +45,7 @@
 
 (defc edn-map [val]
   (bind keys
-    (obj-support/attempt-to-sort (keys val)))
+    (attempt-to-sort (keys val)))
 
   (render
     (if (empty? val)
@@ -23,11 +57,12 @@
                 (let [v (get val k)
 
                       $map-key
-                      (css :pr-2)
+                      (css {:padding "1px 0.5rem 1px 0"})
 
                       $map-val
-                      (css :w-full)]
-                  (<< [:tr {:class (css :border-b)}
+                      (css :p-0 :w-full)]
+                  (<< [:tr {:class (css :border-b
+                                     ["&:last-child" {:border "none"}])}
                        [:td {:class $map-key}
                         (render-edn k)]
                        [:td {:class $map-val}
@@ -42,13 +77,14 @@
            (sg/simple-seq
              val
              (fn [item idx]
-               (let [$seq-val (css :pl-1 :border-b)]
+               (let [$seq-val (css :pl-1 :border-b
+                                ["&:last-child" {:border "none"}])]
                  (<< [:div {:class $seq-val} (render-edn item)]))
                ))]))))
 
 (defc edn-set [val]
   (bind items
-    (vec (obj-support/attempt-to-sort val)))
+    (vec (attempt-to-sort val)))
 
   (render
     (if (empty? val)
@@ -57,7 +93,8 @@
            (sg/simple-seq
              items
              (fn [item idx]
-               (let [$seq-val (css :pl-1 :border-b)]
+               (let [$seq-val (css :pl-1 :border-b
+                                ["&:last-child" {:border "none"}])]
                  (<< [:div {:class $seq-val} (render-edn item)]))))
            ]))))
 

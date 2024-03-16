@@ -54,22 +54,28 @@
    (impl/slot-query nil query config)))
 
 (defn db-read
-  [what]
-  (cond
-    (fn? what)
-    (impl/slot-db-read what)
+  [what & args]
+  (let [read-fn
+        (cond
+          (fn? what)
+          what
 
-    (db/ident? what)
-    (impl/slot-db-read (fn [env db] (get db what)))
+          (seq args)
+          (throw (ex-info "only functions can receive extra arguments" {:what what :args args}))
 
-    (keyword? what)
-    (impl/slot-db-read (fn [env db] (get db what)))
+          (db/ident? what)
+          (fn [env db] (get db what))
 
-    (vector? what)
-    (impl/slot-db-read (fn [env db] (get-in db what)))
+          (keyword? what)
+          (fn [env db] (get db what))
 
-    :else
-    (throw (ex-info "unrecognized db-read argument" {:what what}))))
+          (vector? what)
+          (fn [env db] (get-in db what))
+
+          :else
+          (throw (ex-info "unrecognized db-read argument" {:what what})))]
+
+    (impl/slot-db-read read-fn args)))
 
 (defn use-state
   ([]
@@ -375,6 +381,7 @@
          ::rt/runtime-id runtime-id
          ::rt/data-ref data-ref
          ::rt/event-config {}
+         ::rt/event-interceptors []
          ::rt/fx-config {}
          ::rt/active-queries-map active-queries-map
          ::rt/key-index-seq (atom 0)
@@ -387,6 +394,17 @@
        (swap! rt/known-runtimes-ref assoc runtime-id rt-ref))
 
      rt-ref)))
+
+(defn valid-interceptor? [x]
+  (or (nil? x)
+      (and (map? x)
+           (or (fn? (:before x))
+               (fn? (:after x))))))
+
+(defn set-interceptors! [rt-ref interceptors]
+  {:pre [(vector? interceptors)
+         (every? valid-interceptor? interceptors)]}
+  (swap! rt-ref assoc ::rt/event-interceptors interceptors))
 
 (defn vec-conj [x y]
   (if (nil? x) [y] (conj x y)))

@@ -39,7 +39,9 @@
               (cb/generate
                 '{:ui
                   {:include
-                   [shadow.grove.devtools*]}})
+                   [shadow.grove.devtools*
+                    shadow.grove.ui.edn]}})
+              (cb/minify)
               (cb/write-outputs-to (io/file "src" "ui-release" "shadow" "grove" "devtools" "dist" "css")))]
 
       (doseq [mod (:outputs build-state)

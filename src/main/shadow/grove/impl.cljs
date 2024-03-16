@@ -227,6 +227,26 @@
              (str "Unhandled Event " ev-id)
              {:ev-id ev-id :tx tx}))))
 
+(defn call-interceptors [{::rt/keys [event-interceptors] :as tx-env} stage-key]
+  (reduce-kv
+    (fn [env idx interceptor]
+      ;; allow nils, easier to do (when DEBUG {:after ...}) kind of handlers
+      (if-not interceptor
+        env
+        (try
+          (if-some [handler (get interceptor stage-key)]
+            (let [result (try
+                           (handler env)
+                           (catch :default e
+                             (throw (ex-info "interceptor failed" {:idx idx :stage stage-key :interceptor interceptor} e))))]
+              (when-not (identical? (::tx-guard result) (::tx-guard env))
+                (throw (ex-info "interceptor didn't return tx-env" {:idx idx :stage stage-key :interceptor interceptor :result result})))
+              result)
+            env)
+          )))
+    tx-env
+    event-interceptors))
+
 (defn process-event
   [rt-ref
    ev
@@ -261,19 +281,30 @@
             (atom false)
 
             tx-env
-            (assoc env
-              ::tx-guard tx-guard
-              ::fx []
-              :db tx-db
-              ;; FIXME: should this be strict and only allow chaining tx from fx handlers?
-              ;; should be forbidden to execute side effects directly in tx handlers?
-              ;; but how do we enforce this cleanly? this feels kinda dirty maybe needless indirection?
-              :transact!
-              (fn [next-tx]
-                (throw (ex-info "transact! only allowed from fx env" {:tx next-tx}))))
+            (-> env
+                (assoc
+                  ::tx-guard tx-guard
+                  ::fx []
+                  :origin origin
+                  :db tx-db
+                  ;; FIXME: should this be strict and only allow chaining tx from fx handlers?
+                  ;; should be forbidden to execute side effects directly in tx handlers?
+                  ;; but how do we enforce this cleanly? this feels kinda dirty maybe needless indirection?
+                  :transact!
+                  (fn [next-tx]
+                    (throw (ex-info "transact! only allowed from fx env" {:tx next-tx}))))
+                (cond->
+                  (map? ev)
+                  (assoc :event ev)))
+
+            tx-env
+            (call-interceptors tx-env :before)
 
             result
-            (merge-result tx-env ev (handler tx-env ev))]
+            (merge-result tx-env ev (handler tx-env ev))
+
+            result
+            (call-interceptors result :after)]
 
         (let [{:keys [db data keys-new keys-removed keys-updated] :as tx-result}
               (db/tx-commit! (:db result))]
@@ -319,8 +350,6 @@
                     (fx-fn fx-env value))))))
 
           (when-some [tx-reporter (::rt/tx-reporter env)]
-            ;; dispatch tx-reporter async so it doesn't hold up rendering
-            ;; the only purpose of this is debugging anyways
             (rt/next-tick
               (fn []
                 (let [report
@@ -348,9 +377,7 @@
 
           (:return result))))))
 
-(defn slot-db-read [read-fn]
-  {:pre [(ifn? read-fn)]}
-
+(defn slot-db-read [read-fn args]
   (let [ref
         (comp/claim-bind! ::slot-db-read)
 
@@ -387,7 +414,7 @@
             ;; FIXME: should this expose an update function to update db?
             ;; FIXME: should this expose a transact! function similar to fx?
             result
-            (read-fn query-env observed-data)
+            (apply read-fn query-env observed-data args)
 
             new-keys
             (db/observed-keys observed-data)]
@@ -424,7 +451,9 @@
 
           :else
           result
-          )))))
+          )))
+    []
+    ))
 
 (defn slot-state [init-state merge-fn]
   (let [ref (comp/claim-bind! ::slot-state)

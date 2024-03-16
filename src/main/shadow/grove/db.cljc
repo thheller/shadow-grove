@@ -219,10 +219,28 @@
 
 (deftype Transaction
   [data-before
-   keys-new
-   keys-updated
-   keys-removed
+   ^:mutable keys-new
+   ^:mutable keys-updated
+   ^:mutable keys-removed
    completed-ref]
+
+  IDeref
+  (-deref [this]
+    ;; FIXME: is this the only way to get a persistent snapshot, but continue with the transient?
+    ;; can't be handing out the transient and can't turn into new set via (set keys-new) or whatever
+    ;; FIXME: figure out if this transient handling is even worth, it likely never is the bottleneck
+    (let [new (persistent! keys-new)
+          updated (persistent! keys-updated)
+          removed (persistent! keys-removed)]
+
+      (set! keys-new (transient new))
+      (set! keys-updated (transient updated))
+      (set! keys-removed (transient removed))
+
+      {:data-before data-before
+       :keys-new new
+       :keys-updated updated
+       :keys-removed removed}))
 
   ITransaction
   (tx-check-completed! [this]
