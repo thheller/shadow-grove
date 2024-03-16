@@ -544,7 +544,8 @@
   (db-schema [this]
     schema)
   (tx-snapshot [this]
-    @tx)
+    (when tx
+      @tx))
   (tx-begin [this]
     (when tx
       (throw (ex-info "already in tx" {})))
