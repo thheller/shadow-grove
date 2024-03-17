@@ -264,6 +264,8 @@
   {:pre [(rt/ref? rt-ref)]}
   (gp/run-now! ^not-native (::rt/scheduler @rt-ref) #(render* rt-ref root-el root-node) ::render))
 
+;; for devtools, so it can add listener to be notified when work happened
+(def work-finish-trigger nil)
 
 (deftype RootScheduler [^:mutable update-pending? work-set]
   gp/IScheduleWork
@@ -301,94 +303,37 @@
               ;; until a given time budget is consumed
               (recur)))))
 
-      (finally
-        (set! update-pending? false)))))
+      (when work-finish-trigger
+        (work-finish-trigger))
 
-;; FIXME: make this delegate to the above, don't duplicate the code
-(deftype TracingRootScheduler [^:mutable update-pending? work-set]
-  gp/IScheduleWork
-  (schedule-work! [this work-task trigger]
-    (.add work-set work-task)
-
-    (when-not update-pending?
-      (set! update-pending? true)
-      (rt/microtask
-        (fn []
-          (js/console.group (str trigger))
-          (try
-            (.process-work! this)
-            (finally
-              (js/console.groupEnd)))
-          ))))
-
-  (unschedule! [this work-task]
-    (.delete work-set work-task))
-
-  (did-suspend! [this target])
-  (did-finish! [this target])
-
-  (run-now! [this action trigger]
-    (js/console.group (str trigger))
-    (try
-      (set! update-pending? true)
-      (action)
-      ;; work must happen immediately since (action) may need the DOM event that triggered it
-      ;; any delaying the work here may result in additional paint calls (making things slower overall)
-      ;; if things could have been async the work should have been queued as such and not ended up here
-      (.process-work! this)
-
-      (finally
-        (js/console.groupEnd))
-      ))
-
-  Object
-  (process-work! [this]
-    (try
-      (let [iter (.values work-set)]
-        (loop []
-          (let [current (.next iter)]
-            (when (not ^boolean (.-done current))
-              (gp/work! ^not-native (.-value current))
-
-              ;; should time slice later and only continue work
-              ;; until a given time budget is consumed
-              (recur)))))
+      js/undefined
 
       (finally
         (set! update-pending? false)))))
-
-(goog-define TRACE false)
 
 (defn prepare
   ([data-ref runtime-id]
    (prepare {} data-ref runtime-id))
   ([init data-ref runtime-id]
    (let [root-scheduler
-         (if ^boolean TRACE
-           (TracingRootScheduler. false (js/Set.))
-           (RootScheduler. false (js/Set.)))
+         (RootScheduler. false (js/Set.))
 
          rt-ref
-         (atom nil)
-
-         active-queries-map
-         (js/Map.)]
-
-     (reset! rt-ref
-       (assoc init
-         ::rt/rt true
-         ::rt/scheduler root-scheduler
-         ::rt/runtime-id runtime-id
-         ::rt/data-ref data-ref
-         ::rt/event-config {}
-         ::rt/event-interceptors []
-         ::rt/fx-config {}
-         ::rt/active-queries-map active-queries-map
-         ::rt/key-index-seq (atom 0)
-         ::rt/key-index-ref (atom {})
-         ::rt/query-index-map (js/Map.)
-         ::rt/query-index-ref (atom {})
-         ::rt/env-init []))
+         (atom
+           (assoc init
+             ::rt/rt true
+             ::rt/scheduler root-scheduler
+             ::rt/runtime-id runtime-id
+             ::rt/data-ref data-ref
+             ::rt/event-config {}
+             ::rt/event-interceptors []
+             ::rt/fx-config {}
+             ::rt/active-queries-map (js/Map.)
+             ::rt/key-index-seq (atom 0)
+             ::rt/key-index-ref (atom {})
+             ::rt/query-index-map (js/Map.)
+             ::rt/query-index-ref (atom {})
+             ::rt/env-init []))]
 
      (when ^boolean js/goog.DEBUG
        (swap! rt/known-runtimes-ref assoc runtime-id rt-ref))

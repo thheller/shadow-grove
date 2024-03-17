@@ -39,6 +39,19 @@
         :component item
         :to (get-in env [:db runtime :client-id])}])))
 
+(defn request-log!
+  {::ev/handle ::request-log!}
+  [env {:keys [type name idx instance-id runtime] :as ev} e]
+  (when (contains? (get-in env [:db runtime :supported-ops]) ::m/request-log)
+    (sg/queue-fx env
+      :relay-send
+      [{:op ::m/request-log
+        :type type
+        :idx idx
+        :component instance-id
+        :name name
+        :to (get-in env [:db runtime :client-id])}])))
+
 (defn remove-highlight!
   {::ev/handle ::remove-highlight!}
   [env {:keys [item runtime] :as ev} e]
@@ -51,29 +64,29 @@
 (def $container
   (css :pl-2))
 
-(defc ui-slot [{:keys [type name value] :as slot} idx]
+(defc ui-slot [item {:keys [type name value] :as slot} idx type]
   (bind expanded-ref (atom false))
   (bind expanded (sg/watch expanded-ref))
 
   (render
     (let [{:keys [preview edn]} value]
-      (<< #_[:tr {:class (css :mb-2 {:border "1px solid #ddd"})
-                  }]
-        [:div {:class (css :py-0.5 :pr-2 :font-semibold :whitespace-nowrap :border-t)} name]
-        [:div {:class (css :py-0.5 :font-mono :overflow-auto :border-t)
-               :style/max-height (when-not expanded "142px")
-               :on-click #(swap! expanded-ref not)}
-         (if preview
-           (<< [:div
-                [:div {:class (css :font-bold :p-2)} "FIXME: value too large to print"]
-                [:div {:class (css :p-2 :truncate :whitespace-nowrap)} preview]])
-           (edn/render-edn-str edn))]
-        ))))
+      (<< [:div {:class (css :py-0.5 :pr-2 :font-semibold :whitespace-nowrap :border-t :cursor-help)
+                 :title (str "click to log " name " in runtime console")
+                 :on-click {:e ::request-log! :name name :instance-id (:instance-id item) :idx idx :type type}} name]
+          [:div {:class (css :py-0.5 :font-mono :overflow-auto :border-t)
+                 :style/max-height (when-not expanded "142px")
+                 :on-click #(swap! expanded-ref not)}
+           (if preview
+             (<< [:div
+                  [:div {:class (css :font-bold :p-2)} "FIXME: value too large to print"]
+                  [:div {:class (css :p-2 :truncate :whitespace-nowrap)} preview]])
+             (edn/render-edn-str edn))]
+          ))))
 
-(defc ui-detail [{:keys [name args slots] :as item}]
+(defc ui-detail [{:keys [args slots] :as item}]
   (render
-    (let [$section-label (css :font-semibold :py-2 :text-sm {:grid-column "span 2"})]
-      (<< [:div {:class (css :text-sm :pl-2
+    (let [$section-label (css :font-semibold :py-2 {:grid-column "span 2"})]
+      (<< [:div {:class (css :pl-2
                           :overflow-hidden
                           {:border-left "6px solid #eee"
                            :display "grid"
@@ -81,16 +94,18 @@
                            :grid-row-gap "0"})}
            (when (seq args)
              (<< [:div {:class $section-label} "Arguments"]
-                 (sg/simple-seq args ui-slot)))
+                 (sg/simple-seq args #(ui-slot item %1 %2 :arg))))
 
            (when (seq slots)
              (<< [:div {:class $section-label} "Slots"]
-                 (sg/simple-seq slots ui-slot)))]))))
+                 (sg/simple-seq slots #(ui-slot item %1 %2 :slot))))]))))
 
 (declare ui-node)
 
 (defn ui-node-children [ctx item]
-  (sg/simple-seq (:children item) #(ui-node ctx %1)))
+  (sg/simple-seq (:children item)
+    (fn [item idx]
+      (ui-node (update ctx :path conj idx) item))))
 
 (defc ui-node [ctx item]
   (bind selected
@@ -133,15 +148,21 @@
              (ui-node-children ctx item)])
 
         shadow.grove.components/ManagedComponent
-        (<< [:div {:class (css :font-semibold :cursor-pointer :whitespace-nowrap)
-                   :on-click {:e ::select! :item (:instance-id item)}
-                   :on-mouseout {:e ::remove-highlight! :runtime (:runtime-ident ctx) :item (:instance-id item)}
-                   :on-mouseenter {:e ::highlight! :runtime (:runtime-ident ctx) :item (:instance-id item)}}
-             (:name item)]
-            (when (contains? selected (:instance-id item))
-              (ui-detail item))
-            [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
-             (ui-node-children ctx item)])
+        (let [comp-ctx (update ctx :path conj (:name item))]
+          (<< [:div {:class (css :font-semibold :cursor-pointer :whitespace-nowrap)
+                     :on-click {:e ::select! :item (:path comp-ctx)}
+                     :on-mouseout {:e ::remove-highlight! :runtime (:runtime-ident ctx) :item (:instance-id item)}
+                     :on-mouseenter {:e ::highlight! :runtime (:runtime-ident ctx) :item (:instance-id item)}}
+               (:name item)]
+              ;; can't use :instance-id for tracking which component should show details
+              ;; as every hot-reload re-creates the component, thus changing the instance id
+              ;; instead we track which one we were looking at via the path in the tree
+              ;; which might still change and close the one we were looking at
+              ;; but can't think of another way to do this currently
+              (when (contains? selected (:path comp-ctx))
+                (ui-detail item))
+              [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
+               (ui-node-children comp-ctx item)]))
 
         shadow.arborist.fragments/ManagedFragment
         (ui-node-children ctx item)
@@ -191,16 +212,20 @@
        :a [runtime-ident :selected]
        :v nil}))
 
+  (event ::request-log! [env ev e]
+    (sg/dispatch-up! env (assoc ev :runtime runtime-ident)))
+
   (bind ctx
     {:runtime-ident runtime-ident
+     :path []
      :level 0})
 
   (render
-    (<< [:div {:class (css :flex-1)}
-         [:div {:class (css :bg-white :p-4)}
-          [:button {:class (css :cursor-pointer :text-lg :block :border :px-4 :rounded :whitespace-nowrap :bg-blue-200 [:hover :bg-blue-400])
-                    :on-click ::load-snapshot!} "Update Snapshot"]]
-         [:div {:class (css :pl-2)}
+    (<< [:div {:class (css :flex-1 :text-sm)}
+         #_[:div {:class (css :bg-white :p-2)}
+            [:button {:class (css :cursor-pointer :text-lg :block :border :px-4 :rounded :whitespace-nowrap :bg-blue-200 [:hover :bg-blue-400])
+                      :on-click ::load-snapshot!} "Update Snapshot"]]
+         [:div {:class (css :pl-2 :py-2)}
           (sg/simple-seq snapshot #(ui-node ctx %1))]])))
 
 (attrs/add-attr :form/value

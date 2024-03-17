@@ -61,6 +61,9 @@
   [env {:keys [from ops] :as msg}]
   (assoc-in env [:db (db/make-ident ::m/runtime from) :supported-ops] ops))
 
+(defmethod handle-msg :shadow.grove.preload/work-finished
+  [env {:keys [from snapshot] :as msg}]
+  (assoc-in env [:db (db/make-ident ::m/runtime from) :snapshot] snapshot))
 
 (defmethod handle-msg ::m/focus-component
   [env {:keys [from component snapshot] :as msg}]

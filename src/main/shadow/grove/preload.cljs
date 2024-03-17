@@ -275,6 +275,9 @@
     {:type 'shadow.grove.components/ManagedComponent
      :name (-> this .-config .-component-name)
      :instance-id (.-instance-id this)
+     :suspended? (.-suspended? this)
+     :destroyed? (.-destroyed? this)
+     :error? (.-error? this)
      :args
      (let [args (.-args this)
            args-config (-> this .-config .-debug-info (:args))]
@@ -376,6 +379,36 @@
 (defn remove-highlight [svc msg]
   (.remove border-highlight))
 
+
+(defn request-log [svc {:keys [name component type idx] :as msg}]
+  (when-some [comp (get @comp/instances-ref component)]
+    (let [val (case type
+                :arg
+                (nth (.-args comp) idx)
+                :slot
+                (aget (.-slot-values comp) idx))]
+
+      (js/console.group "DEVTOOLS" name)
+      (js/console.log val)
+      (js/console.groupEnd))))
+
+(defn notify-work-finished [{:keys [runtime] :as svc}]
+  ;; FIXME: should the UI opt-in for these first?
+
+  (let [{:keys [devtools last-snapshot] }  @devtools-ref]
+
+    (when (seq devtools)
+      (let [snapshot (take-snapshot* svc)]
+        ;; FIXME: how often are these actually equal?
+        ;; snapshot can be a large structure, so trying to find a balance between sending
+        ;; it too often (which is expensive) and not missing updates too much
+        (when (not= snapshot last-snapshot)
+          (swap! devtools-ref assoc :last-snapshot snapshot)
+          (shared/relay-msg runtime
+            {:op ::work-finished
+             :to devtools
+             :snapshot snapshot}))))))
+
 (cljs-shared/add-plugin! ::tree #{:obj-support}
   (fn [{:keys [runtime obj-support] :as env}]
     (let [svc {:runtime runtime :obj-support obj-support :devtools #{}}]
@@ -388,10 +421,25 @@
          {::take-snapshot #(take-snapshot svc %)
           ::runtime-notify #(runtime-notify svc %)
           ::clients #(clients svc %)
+          ::m/request-log #(request-log svc %)
           ::m/highlight-component #(highlight-component svc %)
           ::m/remove-highlight #(remove-highlight svc %)}
+
+         :on-disconnect
+         (fn []
+           (set! sg/work-finish-trigger nil))
+
          :on-welcome
          (fn []
+           (set! sg/work-finish-trigger
+             ;; don't want to spam the devtools too much, this might be called a lot
+             (gfn/debounce
+               (fn []
+                 (notify-work-finished svc))
+
+               ;; FIXME: feels bad in the UI if this waits too long
+               250))
+
            (shared/relay-msg runtime
              {:op :request-clients
               :notify true

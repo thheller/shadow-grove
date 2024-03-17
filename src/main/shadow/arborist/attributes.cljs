@@ -127,10 +127,10 @@
       (gfn/debounce debounce)
 
       throttle
-      (gfn/debounce throttle)
+      (gfn/throttle throttle)
 
       rate-limit
-      (gfn/debounce rate-limit)
+      (gfn/rateLimit rate-limit)
 
       ;; FIXME: would it be better to default these to true?
       prevent-default
