@@ -227,7 +227,7 @@
         (init-fn env))
 
       ;; base env, using init-fn to customize
-      {::comp/scheduler (::rt/scheduler @rt-ref)
+      {::rt/scheduler (::rt/scheduler @rt-ref)
        ::comp/event-target event-target
        ::suspense-keys (atom {})
        ::rt/root-el root-el

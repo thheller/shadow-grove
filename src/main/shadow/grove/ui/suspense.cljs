@@ -91,7 +91,7 @@
                 (SuspenseScheduler. parent-scheduler this false #{})
 
                 offscreen-env
-                (assoc parent-env ::comp/scheduler scheduler)
+                (assoc parent-env ::rt/scheduler scheduler)
 
                 next-managed
                 (ap/as-managed vnode offscreen-env)]
@@ -114,7 +114,7 @@
             (SuspenseScheduler. parent-scheduler this false #{})
 
             offscreen-env
-            (assoc parent-env ::comp/scheduler scheduler)
+            (assoc parent-env ::rt/scheduler scheduler)
 
             next-managed
             (ap/as-managed vnode offscreen-env)]
@@ -162,7 +162,7 @@
           (SuspenseScheduler. parent-scheduler this false #{})
 
           offscreen-env
-          (assoc parent-env ::comp/scheduler scheduler)
+          (assoc parent-env ::rt/scheduler scheduler)
 
           next-managed
           (ap/as-managed vnode offscreen-env)]
@@ -221,7 +221,7 @@
             vnode
             (common/dom-marker env)
             env
-            (::comp/scheduler env)
+            (::rt/scheduler env)
             nil ;; display
             nil ;; offscreen
             nil ;; offscreen-scheduler

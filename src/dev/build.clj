@@ -15,8 +15,8 @@
           (-> build-state
               (cb/generate
                 '{:ui
-                  {:include
-                   [shadow.grove.examples*]}})
+                  {:entries
+                   [shadow.grove.examples.app]}})
               (cb/write-outputs-to (io/file "examples" "app" "public" "css")))]
 
       (doseq [mod (:outputs build-state)
@@ -38,9 +38,8 @@
           (-> build-state
               (cb/generate
                 '{:ui
-                  {:include
-                   [shadow.grove.devtools*
-                    shadow.grove.ui.edn]}})
+                  {:entries
+                   [shadow.grove.devtools]}})
               (cb/minify)
               (cb/write-outputs-to (io/file "src" "ui-release" "shadow" "grove" "devtools" "dist" "css")))]
 

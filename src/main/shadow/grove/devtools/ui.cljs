@@ -61,9 +61,6 @@
       [{:op ::m/remove-highlight
         :to (get-in env [:db runtime :client-id])}])))
 
-(def $container
-  (css :pl-2))
-
 (defc ui-slot [item {:keys [type name value] :as slot} idx type]
   (bind expanded-ref (atom false))
   (bind expanded (sg/watch expanded-ref))

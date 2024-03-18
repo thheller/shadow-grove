@@ -379,10 +379,10 @@
 
 (defn slot-db-read [read-fn args]
   (let [ref
-        (comp/claim-bind! ::slot-db-read)
+        (rt/claim-bind! ::slot-db-read)
 
         rt-ref
-        (::rt/runtime-ref comp/*env*)
+        (::rt/runtime-ref rt/*env*)
 
         {::rt/keys [active-queries-map] :as query-env}
         @rt-ref]
@@ -398,7 +398,7 @@
       (let [query-id (rt/next-id)]
         (swap! ref assoc :query-id query-id)
 
-        (.set active-queries-map query-id #(comp/invalidate! ref))))
+        (.set active-queries-map query-id #(gp/invalidate! ref))))
 
     ;; perform query
     (let [db
@@ -443,7 +443,7 @@
           (keyword-identical? result :db/loading)
           (if (false? (:suspend config))
             :db/loading
-            (do (set! comp/*ready* false)
+            (do (set! rt/*ready* false)
                 (:default config {})))
 
           (and ident query)
@@ -456,14 +456,12 @@
     ))
 
 (defn slot-state [init-state merge-fn]
-  (let [ref (comp/claim-bind! ::slot-state)
+  (let [ref (rt/claim-bind! ::slot-state)
         state @ref]
 
     (cond
       (nil? state)
-      (do (reset! ref (vary-meta init-state assoc ::ref ref ::init-state init-state))
-          ;; hack to prevent users from swapping something that can't hold meta
-          (set! ref -validator (fn [x] (satisfies? IMeta x))))
+      (reset! ref (vary-meta init-state assoc ::ref ref ::init-state init-state))
 
       (and merge-fn (not= init-state (::init-state (meta state))))
       (swap! ref (fn [state]

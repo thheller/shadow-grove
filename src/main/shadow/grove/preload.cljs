@@ -265,10 +265,7 @@
      :loaded (lazy/ready? (.-loadable this))
      :children [(dp/snapshot (.-managed this) ctx)]})
 
-  vlist/VirtualList
-  (snapshot [this ctx]
-    {:type 'shadow.grove.ui.vlist/VirtualList
-     :children [(dp/snapshot (.-node (.-box-root this)) ctx)]})
+
 
   shadow.grove.components/ManagedComponent
   (snapshot [this ctx]

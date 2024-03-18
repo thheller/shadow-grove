@@ -15,9 +15,6 @@
   DEBUG
   (js/goog.define "shadow.grove.components.DEBUG" js/goog.DEBUG))
 
-(defprotocol IInvalidateSlot
-  (invalidate! [ref]))
-
 ;; this file is an exercise in writing the least idiomatic clojure code possible
 ;; shield your eyes and beware!
 
@@ -25,13 +22,6 @@
 (defonce instances-ref (atom {}))
 
 (set! *warn-on-infer* false)
-
-(def ^:dynamic ^ManagedComponent *component* nil)
-(def ^:dynamic ^not-native *env* nil)
-(def ^:dynamic ^numeric *slot-idx* nil)
-(def ^:dynamic *slot-value* ::pending)
-(def ^:dynamic *claimed* nil)
-(def ^:dynamic *ready* true)
 
 (defn debug-find-roots []
   (reduce
@@ -123,45 +113,6 @@
       idx
       (recur (bit-shift-right search 1) (inc idx)))))
 
-
-(deftype ComponentSlotRef
-  [component
-   idx
-   ^:mutable state]
-
-  IInvalidateSlot
-  (invalidate! [this]
-    (.invalidate-slot! component idx))
-
-  cljs.core/IDeref
-  (-deref [this]
-    state)
-
-  cljs.core/IReset
-  (-reset! [this nval]
-    (let [oval state]
-      (when (not= oval nval)
-        (set! state nval)
-
-        ;; don't invalidate when slot-fn itself is modifying ref
-        (when-not (identical? *component* component)
-          (when-not (identical? idx *slot-idx*)
-            (invalidate! this)))
-        ))
-
-    nval)
-
-  cljs.core/ISwap
-  (-swap! [this f]
-    (-reset! this (f state)))
-  (-swap! [this f a]
-    (-reset! this (f state a)))
-  (-swap! [this f a b]
-    (-reset! this (f state a b)))
-  (-swap! [this f a b xs]
-    (-reset! this (apply f state a b xs))))
-
-
 (defclass ManagedComponent
   (field ^not-native scheduler)
   (field ^not-native parent-env)
@@ -182,7 +133,6 @@
 
   ;; using maps here since not all slots are going to have refs/cleanup
   (field ^not-native slot-refs {})
-  (field ^not-native slot-cleanup {})
 
   (field ^number dirty-from-args (int 0))
   (field ^number dirty-slots (int 0))
@@ -198,7 +148,7 @@
     (set! parent-env e)
     (set! config c)
     (set! args a)
-    (set! scheduler (::scheduler parent-env))
+    (set! scheduler (::rt/scheduler parent-env))
     (when DEBUG
       ;; only keeping this info for debugging purposes currently, don't think its needed otherwise
       ;; use js/Set since it always maintains insertion order which makes debugging easier
@@ -213,7 +163,7 @@
                  ::ap/dom-event-handler this
                  ::component this
                  ::event-target this
-                 ::scheduler this)))
+                 ::rt/scheduler this)))
 
     ;; marks component boundaries in dev mode for easier inspect
     (when DEBUG
@@ -292,11 +242,12 @@
 
     (set! destroyed? true)
 
-    (reduce-kv
-      (fn [_ ref callback]
-        (callback @ref))
+    (reduce
+      (fn [_ ref]
+        (when-some [cleanup (.-cleanup ref)]
+          (cleanup @ref)))
       nil
-      slot-cleanup)
+      slot-refs)
 
     ;; cleanup fns returned by sg/effect fns
     (reduce-kv
@@ -381,29 +332,15 @@
 
     js/undefined)
 
-  ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
-  Object
-  (handle-error! [this ex]
-    (set! error? true)
-    (.unschedule! this)
-
-    (let [err-fn (::error-handler parent-env)]
-      (err-fn this ex)))
-
-  (get-slot-value [this idx]
-    (aget slot-values idx))
-
-  (set-slot-cleanup! [this ref callback]
-    (set! slot-cleanup (assoc slot-cleanup ref callback)))
-
-  (get-slot-ref [this idx]
+  gp/IProvideSlot
+  (-init-slot-ref [this idx]
     (or (get slot-refs idx)
-        (let [ref (ComponentSlotRef. this idx nil)]
+        (let [ref (rt/SlotRef. this idx nil nil)]
           (set! slot-refs (assoc slot-refs idx ref))
           ref
           )))
 
-  (invalidate-slot! [this idx]
+  (-invalidate-slot! [this idx]
     (when-not destroyed?
       ;; (js/console.log "invalidate-slot!" idx current-idx (.-component-name config) this)
 
@@ -419,6 +356,19 @@
       (.schedule! this ::slot-invalidate!))
 
     js/undefined)
+
+
+  ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
+  Object
+  (handle-error! [this ex]
+    (set! error? true)
+    (.unschedule! this)
+
+    (let [err-fn (::error-handler parent-env)]
+      (err-fn this ex)))
+
+  (get-slot-value [this idx]
+    (aget slot-values idx))
 
   (mark-slots-dirty! [this dirty-bits]
     (set! dirty-slots (bit-or dirty-slots dirty-bits))
@@ -457,24 +407,20 @@
             prev-val
             (aget slot-values idx)]
 
-        ;; not using binding because we don't need previous value capture
-        ;; it is an error if this ever runs nested
+        (binding [rt/*slot-provider* this
+                  rt/*env* component-env
+                  rt/*slot-idx* idx
+                  rt/*slot-value* prev-val
+                  rt/*claimed* false
+                  rt/*ready* true]
 
-        (set! *component* this)
-        (set! *env* component-env)
-        (set! *slot-idx* idx)
-        (set! *slot-value* prev-val)
-        (set! *claimed* false)
-        (set! *ready* true)
-
-        (try
           (let [val (.run slot-config this)]
 
             (aset slot-values idx val)
 
             ;; FIXME: suspense should really be tracked elsewhere
             ;; stops processing slots until invalidated and resuming
-            (if-not *ready*
+            (if-not rt/*ready*
               (.suspend! this idx)
               ;; clear dirty bit
               (do (set! dirty-slots (bit-clear dirty-slots idx))
@@ -489,15 +435,7 @@
                       (set! needs-render? true)))
 
                   (set! current-idx (inc current-idx))
-                  )))
-
-          (finally
-            (set! *component* nil)
-            (set! *ready* true)
-            (set! *env* nil)
-            (set! *slot-idx* nil)
-            (set! *slot-value* ::undefined)
-            (set! *claimed* false)))))
+                  ))))))
 
     js/undefined)
 
@@ -665,7 +603,8 @@
           render-deps
           render-fn
           events
-          debug-info)]
+          (when ^boolean js/goog.DEBUG
+            debug-info))]
 
     (when ^boolean js/goog.DEBUG
       (swap! components-ref assoc component-name cfg))
@@ -700,58 +639,52 @@
 (defn get-component-name [^ManagedComponent comp]
   (. ^clj (. comp -config) -component-name))
 
-(defn claim-bind! [claim-id]
-  (when-not *component*
-    (throw (ex-info "can only be used in component bind" {})))
-
-  (if-not *claimed*
-    (set! *claimed* claim-id)
-    (throw (ex-info "slot already claimed" {:idx *slot-idx* :claimed *claimed* :attempt claim-id})))
-
-  (.get-slot-ref *component* *slot-idx*))
-
-(defn set-cleanup! [ref callback]
-  (when-not *component*
-    (throw (ex-info "can only be used in component bind" {})))
-
-  (.set-slot-cleanup! *component* ref callback))
+(defn set-cleanup! [^rt/SlotRef ref callback]
+  (set! ref -cleanup callback))
 
 (defn slot-effect [deps callback]
-  (let [ref (claim-bind! ::slot-effect)]
+  (let [^rt/SlotRef ref
+        (rt/claim-bind! ::slot-effect)
+
+        ^ManagedComponent component
+        (.-provider ref)]
+
+    (when-not (instance? ManagedComponent component)
+      (throw (ex-info "only components support effects" {})))
 
     ;; FIXME: should this check and bail if deps keywords changed?
     ;; cannot go from :mount to :render
     (case deps
       :render
       ;; ref used as key, so we update the callback when called again
-      (.add-after-render-effect *component* ref callback)
+      (.add-after-render-effect component ref callback)
 
       :mount
       (when-not @ref
-        (.add-after-render-effect-once *component* ref callback)
+        (.add-after-render-effect-once component ref callback)
         (reset! ref :mount))
 
       ;; slot only called again if callback used bindings that changed
       :auto
-      (.add-after-render-effect-once *component* ref callback)
+      (.add-after-render-effect-once component ref callback)
 
       ;; else
       (let [prev-deps @ref]
         (when (not= prev-deps deps)
-          (.add-after-render-effect-once *component* ref callback))
+          (.add-after-render-effect-once component ref callback))
         ))
 
     nil))
 
 (defn env-watch [key-to-atom path-in-atom default]
   (let [ref
-        (claim-bind! ::env-watch)
+        (rt/claim-bind! ::env-watch)
 
         {prev-atom :the-atom :as state}
         @ref
 
         the-atom
-        (get *env* key-to-atom)]
+        (get rt/*env* key-to-atom)]
 
     (set-cleanup! ref
       (fn [{:keys [the-atom]}]
@@ -772,7 +705,7 @@
                 nval (get-in new path-in-atom default)]
 
             (when (not= oval nval)
-              (invalidate! ref)))))
+              (gp/invalidate! ref)))))
 
       (swap! ref assoc :the-atom the-atom))
 
@@ -785,7 +718,7 @@
 
 (defn atom-watch [the-atom access-fn]
   (let [ref
-        (claim-bind! ::atom-watch)
+        (rt/claim-bind! ::atom-watch)
 
         {prev-atom :the-atom :as state}
         @ref]
@@ -806,7 +739,7 @@
                 nval (access-fn new)]
 
             (when (not= oval nval)
-              (invalidate! ref)))))
+              (gp/invalidate! ref)))))
 
       (swap! ref assoc :the-atom the-atom))
 
@@ -820,7 +753,7 @@
 (defn track-change
   [val trigger-fn]
   (let [ref
-        (claim-bind! ::track-change)
+        (rt/claim-bind! ::track-change)
 
         {prev-val :val
          prev-result :result
@@ -830,6 +763,6 @@
     (if (and (not (nil? state))
              (= prev-val val))
       prev-result
-      (let [result (trigger-fn *env* prev-val val prev-result)]
+      (let [result (trigger-fn rt/*env* prev-val val prev-result)]
         (swap! ref assoc :val val :result result)
         result))))

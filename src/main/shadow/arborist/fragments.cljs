@@ -39,6 +39,15 @@
 
 (deftype FragmentCode [create-fn mount-fn update-fn destroy-fn debug-info])
 
+(defn make-fragment-code [create-fn mount-fn update-fn destroy-fn debug-info]
+  (FragmentCode. create-fn mount-fn update-fn destroy-fn
+    ;; don't want these in release builds
+    ;; closure is mostly smart enough to remove this without, but as soon as there
+    ;; ever is externs for a field debug_info that'll fail, so better be sure
+    (when ^boolean js/goog.DEBUG
+      debug-info
+      )))
+
 (declare ^{:arglists '([thing])} fragment-init?)
 
 (defclass ManagedFragment

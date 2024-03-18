@@ -29,6 +29,13 @@
 (defprotocol ISchedulerSource
   (get-scheduler [this]))
 
+(defprotocol IInvalidateSlot
+  (invalidate! [ref]))
+
+(defprotocol IProvideSlot
+  (-invalidate-slot! [this idx])
+  (-init-slot-ref [this idx]))
+
 ;; just here so that working on components file doesn't cause hot-reload issues
 ;; with already constructed components
 (deftype ComponentConfig

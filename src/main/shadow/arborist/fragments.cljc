@@ -861,7 +861,7 @@
 
 
         fragment-code
-        `(shadow.arborist.fragments/FragmentCode.
+        `(shadow.arborist.fragments/make-fragment-code
            #_~(->> ast
                    (map make-template-string)
                    (str/join ""))
