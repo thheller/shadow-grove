@@ -379,7 +379,7 @@
 
 (defn slot-db-read [read-fn args]
   (let [ref
-        (rt/claim-bind! ::slot-db-read)
+        (rt/claim-slot! ::slot-db-read)
 
         rt-ref
         (::rt/runtime-ref rt/*env*)
@@ -456,7 +456,7 @@
     ))
 
 (defn slot-state [init-state merge-fn]
-  (let [ref (rt/claim-bind! ::slot-state)
+  (let [ref (rt/claim-slot! ::slot-state)
         state @ref]
 
     (cond

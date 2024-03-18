@@ -644,7 +644,7 @@
 
 (defn slot-effect [deps callback]
   (let [^rt/SlotRef ref
-        (rt/claim-bind! ::slot-effect)
+        (rt/claim-slot! ::slot-effect)
 
         ^ManagedComponent component
         (.-provider ref)]
@@ -678,7 +678,7 @@
 
 (defn env-watch [key-to-atom path-in-atom default]
   (let [ref
-        (rt/claim-bind! ::env-watch)
+        (rt/claim-slot! ::env-watch)
 
         {prev-atom :the-atom :as state}
         @ref
@@ -718,7 +718,7 @@
 
 (defn atom-watch [the-atom access-fn]
   (let [ref
-        (rt/claim-bind! ::atom-watch)
+        (rt/claim-slot! ::atom-watch)
 
         {prev-atom :the-atom :as state}
         @ref]
@@ -753,7 +753,7 @@
 (defn track-change
   [val trigger-fn]
   (let [ref
-        (rt/claim-bind! ::track-change)
+        (rt/claim-slot! ::track-change)
 
         {prev-val :val
          prev-result :result

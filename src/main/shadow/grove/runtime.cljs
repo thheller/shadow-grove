@@ -68,7 +68,7 @@
   (-swap! [this f a b xs]
     (-reset! this (apply f state a b xs))))
 
-(defn claim-bind! [claim-id]
+(defn claim-slot! [claim-id]
   (when-not *slot-provider*
     (throw (ex-info "can only be used in component bind" {})))
 
