@@ -20,7 +20,6 @@
     [shadow.grove.ui.portal]
     [shadow.grove.ui.suspense]
     [shadow.grove.ui.loadable :as loadable]
-    [shadow.grove.ui.vlist :as vlist]
     [shadow.grove.components :as comp]
     [shadow.grove.devtools.protocols :as dp]
     [shadow.lazy :as lazy]

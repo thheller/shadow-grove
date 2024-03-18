@@ -1,14 +1,15 @@
 (ns shadow.arborist.interpreted
   (:require
     [clojure.string :as str]
+    [shadow.cljs.modern :refer (defclass)]
     [shadow.arborist.attributes :as attr]
     [shadow.arborist.collections :as coll]
-    [shadow.cljs.modern :refer (defclass)]
     [shadow.arborist.fragments :as frag]
     [shadow.arborist.attributes :as a]
     [shadow.arborist.protocols :as p]
     [shadow.arborist.dom-scheduler :as ds]
-    [shadow.arborist.common :as common]))
+    [shadow.arborist.common :as common]
+    [shadow.grove.devtools.protocols :as devp]))
 
 (deftype TagInfo [tag tag-id tag-class attr-class attrs child-offset]
   Object
@@ -396,3 +397,17 @@
   cljs.core/LazySeq
   (as-managed [this env]
     (construct-hiccup-seq env this)))
+
+
+
+(when ^boolean js/goog.DEBUG
+  (extend-protocol devp/ISnapshot
+    ManagedVector
+    (snapshot [this ctx]
+      {:type `ManagedVector
+       :children (mapv #(devp/snapshot % ctx) (.-children this))})
+
+    ManagedFragment
+    (snapshot [this ctx]
+      {:type `ManagedFragment
+       :children (mapv #(devp/snapshot % ctx) (.-children this))})))

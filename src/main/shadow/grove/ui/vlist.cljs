@@ -1,4 +1,5 @@
 (ns shadow.grove.ui.vlist
+  {:deprecated "use vlist2 instead"}
   (:require
     [goog.style :as gs]
     [goog.functions :as gfn]
