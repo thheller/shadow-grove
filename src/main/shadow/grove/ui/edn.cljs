@@ -42,8 +42,8 @@
 
 (defn measure
   ([val]
-   (measure val 0))
-  ([val result]
+   (measure 0 val))
+  ([result val]
    (cond
      (map? val)
      (if (empty? val)
@@ -53,18 +53,14 @@
        ;; key can also be vectors and stuff, so cannot just assume 1 for keywords
        (reduce-kv
          (fn [result k v]
-           (max (measure k result) (measure v result)))
+           (max (measure result k) (measure result v)))
          result
          val))
 
      (coll? val)
      (if (empty? val)
        (inc result)
-       (reduce
-         (fn [result v]
-           (+ result (measure v)))
-         result
-         val))
+       (reduce measure result val))
 
      :else
      (inc result))))
