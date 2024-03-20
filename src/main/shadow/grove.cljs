@@ -255,7 +255,7 @@
           new-root (sa/dom-root root-el new-env)]
       (sa/update! new-root root-node)
       (when ^boolean js/goog.DEBUG
-        (.setAttribute root-el "data-grove-root" ""))
+        (swap! rt-ref assoc ::rt/root new-root))
       (set! (.-sg$root root-el) new-root)
       (set! (.-sg$env root-el) new-env)
       ::started)))
@@ -312,9 +312,9 @@
         (set! update-pending? false)))))
 
 (defn prepare
-  ([data-ref runtime-id]
-   (prepare {} data-ref runtime-id))
-  ([init data-ref runtime-id]
+  ([data-ref app-id]
+   (prepare {} data-ref app-id))
+  ([init data-ref app-id]
    (let [root-scheduler
          (RootScheduler. false (js/Set.))
 
@@ -323,11 +323,12 @@
            (assoc init
              ::rt/rt true
              ::rt/scheduler root-scheduler
-             ::rt/runtime-id runtime-id
+             ::rt/app-id app-id
              ::rt/data-ref data-ref
              ::rt/event-config {}
              ::rt/event-interceptors []
              ::rt/fx-config {}
+             ::rt/tx-seq-ref (atom 0)
              ::rt/active-queries-map (js/Map.)
              ::rt/key-index-seq (atom 0)
              ::rt/key-index-ref (atom {})
@@ -336,7 +337,7 @@
              ::rt/env-init []))]
 
      (when ^boolean js/goog.DEBUG
-       (swap! rt/known-runtimes-ref assoc runtime-id rt-ref))
+       (swap! rt/known-runtimes-ref assoc app-id rt-ref))
 
      rt-ref)))
 

@@ -247,6 +247,8 @@
     tx-env
     event-interceptors))
 
+(def tx-reporter nil)
+
 (defn process-event
   [rt-ref
    ev
@@ -349,11 +351,12 @@
 
                     (fx-fn fx-env value))))))
 
-          (when-some [tx-reporter (::rt/tx-reporter env)]
+          (when-not (nil? tx-reporter)
             (rt/next-tick
               (fn []
                 (let [report
-                      {:event ev
+                      {:app-id (::rt/app-id env)
+                       :event ev
                        :origin origin
                        :keys-new keys-new
                        :keys-removed keys-removed

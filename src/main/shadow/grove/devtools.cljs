@@ -4,6 +4,7 @@
     [shadow.cljs.modern :refer (js-await)]
     [shadow.grove.db :as db]
     [shadow.grove.history :as history]
+    [shadow.grove.impl :as impl]
     [shadow.grove.runtime :as rt]
     [shadow.grove.events :as ev]
     [shadow.grove.devtools :as-alias m]
@@ -37,7 +38,7 @@
        :root-el root-el})
 
   (when ^boolean js/goog.DEBUG
-    (swap! env/rt-ref assoc :shadow.grove.runtime/tx-reporter
+    (set! impl/tx-reporter
       (fn [report]
         (let [e (-> report :event :e)]
           (case e

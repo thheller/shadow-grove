@@ -57,14 +57,15 @@
                 (let [v (get val k)
 
                       $map-key
-                      (css {:padding "1px 0.5rem 1px 0"})
+                      (css :align-top {:padding "1px 0.5rem 1px 0"})
 
                       $map-val
                       (css :p-0 :w-full)]
                   (<< [:tr {:class (css :border-b
                                      ["&:last-child" {:border "none"}])}
                        [:td {:class $map-key}
-                        (render-edn k)]
+                        [:div {:class (css {:position "sticky" :top "0px"})}
+                         (render-edn k)]]
                        [:td {:class $map-val}
                         (render-edn v)]])
                   )))]]))))

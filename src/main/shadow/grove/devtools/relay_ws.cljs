@@ -59,7 +59,34 @@
 
 (defmethod handle-msg :supported-ops
   [env {:keys [from ops] :as msg}]
-  (assoc-in env [:db (db/make-ident ::m/runtime from) :supported-ops] ops))
+  (-> env
+      (assoc-in [:db (db/make-ident ::m/runtime from) :supported-ops] ops)
+      (cond->
+        (contains? ops ::m/stream-sub)
+        (sg/queue-fx :relay-send
+          [{:op ::m/stream-sub
+            :to from}])
+        )))
+
+(defmethod handle-msg ::m/stream-start
+  [env {:keys [from events] :as msg}]
+  (let [runtime-ident (db/make-ident ::m/runtime from)
+        events (mapv #(assoc % :event-id (random-uuid) :runtime runtime-ident) events)]
+
+    (update env :db db/merge-seq ::m/event events [runtime-ident :events])
+    ))
+
+(defmethod handle-msg ::m/stream-update
+  [env {:keys [from event] :as msg}]
+  (let [event-id (random-uuid)
+        event-ident (db/make-ident ::m/event event-id)
+        runtime-ident (db/make-ident ::m/runtime from)]
+
+    (-> env
+        (update :db db/add ::m/event (assoc event :event-id event-id :runtime runtime-ident))
+        (update-in [:db runtime-ident :events] conj event-ident)
+        )))
+
 
 (defmethod handle-msg :shadow.grove.preload/work-finished
   [env {:keys [from snapshot] :as msg}]

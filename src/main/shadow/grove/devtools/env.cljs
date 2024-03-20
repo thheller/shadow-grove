@@ -8,6 +8,11 @@
   {::m/runtime
    {:type :entity
     :primary-key :client-id
+    :attrs {}}
+
+   ::m/event
+   {:type :entity
+    :primary-key :event-id
     :attrs {}}})
 
 (defonce data-ref

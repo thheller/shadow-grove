@@ -1,8 +1,11 @@
 (ns shadow.grove.preload
   (:require
+    [cognitect.transit :as transit]
     [goog.functions :as gfn]
     [goog.style :as gs]
     [clojure.core.protocols :as cp]
+    [shadow.grove.db.ident :as ident]
+    [shadow.grove.impl :as impl]
     [shadow.remote.runtime.api :as p]
     [shadow.remote.runtime.shared :as shared]
     [shadow.remote.runtime.writer :as lw]
@@ -302,21 +305,16 @@
   )
 
 (defn take-snapshot* [env]
-  (->> (js/document.querySelectorAll "[data-grove-root]")
-       (array-seq)
-       (map #(.-sg$root ^js %))
+  (->> (vals @rt/known-runtimes-ref)
+       (map (fn [rt-ref]
+              (::rt/root @rt-ref)))
        (map #(dp/snapshot % env))
        (vec)))
 
 (defn take-snapshot [{:keys [runtime] :as env} msg]
   (shared/reply runtime msg
     {:op ::snapshot
-     :snapshot
-     (->> (js/document.querySelectorAll "[data-grove-root]")
-          (array-seq)
-          (map #(.-sg$root ^js %))
-          (map #(dp/snapshot % env))
-          (vec))}))
+     :snapshot (take-snapshot* env)}))
 
 (defonce devtools-ref (atom nil))
 
@@ -391,7 +389,7 @@
 (defn notify-work-finished [{:keys [runtime] :as svc}]
   ;; FIXME: should the UI opt-in for these first?
 
-  (let [{:keys [devtools last-snapshot] }  @devtools-ref]
+  (let [{:keys [devtools last-snapshot]} @devtools-ref]
 
     (when (seq devtools)
       (let [snapshot (take-snapshot* svc)]
@@ -405,9 +403,91 @@
              :to devtools
              :snapshot snapshot}))))))
 
+;; keeping these global, since devtools ui doesn't need the runtime distinction.
+;; I should maybe get rid of ::rt/runtime-id entirely, since the only reason I added it
+;; was that I initially planned to have the devtools running in-process with its own runtime.
+;; since its now remote that is no longer needed? are users ever going to have two runtimes
+;; in the same page?
+(defonce tx-seq-ref (atom 0))
+(defonce tx-ref (atom {}))
+
+(defn as-stream-event [report]
+  (select-keys report
+    [:ts
+     :tx-id
+     :app-id
+     :event
+     :fx
+     :keys-new
+     :keys-updated
+     :keys-removed]))
+
+(defn stream-sub [{:keys [streams-ref runtime] :as svc} {:keys [from] :as msg}]
+  (swap! streams-ref conj from)
+
+  (shared/reply runtime msg
+    {:op ::m/stream-start
+
+     ;; send stored events in order they appeared
+     :events
+     (->> @tx-ref
+          (sort-by first)
+          (map second)
+          (map as-stream-event)
+          (vec))}))
+
+(defn pad2 [num]
+  (.padStart (js/String num) 2 "0"))
+
+(defn send-stream-update
+  [{:keys [runtime] :as svc}
+   to
+   report]
+
+  (let [tx-id (swap! tx-seq-ref inc)
+        report (assoc report :tx-id tx-id :ts (let [d (js/Date.)]
+                                                (str (pad2 (.getHours d))
+                                                     ":"
+                                                     (pad2 (.getMinutes d))
+                                                     ":"
+                                                     (pad2 (.getSeconds d))
+                                                     "."
+                                                     (.getMilliseconds d)
+                                                     )
+                                                ))]
+
+    ;; store so that devtools can query db diff on demand
+    ;; FIXME: should really garbage collect these at some point, they are going to pile up quick
+    (swap! tx-ref assoc tx-id report)
+
+    (shared/relay-msg runtime
+      {:op ::m/stream-update
+       :to to
+       :event (as-stream-event report)
+       })))
+
+(defn tx-reporter [{:keys [streams-ref runtime] :as svc} report]
+  (doseq [runtime @streams-ref]
+    (send-stream-update svc runtime report)))
+
 (cljs-shared/add-plugin! ::tree #{:obj-support}
   (fn [{:keys [runtime obj-support] :as env}]
-    (let [svc {:runtime runtime :obj-support obj-support :devtools #{}}]
+    (cljs-shared/add-transit-writers! runtime
+      {ident/Ident
+       (transit/write-handler
+         (fn tag-fn [x]
+           "gdb/ident")
+         (fn rep-fn [x]
+           [(db/ident-key x) (db/ident-val x)]))})
+
+    (let [streams-ref
+          (atom #{})
+
+          svc
+          {:runtime runtime
+           :obj-support obj-support
+           :streams-ref streams-ref
+           :devtools #{}}]
 
       (reset! devtools-ref svc)
 
@@ -417,12 +497,15 @@
          {::take-snapshot #(take-snapshot svc %)
           ::runtime-notify #(runtime-notify svc %)
           ::clients #(clients svc %)
+          ::m/stream-sub #(stream-sub svc %)
           ::m/request-log #(request-log svc %)
           ::m/highlight-component #(highlight-component svc %)
           ::m/remove-highlight #(remove-highlight svc %)}
 
          :on-disconnect
          (fn []
+           (reset! streams-ref #{})
+           (set! impl/tx-reporter nil)
            (set! sg/work-finish-trigger nil))
 
          :on-welcome
@@ -435,6 +518,8 @@
 
                ;; FIXME: feels bad in the UI if this waits too long
                250))
+
+           (set! impl/tx-reporter #(tx-reporter svc %))
 
            (shared/relay-msg runtime
              {:op :request-clients
