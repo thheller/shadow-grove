@@ -91,89 +91,6 @@
     (.push (IdentFormatter.))
     ))
 
-
-(defn get-databases [{:keys [runtime]} msg]
-  (shared/reply runtime msg
-    {:op :db/list-databases
-     ;; just keywords or more details? don't actually have any?
-     :databases
-     (-> (keys @rt/known-runtimes-ref)
-         (set))}))
-
-(defn get-tables [{:keys [runtime]} {:keys [db] :as msg}]
-  (let [env-ref (get @rt/known-runtimes-ref db)
-        data-ref (get @env-ref ::rt/data-ref)
-        data @data-ref
-        {::db/keys [ident-types]} (meta data)]
-
-    (shared/reply runtime msg
-      {:op :db/list-tables
-       ;; just keywords or more details? don't actually have any?
-       :tables (conj ident-types :db/globals)})))
-
-(defn get-table-columns [{:keys [runtime]} {:keys [db table] :as msg}]
-  (let [env-ref (get @rt/known-runtimes-ref db)
-        data-ref (get @env-ref ::rt/data-ref)
-        db @data-ref
-
-        ;; FIXME: likely doesn't need all rows, should just take a random sample
-        known-keys-of-table
-        (->> (db/all-of db table)
-             (mapcat keys)
-             (set))]
-
-    (shared/reply runtime msg
-      {:op :db/list-table-columns
-       :columns known-keys-of-table})))
-
-(defn get-rows [{:keys [runtime]} {:keys [db table offset count] :as msg}]
-  (let [env-ref (get @rt/known-runtimes-ref db)
-        data-ref (get @env-ref ::rt/data-ref)
-        data @data-ref
-        rows
-        (->> (db/all-of data table)
-             (sort-by :db/ident)
-             (vec))]
-
-    ;; FIXME: slice data, don't send everything
-
-    (shared/reply runtime msg
-      {:op :db/list-rows
-       :rows rows})))
-
-(defn get-entry
-  [{:keys [runtime]}
-   {:keys [db table row] :as msg}]
-  (let [env-ref (get @rt/known-runtimes-ref db)
-        data-ref (get @env-ref ::rt/data-ref)
-        db @data-ref
-        ident (if (= table :db/globals) row (db/make-ident table row))
-        val (get db ident)]
-
-    (shared/reply runtime msg
-      {:op :db/entry :row val})))
-
-(cljs-shared/add-plugin! ::db-explorer #{}
-  (fn [{:keys [runtime] :as env}]
-    (let [svc
-          {:runtime runtime}]
-
-      ;; maybe just return the ops?
-      ;; dunno if this extra layer is needed
-      (p/add-extension runtime
-        ::db-explorer
-        {:ops
-         {:db/get-databases #(get-databases svc %)
-          :db/get-tables #(get-tables svc %)
-          :db/get-table-columns #(get-table-columns svc %)
-          :db/get-rows #(get-rows svc %)
-          :db/get-entry #(get-entry svc %)}
-         ;; :on-tool-disconnect #(tool-disconnect svc %)
-         })
-      svc))
-  (fn [{:keys [runtime] :as svc}]
-    (p/del-extension runtime ::db-explorer)))
-
 (set! *warn-on-infer* false)
 
 (defn as-embedded-value [{:keys [obj-support] :as ctx} value]
@@ -339,6 +256,8 @@
   (doto (js/document.createElement "div")
     (gs/setStyle
       #js {"border" "2px solid red"
+           "background-color" "red"
+           "opacity" "0.2"
            "position" "absolute"
            "pointer-events" "none"
            "z-index" "1000"
@@ -399,15 +318,14 @@
         (when (not= snapshot last-snapshot)
           (swap! devtools-ref assoc :last-snapshot snapshot)
           (shared/relay-msg runtime
-            {:op ::work-finished
+            {:op ::m/work-finished
              :to devtools
              :snapshot snapshot}))))))
 
-;; keeping these global, since devtools ui doesn't need the runtime distinction.
-;; I should maybe get rid of ::rt/runtime-id entirely, since the only reason I added it
-;; was that I initially planned to have the devtools running in-process with its own runtime.
-;; since its now remote that is no longer needed? are users ever going to have two runtimes
-;; in the same page?
+
+;; FIXME: this needs some kind of garbage collection
+;; these will pile up quick and they potentially hold large structures
+;; want to hold on to quite a few so that fresh devtools don't start out empty
 (defonce tx-seq-ref (atom 0))
 (defonce tx-ref (atom {}))
 
@@ -436,39 +354,43 @@
           (map as-stream-event)
           (vec))}))
 
-(defn pad2 [num]
-  (.padStart (js/String num) 2 "0"))
+(defn get-runtimes [{:keys [runtime] :as svc} msg]
+  (shared/reply runtime msg
+    {:op ::m/runtimes
+     :runtimes (set (keys @rt/known-runtimes-ref))}))
 
-(defn send-stream-update
-  [{:keys [runtime] :as svc}
-   to
-   report]
+(defn get-db-copy [{:keys [runtime] :as svc} {:keys [app-id] :as msg}]
+  (shared/reply runtime msg
+    {:op ::m/db-copy
+     :db (-> @rt/known-runtimes-ref (get app-id) (deref) (get ::rt/data-ref) (deref) (deref))}))
 
-  (let [tx-id (swap! tx-seq-ref inc)
-        report (assoc report :tx-id tx-id :ts (let [d (js/Date.)]
-                                                (str (pad2 (.getHours d))
-                                                     ":"
-                                                     (pad2 (.getMinutes d))
-                                                     ":"
-                                                     (pad2 (.getSeconds d))
-                                                     "."
-                                                     (.getMilliseconds d)
-                                                     )
-                                                ))]
+(defn tx-reporter [report]
+  (let [tx-id
+        (swap! tx-seq-ref inc)
+
+        report
+        (assoc report
+          :tx-id tx-id
+          :ts (js/Date.now))]
 
     ;; store so that devtools can query db diff on demand
     ;; FIXME: should really garbage collect these at some point, they are going to pile up quick
     (swap! tx-ref assoc tx-id report)
 
-    (shared/relay-msg runtime
-      {:op ::m/stream-update
-       :to to
-       :event (as-stream-event report)
-       })))
+    (when-some [devtools @devtools-ref]
+      (let [streams-ref (:streams-ref devtools)
+            streams @streams-ref]
+        (when (seq streams)
+          (shared/relay-msg (:runtime devtools)
+            {:op ::m/stream-update
+             :to streams
+             :event (as-stream-event report)
+             }))))))
 
-(defn tx-reporter [{:keys [streams-ref runtime] :as svc} report]
-  (doseq [runtime @streams-ref]
-    (send-stream-update svc runtime report)))
+;; register immediately when preload is loaded
+;; otherwise may miss some events before actually connected
+;; want to ideally gather all events
+(set! impl/tx-reporter tx-reporter)
 
 (cljs-shared/add-plugin! ::tree #{:obj-support}
   (fn [{:keys [runtime obj-support] :as env}]
@@ -494,9 +416,11 @@
       (p/add-extension runtime
         ::tree
         {:ops
-         {::take-snapshot #(take-snapshot svc %)
+         {::m/take-snapshot #(take-snapshot svc %)
           ::runtime-notify #(runtime-notify svc %)
           ::clients #(clients svc %)
+          ::m/get-runtimes #(get-runtimes svc %)
+          ::m/get-db-copy #(get-db-copy svc %)
           ::m/stream-sub #(stream-sub svc %)
           ::m/request-log #(request-log svc %)
           ::m/highlight-component #(highlight-component svc %)
@@ -518,8 +442,6 @@
 
                ;; FIXME: feels bad in the UI if this waits too long
                250))
-
-           (set! impl/tx-reporter #(tx-reporter svc %))
 
            (shared/relay-msg runtime
              {:op :request-clients

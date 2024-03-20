@@ -40,12 +40,49 @@
 
 (declare render-edn)
 
+(defn measure
+  ([val]
+   (measure val 0))
+  ([val result]
+   (cond
+     (map? val)
+     (if (empty? val)
+       ;; going to display at least one row to show empty map
+       (inc result)
+       ;; key or val, which ever takes more height is used
+       ;; key can also be vectors and stuff, so cannot just assume 1 for keywords
+       (reduce-kv
+         (fn [result k v]
+           (max (measure k result) (measure v result)))
+         result
+         val))
+
+     (coll? val)
+     (if (empty? val)
+       (inc result)
+       (reduce
+         (fn [result v]
+           (+ result (measure v)))
+         result
+         val))
+
+     :else
+     (inc result))))
+
 (defn edn-empty-coll [label]
   (<< [:div {:class (css :pl-1)} label [:span {:class (css :text-gray-400)} " empty"]]))
 
 (defc edn-map [val]
   (bind keys
     (attempt-to-sort (keys val)))
+
+  ;; FIXME: figure out good way to limit size of initially shown elements
+  ;; each edn entry takes at least one height unit
+  ;; nested maps/vectors/maps can yield trees
+  ;; which aren't exactly human friendly to view
+  ;; at some point should default to the usual expand toggle style
+  ;; but I want to avoid having to toggle 5 times to see a somewhat simple structure
+  ;; (bind height (measure val))
 
   (render
     (if (empty? val)
@@ -74,13 +111,18 @@
   (render
     (if (empty? val)
       (edn-empty-coll "[]")
-      (<< [:div {:class (css {:border-left "6px solid green"})}
+      (<< [:div {:class (css {:border-left "6px solid green"
+                              :display "grid"
+                              :grid-template-columns "min-content 1fr"})}
            (sg/simple-seq
              val
              (fn [item idx]
                (let [$seq-val (css :pl-1 :border-b
                                 ["&:last-child" {:border "none"}])]
-                 (<< [:div {:class $seq-val} (render-edn item)]))
+                 (<< [:div {:class (css :border-b)}
+                      [:div {:class (css :px-1 :text-right :text-gray-500 {:position "sticky" :top "0px" :width "30px"})}
+                       idx]]
+                     [:div {:class $seq-val} (render-edn item)]))
                ))]))))
 
 (defc edn-set [val]
@@ -120,7 +162,10 @@
     (<< [:div {:class (css :pl-1 :whitespace-nowrap {:color "#008000"})} (pr-str val)])
 
     (keyword? val)
-    (<< [:div {:class (css :pl-1 :whitespace-nowrap {:color "#660e7a"})} (pr-str val)])
+    (<< [:div {:class (css :pl-1 :whitespace-nowrap {:color "#660e7a"})}
+         ;; FIXME: would be nice if keywords didn't take so much space with long namespaces
+         ;; should maybe truncate namespaces in some way and only show full on hover/title?
+         (str val)])
 
     :else
     (<< [:div {:class (css :pl-1 :whitespace-nowrap)} (pr-str val)])

@@ -49,7 +49,7 @@
   (when-some [search js/document.location.search]
     (let [params (js/URLSearchParams. search)]
       (when-some [rt-id (.get params "runtime")]
-        (let [ident (db/make-ident ::m/runtime (js/parseInt rt-id 10))]
+        (let [ident (db/make-ident ::m/target (js/parseInt rt-id 10))]
           (sg/run-tx! env/rt-ref
             {:e :form/set-attr
              :a [::m/selected-runtime]

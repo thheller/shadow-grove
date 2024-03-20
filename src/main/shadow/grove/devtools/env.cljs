@@ -5,7 +5,7 @@
     [shadow.grove.devtools :as-alias m]))
 
 (def schema
-  {::m/runtime
+  {::m/target
    {:type :entity
     :primary-key :client-id
     :attrs {}}

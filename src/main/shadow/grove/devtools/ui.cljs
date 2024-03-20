@@ -25,10 +25,49 @@
 
 (defn load-snapshot [env {:keys [client-id] :as runtime}]
   (relay-ws/call! @(::rt/runtime-ref env)
-    {:op :shadow.grove.preload/take-snapshot
+    {:op ::m/take-snapshot
      :to client-id}
     {:e ::m/set-snapshot!
      :ident (:db/ident runtime)}))
+
+(defn set-db-copy!
+  {::ev/handle ::m/set-db-copy!}
+  [env {:keys [ident call-result] :as msg}]
+  (let [remote-db
+        (:db call-result)
+
+        db-globals
+        (reduce-kv
+          (fn [m k v]
+            (if (keyword? k)
+              (assoc m k v)
+              m))
+          {}
+          remote-db)
+
+        db-tables
+        (reduce-kv
+          (fn [m k v]
+            (if (and (vector? k) (= 2 (count k)) (= :shadow.grove.db/all (first k)))
+              (assoc m (second k) (count v))
+              m))
+          {}
+          remote-db)]
+
+    (update-in env [:db ident] merge
+      {:db remote-db
+       :db-globals db-globals
+       :db-tables db-tables})
+    ))
+
+(defn load-db-copy [env {:keys [client-id] :as target}]
+  (relay-ws/call! @(::rt/runtime-ref env)
+    {:op ::m/get-db-copy
+     :to client-id
+     ;; FIXME: app selection in case of multiple?
+     :app-id (first (:runtimes target))}
+    {:e ::m/set-db-copy!
+     :ident (:db/ident target)}))
 
 (defn switch-view!
   {::ev/handle ::m/switch-view!}
@@ -41,9 +80,9 @@
   (when (contains? (get-in env [:db runtime :supported-ops]) ::m/highlight-component)
     (sg/queue-fx env
       :relay-send
-      [{:op ::m/highlight-component
-        :component item
-        :to (get-in env [:db runtime :client-id])}])))
+      {:op ::m/highlight-component
+       :component item
+       :to (get-in env [:db runtime :client-id])})))
 
 (defn request-log!
   {::ev/handle ::m/request-log!}
@@ -51,12 +90,12 @@
   (when (contains? (get-in env [:db runtime :supported-ops]) ::m/request-log)
     (sg/queue-fx env
       :relay-send
-      [{:op ::m/request-log
-        :type type
-        :idx idx
-        :component instance-id
-        :name name
-        :to (get-in env [:db runtime :client-id])}])))
+      {:op ::m/request-log
+       :type type
+       :idx idx
+       :component instance-id
+       :name name
+       :to (get-in env [:db runtime :client-id])})))
 
 (defn remove-highlight!
   {::ev/handle ::m/remove-highlight!}
@@ -64,8 +103,8 @@
   (when (contains? (get-in env [:db runtime :supported-ops]) ::m/highlight-component)
     (sg/queue-fx env
       :relay-send
-      [{:op ::m/remove-highlight
-        :to (get-in env [:db runtime :client-id])}])))
+      {:op ::m/remove-highlight
+       :to (get-in env [:db runtime :client-id])})))
 
 (defn events-vlist [env db runtime-ident {:keys [offset num] :or {offset 0 num 0} :as params}]
   (let [events
@@ -196,6 +235,19 @@
                    (ui-node-children ctx item)]))
             )))))
 
+(defn pad2 [num]
+  (.padStart (js/String num) 2 "0"))
+
+(defn time-ts [ts]
+  (let [d (js/Date. ts)]
+    (str (pad2 (.getHours d))
+         ":"
+         (pad2 (.getMinutes d))
+         ":"
+         (pad2 (.getSeconds d))
+         "."
+         (.getMilliseconds d))))
+
 (defc ui-event [event-ident]
   (bind entry
     (sg/db-read event-ident))
@@ -204,12 +256,12 @@
     (let [{:keys [ts event keys-new keys-updated keys-removed fx]} entry
           $numeric (css :text-center {:width "30px"})]
 
-      (<< [:div {:class (css :flex :border-b [:hover :bg-gray-100])
+      (<< [:div {:class (css :flex :border-b :cursor-pointer [:hover :bg-gray-100])
                  :on-click {:e :form/set-attr
                             :a [(:runtime entry) :selected-event]
                             :v event-ident}}
-           [:div {:class (css :px-2)} ts]
-           [:div {:class (css :flex-1 {:color "#660e7a"})} (str (:e event))]
+           [:div {:class (css :px-2 {:width "95px"})} (time-ts ts)]
+           [:div {:class (css :flex-1 :truncate {:color "#660e7a"})} (str (:e event))]
            [:div {:class $numeric} (count keys-new)]
            [:div "/"]
            [:div {:class $numeric} (count keys-updated)]
@@ -279,11 +331,10 @@
   (render
     (let [{:keys [ts event keys-new keys-updated keys-removed fx]} entry
           $label (css :px-4 :py-2 :border-l :text-center :cursor-pointer)]
-      (<< [:div {:class (css :flex)}
-           [:div {:class (css :flex-1 :px-4 :pt-2 :text-lg :font-bold)} (str (:e event))]
-           [:div {:class (css :cursor-pointer :pt-2 :pr-2)
-                  :on-click ::close!} icon-close]]
-          [:div {:class (css :px-4 :pb-2 :text-gray-600 :text-sm)} ts]
+      (<< [:div {:class (css :flex)
+                 :on-click ::close!}
+           [:div {:class (css :flex-1 :px-4 :py-2 :text-lg :font-bold)} (str (:e event))]
+           [:div {:class (css :cursor-pointer :py-2 :pr-2)} icon-close]]
           [:div {:class (css :flex :border-y-2 :overflow-hidden)}
            [:div {:class $label :on-click #(reset! tab-ref :event)} "Event"]
            [:div {:class $label :on-click #(reset! tab-ref :keys-new)} (count keys-new) " new keys added"]
@@ -298,7 +349,6 @@
                :keys-removed keys-removed
                :fx fx
                event))]
-
           ))))
 
 (defc ui-events [runtime-ident]
@@ -327,16 +377,46 @@
                (ui-event-details selected)]))
         )))
 
-(defc ui-tree [^:stable runtime-ident]
-  (bind {:keys [snapshot view] :as runtime}
-    (sg/db-read runtime-ident))
+(defc ui-data [target-ident]
+  (bind {:keys [db db-globals db-table db-tables] :as target}
+    (sg/db-read target-ident))
+
+  (effect :mount [env]
+    (when-not db
+      (load-db-copy env target)))
+
+  (bind db-tables-sorted
+    (->> (keys db-tables)
+         (sort)
+         (vec)))
+
+  (event ::select! [env ev e]
+    (js/console.log "select" ev))
+
+  (render
+    (<< [:div {:class (css :p-2 :text-lg :font-semibold)}
+         "Tables " (count db-tables)
+         " | Globals " (count db-globals)]
+        (sg/simple-seq db-tables-sorted
+          (fn [table]
+            (<< [:div {:class (css :flex :cursor-pointer :border-b)
+                       :on-click {:e ::select! :table table}}
+                 [:div {:class (css :text-right :px-2 {:width "60px"})} (str (get db-tables table))]
+                 [:div {:class (css :flex-1)}
+                  (str table)]])))
+
+        )))
+
+(defc ui-tree [^:stable target-ident]
+  (bind {:keys [snapshot view] :as target}
+    (sg/db-read target-ident))
 
   (effect :mount [env]
     (when-not snapshot
-      (load-snapshot env runtime)))
+      (load-snapshot env target)))
 
   (event ::load-snapshot! [env ev e]
-    (load-snapshot env runtime))
+    (load-snapshot env target))
 
   ;; FIXME: move this to proper db handlers
   ;; component technically doesn't care about selected
@@ -362,14 +442,14 @@
     (.preventDefault e)
     (sg/run-tx env
       {:e :form/set-attr
-       :a [runtime-ident :selected]
+       :a [target-ident :selected]
        :v nil}))
 
   (event ::request-log! [env ev e]
-    (sg/dispatch-up! env (assoc ev :runtime runtime-ident)))
+    (sg/dispatch-up! env (assoc ev :runtime target-ident)))
 
   (bind ctx
-    {:runtime-ident runtime-ident
+    {:runtime-ident target-ident
      :path []
      :level 0})
 
@@ -377,7 +457,7 @@
     (<< [:div {:class (css :flex-1 :overflow-auto :pl-2 :py-2)}
          (sg/simple-seq snapshot #(ui-node ctx %1))])))
 
-(defc ui-runtime [^:stable runtime-ident]
+(defc ui-target [^:stable runtime-ident]
   (bind view
     (sg/db-read [runtime-ident :view]))
 
@@ -389,13 +469,13 @@
              [:button {:class $button
                        :on-click {:e ::m/switch-view! :runtime runtime-ident :view :tree}} "Tree"]
              [:button {:class $button
-                       :on-click {:e ::m/switch-view! :runtime runtime-ident :view :events}} "Events"]]]
+                       :on-click {:e ::m/switch-view! :runtime runtime-ident :view :events}} "Events"]
+             [:button {:class $button
+                       :on-click {:e ::m/switch-view! :runtime runtime-ident :view :data}} "Data"]]]
            (case view
-             :events
+             :tree (ui-tree runtime-ident)
+             :data (ui-data runtime-ident)
              (ui-events runtime-ident)
-
-             ;; ui tree
-             (ui-tree runtime-ident)
              )]))))
 
 (attrs/add-attr :form/value
@@ -437,40 +517,39 @@
         (.addEventListener node "change" ev-fn)
         ))))
 
-(defn suitable-runtimes [env db]
-  (->> (db/all-of db ::m/runtime)
-       (filter #(contains? (:supported-ops %) :shadow.grove.preload/take-snapshot))
+(defn suitable-targets [env db]
+  (->> (db/all-of db ::m/target)
+       (filter #(contains? (:supported-ops %) ::m/take-snapshot))
        (remove :disconnected)
        (sort-by :client-id)
        (vec)))
 
 (defc ui-root []
-  (bind runtimes
-    (sg/db-read suitable-runtimes))
+  (bind targets
+    (sg/db-read suitable-targets))
 
   (bind selected
-    (sg/db-read ::m/selected-runtime))
+    (sg/db-read ::m/selected-target))
 
   (render
     (cond
-      (empty? runtimes)
+      (empty? targets)
       (<< [:div {:class (css :p-4 :text-lg)}
-           "no runtimes found, need a runtime with shadow.grove.preload loaded!"])
+           "no target runtimes found, need a runtime with shadow.grove.preload loaded!"])
 
       selected
-      (ui-runtime selected)
+      (ui-target selected)
 
       :else
       (<< [:div {:class (css :p-4)}
            [:h1 {:class (css :font-bold :text-2xl :pb-4)} "Runtimes"]
-           (sg/simple-seq runtimes
-             (fn [{:keys [client-id client-info supported-ops] :as runtime}]
+           (sg/simple-seq targets
+             (fn [{:keys [client-id client-info supported-ops] :as target}]
                (<< [:div {:class (css :cursor-pointer :border :p-2 :mb-2 [:hover :border-green-500])
                           :on-click
                           {:e :form/set-attr
-                           :a [::m/selected-runtime]
-                           :v (:db/ident runtime)}}
+                           :a [::m/selected-target]
+                           :v (:db/ident target)}}
                     (str "#" client-id " - " (pr-str (dissoc client-info :since :proc-id)))
                     ])))
-           ]
-          ))))
+           ]))))
