@@ -380,7 +380,7 @@
 
           (:return result))))))
 
-(defn slot-db-read [read-fn args]
+(defn slot-db-read [args read-fn]
   (let [ref
         (rt/claim-slot! ::slot-db-read)
 
@@ -408,29 +408,30 @@
           @(::rt/data-ref query-env)
 
           {:keys [query-id read-keys]}
-          @ref]
+          @ref
 
-      (let [observed-data
-            (db/observed db)
+          observed-data
+          (db/observed db)
 
-            ;; FIXME: should the env used here be the component env or a fresh dedicated env?
-            ;; FIXME: should this expose an update function to update db?
-            ;; FIXME: should this expose a transact! function similar to fx?
-            result
-            (apply read-fn query-env observed-data args)
+          ;; FIXME: should the env used here be the component env or a fresh dedicated env?
+          ;; FIXME: should this expose an update function to update db?
+          ;; FIXME: should this expose a transact! function similar to fx?
+          result
+          (apply read-fn query-env observed-data args)
 
-            new-keys
-            (db/observed-keys observed-data)]
+          new-keys
+          (db/observed-keys observed-data)]
 
-        (index-query query-env query-id read-keys new-keys)
+      (index-query query-env query-id read-keys new-keys)
 
-        (swap! ref assoc :read-keys new-keys)
+      (swap! ref assoc :read-keys new-keys)
 
-        result
-        ))))
+      result
+      )))
 
 (defn slot-query [ident query config]
   (slot-db-read
+    []
     (fn [env db]
       (let [result
             (if (and ident (nil? query))
@@ -454,9 +455,7 @@
 
           :else
           result
-          )))
-    []
-    ))
+          )))))
 
 (defn slot-state [init-state merge-fn]
   (let [ref (rt/claim-slot! ::slot-state)

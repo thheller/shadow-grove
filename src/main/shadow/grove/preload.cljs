@@ -1,5 +1,6 @@
 (ns shadow.grove.preload
   (:require
+    [clojure.string :as str]
     [cognitect.transit :as transit]
     [goog.functions :as gfn]
     [goog.style :as gs]
@@ -107,7 +108,7 @@
 (extend-protocol dp/ISnapshot
   default
   (snapshot [this ctx]
-    (js/console.log "unknown snapshot" (pr-str (type this)) this)
+    ;; (js/console.log "unknown snapshot" (pr-str (type this)) this)
     {:type (pr-str (type this))})
 
   shadow.arborist/TreeRoot
@@ -310,17 +311,22 @@
 
   (let [{:keys [devtools last-snapshot]} @devtools-ref]
 
-    (when (seq devtools)
-      (let [snapshot (take-snapshot* svc)]
-        ;; FIXME: how often are these actually equal?
-        ;; snapshot can be a large structure, so trying to find a balance between sending
-        ;; it too often (which is expensive) and not missing updates too much
-        (when (not= snapshot last-snapshot)
-          (swap! devtools-ref assoc :last-snapshot snapshot)
-          (shared/relay-msg runtime
-            {:op ::m/work-finished
-             :to devtools
-             :snapshot snapshot}))))))
+    ;; FIXME: this sends too much data too frequently
+    ;; shadow-cljs snapshot easily reaches 100k sometimes
+    ;; sending that for every UI update makes both the devtools and the app slow
+    ;; should just send a update signal and the devtools UI can request the full snapshot?
+
+    #_(when (seq devtools)
+        (let [snapshot (take-snapshot* svc)]
+          ;; FIXME: how often are these actually equal?
+          ;; snapshot can be a large structure, so trying to find a balance between sending
+          ;; it too often (which is expensive) and not missing updates too much
+          (when (not= snapshot last-snapshot)
+            (swap! devtools-ref assoc :last-snapshot snapshot)
+            (shared/relay-msg runtime
+              {:op ::m/work-finished
+               :to devtools
+               :snapshot snapshot}))))))
 
 
 ;; FIXME: this needs some kind of garbage collection
@@ -329,16 +335,18 @@
 (defonce tx-seq-ref (atom 0))
 (defonce tx-ref (atom {}))
 
-(defn as-stream-event [report]
-  (select-keys report
-    [:ts
-     :tx-id
-     :app-id
-     :event
-     :fx
-     :keys-new
-     :keys-updated
-     :keys-removed]))
+(defn as-stream-event [entry]
+  (-> entry
+      (select-keys
+        [:ts
+         :tx-id
+         :app-id
+         :event
+         :fx
+         :keys-new
+         :keys-updated
+         :keys-removed])
+      (assoc :type :tx-report)))
 
 (defn stream-sub [{:keys [streams-ref runtime] :as svc} {:keys [from] :as msg}]
   (swap! streams-ref conj from)
@@ -387,10 +395,39 @@
              :event (as-stream-event report)
              }))))))
 
+(defn header-val? [x]
+  (or (string? x) (keyword? x)))
+
+(defn dev-log-handler [src-info log-struct]
+  ;; (dev-log "SOME-LABEL" x)
+  ;; (dev-log "SOME-LABEL" ::foo {:x "data"})
+  ;; (dev-log ::foo {:x "data"})
+  ;; trying to extra a reasonable line used in UI event log
+  (let [header (vec (take-while header-val? log-struct))
+        header (->> header
+                    (map str)
+                    (str/join " "))]
+
+    ;; FIXME: should these also be stored in tx-ref?
+    (when-some [devtools @devtools-ref]
+      (let [streams-ref (:streams-ref devtools)
+            streams @streams-ref]
+        (when (seq streams)
+          (shared/relay-msg (:runtime devtools)
+            {:op ::m/stream-update
+             :to streams
+             :event {:type :dev-log
+                     :ts (js/Date.now)
+                     :header header
+                     :log log-struct
+                     :src-info src-info}
+             }))))))
+
 ;; register immediately when preload is loaded
 ;; otherwise may miss some events before actually connected
 ;; want to ideally gather all events
 (set! impl/tx-reporter tx-reporter)
+(set! sg/dev-log-handler dev-log-handler)
 
 (cljs-shared/add-plugin! ::tree #{:obj-support}
   (fn [{:keys [runtime obj-support] :as env}]

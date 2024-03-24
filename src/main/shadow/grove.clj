@@ -24,3 +24,14 @@
 
 (defmacro css [& body]
   (with-meta `(shadow.css/css ~@body) (meta &form)))
+
+(defmacro dev-only [& body]
+  (when (= :dev (:shadow.build/mode &env))
+    `(do ~@body)))
+
+(defmacro dev-log [& args]
+
+  (when (= :dev (:shadow.build/mode &env))
+    (let [{:keys [line column file]} (meta &form)]
+      `(when-not (nil? shadow.grove/dev-log-handler)
+         (shadow.grove/dev-log-handler {:ns ~(str *ns*) :line ~line :column ~column :file ~file} [~@args])))))

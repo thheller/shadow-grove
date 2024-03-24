@@ -68,6 +68,7 @@
 (defn edn-empty-coll [label]
   (<< [:div {:class (css :pl-1)} label [:span {:class (css :text-gray-400)} " empty"]]))
 
+;; very wide but feels very clean
 (defc edn-map [val]
   (bind keys
     (attempt-to-sort (keys val)))
@@ -102,6 +103,41 @@
                        [:td {:class $map-val}
                         (render-edn v)]])
                   )))]]))))
+
+;; not super wide, but kinda unreadable
+(defc edn-map-not-so-wide [val]
+  (bind keys
+    (attempt-to-sort (keys val)))
+
+  ;; FIXME: figure out good way to limit size of initially shown elements
+  ;; each edn entry takes at least one height unit
+  ;; nested maps/vectors/maps can yield trees
+  ;; which aren't exactly human friendly to view
+  ;; at some point should default to the usual expand toggle style
+  ;; but I want to avoid having to toggle 5 times to see a somewhat simple structure
+  ;; (bind height (measure val))
+
+  (render
+    (if (empty? val)
+      (edn-empty-coll "{}")
+      (<< [:div {:class (css {:border-left "6px solid purple"
+                              ;; :display "grid"
+                              ;; :grid-template-columns "min-content 1fr"
+                              })}
+           (sg/simple-seq keys
+             (fn [k]
+               (let [v (get val k)
+
+                     $map-key
+                     (css :align-top {:padding "1px 0.5rem 1px 0"})
+
+                     $map-val
+                     (css :p-0 :pl-2 :w-full :border-b #_{:border-left "6px solid #eee"})]
+                 (<< [:div {:class (css :py-1 #_ {:position "sticky" :top "0px"})}
+                      (render-edn k)]
+                     [:div {:class $map-val}
+                      (render-edn v)])
+                 )))]))))
 
 (defc edn-vec [val]
   (render

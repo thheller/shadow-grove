@@ -9,65 +9,15 @@
     [shadow.grove.devtools.relay-ws :as relay-ws]
     [shadow.grove.ui.edn :as edn]
     [shadow.grove.ui.vlist2 :as vlist]
+    [shadow.grove.devtools.ui.events :as ui-events]
+    [shadow.grove.devtools.ui.tree :as ui-tree]
+    [shadow.grove.devtools.ui.data :as ui-data]
     [shadow.grove :as sg :refer (defc << css)]))
 
 (defn form-set-attr!
   {::ev/handle :form/set-attr}
   [env {:keys [a v]}]
   (update env :db assoc-in (if (keyword? a) [a] a) v))
-
-(defn set-snapshot!
-  {::ev/handle ::m/set-snapshot!}
-  [env {:keys [ident call-result] :as msg}]
-  (let [snapshot (:snapshot call-result)]
-    (assoc-in env [:db ident :snapshot] snapshot)
-    ))
-
-(defn load-snapshot [env {:keys [client-id] :as runtime}]
-  (relay-ws/call! @(::rt/runtime-ref env)
-    {:op ::m/take-snapshot
-     :to client-id}
-    {:e ::m/set-snapshot!
-     :ident (:db/ident runtime)}))
-
-(defn set-db-copy!
-  {::ev/handle ::m/set-db-copy!}
-  [env {:keys [ident call-result] :as msg}]
-  (let [remote-db
-        (:db call-result)
-
-        db-globals
-        (reduce-kv
-          (fn [m k v]
-            (if (keyword? k)
-              (assoc m k v)
-              m))
-          {}
-          remote-db)
-
-        db-tables
-        (reduce-kv
-          (fn [m k v]
-            (if (and (vector? k) (= 2 (count k)) (= :shadow.grove.db/all (first k)))
-              (assoc m (second k) (count v))
-              m))
-          {}
-          remote-db)]
-
-    (update-in env [:db ident] merge
-      {:db remote-db
-       :db-globals db-globals
-       :db-tables db-tables})
-    ))
-
-(defn load-db-copy [env {:keys [client-id] :as target}]
-  (relay-ws/call! @(::rt/runtime-ref env)
-    {:op ::m/get-db-copy
-     :to client-id
-     ;; FIXME: app selection in case of multiple?
-     :app-id (first (:runtimes target))}
-    {:e ::m/set-db-copy!
-     :ident (:db/ident target)}))
 
 (defn switch-view!
   {::ev/handle ::m/switch-view!}
@@ -123,360 +73,6 @@
      :offset offset
      :slice slice}))
 
-(defc ui-slot [item {:keys [type name value] :as slot} idx type]
-  (bind expanded-ref (atom false))
-  (bind expanded (sg/watch expanded-ref))
-
-  (render
-    (let [{:keys [preview edn]} value]
-      (<< [:div {:class (css :py-0.5 :pr-2 :font-semibold :whitespace-nowrap :border-t :cursor-help)
-                 :title (str "click to log " name " in runtime console")
-                 :on-click {:e ::m/request-log! :name name :instance-id (:instance-id item) :idx idx :type type}} name]
-          [:div {:class (css :py-0.5 :font-mono :overflow-auto :border-t)
-                 :style/max-height (when-not expanded "142px")
-                 :on-click #(swap! expanded-ref not)}
-           (if preview
-             (<< [:div
-                  [:div {:class (css :font-bold :p-2)} "FIXME: value too large to print"]
-                  [:div {:class (css :p-2 :truncate :whitespace-nowrap)} preview]])
-             (edn/render-edn-str edn))]
-          ))))
-
-(defc ui-detail [{:keys [args slots] :as item}]
-  (render
-    (let [$section-label (css :font-semibold :py-2 {:grid-column "span 2"})]
-      (<< [:div {:class (css :pl-2
-                          :overflow-hidden
-                          {:border-left "6px solid #eee"
-                           :display "grid"
-                           :grid-template-columns "min-content minmax(25%, auto)"
-                           :grid-row-gap "0"})}
-           (when (seq args)
-             (<< [:div {:class $section-label} "Arguments"]
-                 (sg/simple-seq args #(ui-slot item %1 %2 :arg))))
-
-           (when (seq slots)
-             (<< [:div {:class $section-label} "Slots"]
-                 (sg/simple-seq slots #(ui-slot item %1 %2 :slot))))]))))
-
-(declare ui-node)
-
-(defn ui-node-children [ctx item]
-  (sg/simple-seq (:children item)
-    (fn [item idx]
-      (ui-node (update ctx :path conj idx) item))))
-
-(defc ui-node [ctx item]
-  (bind selected
-    (sg/db-read ::m/selected))
-
-  (render
-    (if-not item
-      (<< [:div "nil"])
-      (case (:type item)
-        shadow.arborist/TreeRoot
-        (<< [:div {:class (css :font-mono)} (:container item)]
-            (ui-node-children ctx item))
-
-        shadow.arborist.common/ManagedRoot
-        (<< [:div "Managed Root"]
-            [:div {:class (css :pl-2)}
-             (ui-node-children ctx item)])
-
-        shadow.arborist.common/ManagedText
-        nil
-
-        shadow.arborist.collections/SimpleCollection
-        (<< [:div (str "simple-seq [" (count (:children item)) "]")]
-            [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
-             (ui-node-children ctx item)])
-
-        shadow.arborist.collections/KeyedCollection
-        (<< [:div (str "keyed-seq [" (count (:children item)) "]")]
-            [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
-             (ui-node-children ctx item)])
-
-        shadow.grove.ui.suspense/SuspenseRoot
-        (<< [:div "Suspense Root"]
-            [:div {:class (css :pl-2)}
-             (ui-node-children ctx item)])
-
-        shadow.grove.ui.portal/PortalNode
-        (<< [:div "Portal"]
-            [:div {:class (css :pl-2)}
-             (ui-node-children ctx item)])
-
-        shadow.grove.components/ManagedComponent
-        (let [comp-ctx (update ctx :path conj (:name item))]
-          (<< [:div {:class (css :font-semibold :cursor-pointer :whitespace-nowrap)
-                     :on-click {:e ::select! :item (:path comp-ctx)}
-                     :on-mouseout {:e ::m/remove-highlight! :runtime (:runtime-ident ctx) :item (:instance-id item)}
-                     :on-mouseenter {:e ::m/highlight! :runtime (:runtime-ident ctx) :item (:instance-id item)}}
-               (:name item)]
-              ;; can't use :instance-id for tracking which component should show details
-              ;; as every hot-reload re-creates the component, thus changing the instance id
-              ;; instead we track which one we were looking at via the path in the tree
-              ;; which might still change and close the one we were looking at
-              ;; but can't think of another way to do this currently
-              (when (contains? selected (:path comp-ctx))
-                (ui-detail item))
-              [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
-               (ui-node-children comp-ctx item)]))
-
-        shadow.arborist.fragments/ManagedFragment
-        (ui-node-children ctx item)
-        #_(<< [:div
-               [:div (str (:ns item) "/L" (:line item) "-C" (:column item))]
-               (ui-node-children item)])
-
-        (<< [:div (or (str (:type item)) (pr-str (dissoc item :children)))]
-            (when (:children item)
-              (<< [:div {:class (css :pl-2)}
-                   (ui-node-children ctx item)]))
-            )))))
-
-(defn pad2 [num]
-  (.padStart (js/String num) 2 "0"))
-
-(defn time-ts [ts]
-  (let [d (js/Date. ts)]
-    (str (pad2 (.getHours d))
-         ":"
-         (pad2 (.getMinutes d))
-         ":"
-         (pad2 (.getSeconds d))
-         "."
-         (.getMilliseconds d))))
-
-(defc ui-event [event-ident]
-  (bind entry
-    (sg/db-read event-ident))
-
-  (render
-    (let [{:keys [ts event keys-new keys-updated keys-removed fx]} entry
-          $numeric (css :text-center {:width "30px"})]
-
-      (<< [:div {:class (css :flex :border-b :cursor-pointer [:hover :bg-gray-100])
-                 :on-click {:e :form/set-attr
-                            :a [(:runtime entry) :selected-event]
-                            :v event-ident}}
-           [:div {:class (css :px-2 {:width "95px"})} (time-ts ts)]
-           [:div {:class (css :flex-1 :truncate {:color "#660e7a"})} (str (:e event))]
-           [:div {:class $numeric} (count keys-new)]
-           [:div "/"]
-           [:div {:class $numeric} (count keys-updated)]
-           [:div "/"]
-           [:div {:class $numeric} (count keys-removed)]
-           [:div "/"]
-           [:div {:class $numeric} (count fx)]
-           ])
-      )))
-
-(defc expandable [content]
-  (bind content-ref (sg/ref))
-
-  (bind state-ref
-    (atom {:expanded false
-           :needs-expand false}))
-
-  (bind {:keys [expanded needs-expand]}
-    (sg/watch state-ref))
-
-  (effect content [env]
-    (let [el @content-ref]
-      (when (not= (.-scrollHeight el) (.-clientHeight el))
-        (swap! state-ref assoc :needs-expand true)
-        )))
-
-  (render
-    (<< [:div {:class (css :relative
-                        ["& > .controls" :hidden]
-                        ["&:hover > .controls" :block])}
-
-         (when needs-expand
-           (<< [:div {:class (css "controls"
-                               :absolute :p-2 :bg-white
-                               :border :shadow-lg
-                               {:top "0px"
-                                :z-index "1"})
-                      :style/cursor (if expanded "zoom-out" "zoom-in")
-                      :on-click #(swap! state-ref update :expanded not)}
-                (if expanded "-" "+")]))
-
-         [:div {:dom/ref content-ref
-                :style/max-height (when-not expanded "129px")
-                :class (css :flex-1 :overflow-auto)}
-          content]])))
-
-(def icon-close
-  ;; https://github.com/sschoger/heroicons-ui/blob/master/svg/icon-x-square.svg
-  (<< [:svg
-       {:xmlns "http://www.w3.org/2000/svg"
-        :viewBox "0 0 24 24"
-        :width "24"
-        :height "24"}
-       [:path
-        {:d "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2zm0 2v14h14V5H5zm8.41 7l1.42 1.41a1 1 0 1 1-1.42 1.42L12 13.4l-1.41 1.42a1 1 0 1 1-1.42-1.42L10.6 12l-1.42-1.41a1 1 0 1 1 1.42-1.42L12 10.6l1.41-1.42a1 1 0 1 1 1.42 1.42L13.4 12z"}]]))
-
-(defc ui-event-details [event-ident]
-  (bind entry
-    (sg/db-read event-ident))
-
-  (bind tab-ref
-    (atom :event))
-
-  (bind tab
-    (sg/watch tab-ref))
-
-  (render
-    (let [{:keys [ts event keys-new keys-updated keys-removed fx]} entry
-          $label (css :px-4 :py-2 :border-l :text-center :cursor-pointer)]
-      (<< [:div {:class (css :flex)
-                 :on-click ::close!}
-           [:div {:class (css :flex-1 :px-4 :py-2 :text-lg :font-bold)} (str (:e event))]
-           [:div {:class (css :cursor-pointer :py-2 :pr-2)} icon-close]]
-          [:div {:class (css :flex :border-y-2 :overflow-hidden)}
-           [:div {:class $label :on-click #(reset! tab-ref :event)} "Event"]
-           [:div {:class $label :on-click #(reset! tab-ref :keys-new)} (count keys-new) " new keys added"]
-           [:div {:class $label :on-click #(reset! tab-ref :keys-updated)} (count keys-updated) " keys updated"]
-           [:div {:class $label :on-click #(reset! tab-ref :keys-removed)} (count keys-removed) " keys removed"]
-           [:div {:class $label :on-click #(reset! tab-ref :fx)} (count fx) " effects"]]
-          [:div {:class (css :flex-1 :overflow-auto)}
-           (edn/render-edn
-             (case tab
-               :keys-new keys-new
-               :keys-updated keys-updated
-               :keys-removed keys-removed
-               :fx fx
-               event))]
-          ))))
-
-(defc ui-events [runtime-ident]
-  (bind events
-    (sg/db-read [runtime-ident :events]))
-
-  (bind selected
-    (sg/db-read [runtime-ident :selected-event]))
-
-  (event ::close! [env ev e]
-    (sg/run-tx env
-      {:e :form/set-attr
-       :a [runtime-ident :selected-event]
-       :v nil}))
-
-  (render
-    (<< [:div {:class (css :flex-1 :overflow-auto)
-               :style/min-height (when selected "80px")
-               :style/max-height (when selected "80px")}
-         #_[:div {:class (css :flex)}
-            [:div {:class (css :text-center {:width "140px"})} "Changes"]
-            [:div {:class (css :flex-1 :pl-2)} "Event"]]
-         (sg/keyed-seq events identity ui-event)]
-        (when selected
-          (<< [:div {:class (css :flex-1 :flex :flex-col :overflow-auto {:border-top "4px solid #eee"})}
-               (ui-event-details selected)]))
-        )))
-
-(defc ui-data [target-ident]
-  (bind {:keys [db db-globals db-table db-tables] :as target}
-    (sg/db-read target-ident))
-
-  (effect :mount [env]
-    (when-not db
-      (load-db-copy env target)))
-
-  (bind db-tables-sorted
-    (->> (keys db-tables)
-         (sort)
-         (vec)))
-
-  (event ::select! [env ev e]
-    (js/console.log "select" ev))
-
-  (render
-    (<< [:div {:class (css :p-2 :text-lg :font-semibold)}
-         "Tables " (count db-tables)
-         " | Globals " (count db-globals)]
-        (sg/simple-seq db-tables-sorted
-          (fn [table]
-            (<< [:div {:class (css :flex :cursor-pointer :border-b)
-                       :on-click {:e ::select! :table table}}
-                 [:div {:class (css :text-right :px-2 {:width "60px"})} (str (get db-tables table))]
-                 [:div {:class (css :flex-1)}
-                  (str table)]])))
-
-        )))
-
-(defc ui-tree [^:stable target-ident]
-  (bind {:keys [snapshot view] :as target}
-    (sg/db-read target-ident))
-
-  (effect :mount [env]
-    (when-not snapshot
-      (load-snapshot env target)))
-
-  (event ::load-snapshot! [env ev e]
-    (load-snapshot env target))
-
-  ;; FIXME: move this to proper db handlers
-  ;; component technically doesn't care about selected
-  (bind selected
-    (sg/db-read ::m/selected))
-
-  (event ::select! [env {:keys [item] :as ev} e]
-    (.preventDefault e)
-    (sg/run-tx env
-      {:e :form/set-attr
-       :a ::m/selected
-       :v (cond
-            (contains? selected item)
-            (disj selected item)
-
-            (false? (.-ctrlKey e))
-            #{item}
-
-            :else
-            (conj selected item))}))
-
-  (event ::deselect! [env ev e]
-    (.preventDefault e)
-    (sg/run-tx env
-      {:e :form/set-attr
-       :a [target-ident :selected]
-       :v nil}))
-
-  (event ::request-log! [env ev e]
-    (sg/dispatch-up! env (assoc ev :runtime target-ident)))
-
-  (bind ctx
-    {:runtime-ident target-ident
-     :path []
-     :level 0})
-
-  (render
-    (<< [:div {:class (css :flex-1 :overflow-auto :pl-2 :py-2)}
-         (sg/simple-seq snapshot #(ui-node ctx %1))])))
-
-(defc ui-target [^:stable runtime-ident]
-  (bind view
-    (sg/db-read [runtime-ident :view]))
-
-  (render
-    (let [$button (css :inline-block :cursor-pointer :text-lg :border :px-4 :rounded :whitespace-nowrap :bg-blue-200 [:hover :bg-blue-400])]
-      (<< [:div {:class (css :flex-1 :flex :flex-col :text-sm :overflow-hidden)}
-           [:div {:class (css :bg-white :p-2)}
-            [:div
-             [:button {:class $button
-                       :on-click {:e ::m/switch-view! :runtime runtime-ident :view :tree}} "Tree"]
-             [:button {:class $button
-                       :on-click {:e ::m/switch-view! :runtime runtime-ident :view :events}} "Events"]
-             [:button {:class $button
-                       :on-click {:e ::m/switch-view! :runtime runtime-ident :view :data}} "Data"]]]
-           (case view
-             :tree (ui-tree runtime-ident)
-             :data (ui-data runtime-ident)
-             (ui-events runtime-ident)
-             )]))))
 
 (attrs/add-attr :form/value
   (fn [env ^js node oval nval]
@@ -516,6 +112,27 @@
         (set! node -grove$formField ev-fn)
         (.addEventListener node "change" ev-fn)
         ))))
+
+(defc ui-target [^:stable runtime-ident]
+  (bind view
+    (sg/db-read [runtime-ident :view]))
+
+  (render
+    (let [$button (css :inline-block :cursor-pointer :text-lg :border :px-4 :rounded :whitespace-nowrap :bg-blue-200 [:hover :bg-blue-400])]
+      (<< [:div {:class (css :flex-1 :flex :flex-col :text-sm :overflow-hidden)}
+           [:div {:class (css :bg-white :p-2)}
+            [:div
+             [:button {:class $button
+                       :on-click {:e ::m/switch-view! :runtime runtime-ident :view :tree}} "Tree"]
+             [:button {:class $button
+                       :on-click {:e ::m/switch-view! :runtime runtime-ident :view :events}} "Events"]
+             [:button {:class $button
+                       :on-click {:e ::m/switch-view! :runtime runtime-ident :view :data}} "Data"]]]
+           (case view
+             :tree (ui-tree/ui-panel runtime-ident)
+             :data (ui-data/ui-panel runtime-ident)
+             (ui-events/ui-panel runtime-ident)
+             )]))))
 
 (defn suitable-targets [env db]
   (->> (db/all-of db ::m/target)

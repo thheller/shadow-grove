@@ -24,6 +24,9 @@
 
 (set! *warn-on-infer* false)
 
+;; used by shadow.grove.preload to funnel debug messages to devtools
+(def dev-log-handler nil)
+
 (defn dispatch-up! [{::comp/keys [^not-native parent] :as env} ev-map]
   {:pre [(map? env)
          (map? ev-map)
@@ -75,7 +78,7 @@
           :else
           (throw (ex-info "unrecognized db-read argument" {:what what})))]
 
-    (impl/slot-db-read read-fn args)))
+    (impl/slot-db-read args read-fn)))
 
 (defn use-state
   ([]
