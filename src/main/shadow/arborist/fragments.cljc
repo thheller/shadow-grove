@@ -869,9 +869,10 @@
            ~(make-mount-impl ast sym->idx)
            ~(make-update-impl ast sym->idx)
            ~(make-destroy-impl ast sym->idx)
-           {:ns ~(str *ns*)
-            :line ~(:line (meta macro-form))
-            :column ~(:column (meta macro-form))})]
+           ~(let [m (meta macro-form)]
+              {:file (:file m)
+               :line (:line m)
+               :column (:column m)}))]
 
     ;;(clojure.pprint/pprint ast)
     ;; (clojure.pprint/pprint sym->idx)
