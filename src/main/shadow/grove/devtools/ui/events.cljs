@@ -2,8 +2,14 @@
   (:require
     [shadow.grove.devtools :as-alias m]
     [shadow.grove :as sg :refer (defc << css)]
+    [shadow.grove.events :as ev]
     [shadow.grove.devtools.ui.common :as ui-common]
     [shadow.grove.ui.edn :as edn]))
+
+(defn select-event!
+  {::ev/handle ::select-event!}
+  [env {:keys [runtime event] :as ev}]
+  (assoc-in env [:db runtime :selected-event] event))
 
 (defc ui-tx-report [entry]
   (bind tab-ref
@@ -89,23 +95,24 @@
 
   (render
     (let [{:keys [ts]} entry
-          $numeric (css :text-center {:width "30px"})]
+          $numeric (css :text-center {:width "30px"})
+
+          select-ev
+          {:e ::select-event!
+           :runtime (:runtime entry)
+           :event event-ident}]
 
       (case (:type entry)
         :dev-log
         (<< [:div {:class (css :flex :border-b :cursor-pointer [:hover :bg-gray-100])
-                   :on-click {:e :form/set-attr
-                              :a [(:runtime entry) :selected-event]
-                              :v event-ident}}
+                   :on-click select-ev}
              [:div {:class (css :px-2 {:width "95px"})} (time-ts ts)]
              [:div {:class (css :flex-1 :truncate)} (:header entry)]])
 
         :tx-report
         (let [{:keys [event keys-new keys-updated keys-removed fx]} entry]
           (<< [:div {:class (css :flex :border-b :cursor-pointer [:hover :bg-gray-100])
-                     :on-click {:e :form/set-attr
-                                :a [(:runtime entry) :selected-event]
-                                :v event-ident}}
+                     :on-click select-ev}
                [:div {:class (css :px-2 {:width "95px"})} (time-ts ts)]
                [:div {:class (css :flex-1 :truncate {:color "#660e7a"})} (str (:e event))]
                [:div {:class $numeric} (count keys-new)]
@@ -128,9 +135,9 @@
 
   (event ::close! [env ev e]
     (sg/run-tx env
-      {:e :form/set-attr
-       :a [runtime-ident :selected-event]
-       :v nil}))
+      {:e ::select-event!
+       :runtime runtime-ident
+       :event nil}))
 
   (render
     (<< [:div {:class (css :flex-1 :overflow-auto)}

@@ -36,8 +36,8 @@
 
 (defn request-log!
   {::ev/handle ::m/request-log!}
-  [env {:keys [type name idx instance-id runtime] :as ev} e]
-  (when (contains? (get-in env [:db runtime :supported-ops]) ::m/request-log)
+  [env {:keys [type name idx instance-id target] :as ev} e]
+  (when (contains? (get-in env [:db target :supported-ops]) ::m/request-log)
     (sg/queue-fx env
       :relay-send
       {:op ::m/request-log
@@ -45,7 +45,7 @@
        :idx idx
        :component instance-id
        :name name
-       :to (get-in env [:db runtime :client-id])})))
+       :to (get-in env [:db target :client-id])})))
 
 (defn remove-highlight!
   {::ev/handle ::m/remove-highlight!}
@@ -72,46 +72,6 @@
     {:item-count entries
      :offset offset
      :slice slice}))
-
-
-(attrs/add-attr :form/value
-  (fn [env ^js node oval nval]
-    (set! node -grove$formValue nval)))
-
-(defn get-form-value [^js x]
-  (cond
-    (instance? js/Event x)
-    (get-form-value (-> x .-target))
-
-    (instance? js/HTMLSelectElement x)
-    (let [selected (.-selectedOptions x)]
-      (if (.-multiple x)
-        (->> selected (array-seq) (map get-form-value) (vec))
-        (get-form-value (aget selected 0))))
-
-    (instance? js/HTMLElement x)
-    (-> x .-grove$formValue)
-    :else
-    (do (js/console.warn "failed to get form value from" x)
-        (throw (ex-info "failed to get form value from unknown object" {:x x})))
-    ))
-
-(attrs/add-attr :form/field
-  (fn [env ^js node oval nval]
-    (let [old-fn (.-grove$formField node)]
-      (when old-fn
-        (.removeEventListener node "change" old-fn))
-
-
-      ;; FIXME: node is of known type
-      ;; add specific handlers per tag instead of get-form-value having to figure it out
-      ;; might be better to use input even for input elements
-      (let [ev-fn (fn [e]
-                    (let [val (get-form-value node)]
-                      (sg/run-tx env {:e :form/set-attr :a nval :v val})))]
-        (set! node -grove$formField ev-fn)
-        (.addEventListener node "change" ev-fn)
-        ))))
 
 (defc ui-target [^:stable runtime-ident]
   (bind view
@@ -164,9 +124,8 @@
              (fn [{:keys [client-id client-info supported-ops] :as target}]
                (<< [:div {:class (css :cursor-pointer :border :p-2 :mb-2 [:hover :border-green-500])
                           :on-click
-                          {:e :form/set-attr
-                           :a [::m/selected-target]
-                           :v (:db/ident target)}}
+                          {:e ::m/select-target!
+                           :target (:db/ident target)}}
                     (str "#" client-id " - " (pr-str (dissoc client-info :since :proc-id)))
                     ])))
            ]))))

@@ -316,17 +316,17 @@
     ;; sending that for every UI update makes both the devtools and the app slow
     ;; should just send a update signal and the devtools UI can request the full snapshot?
 
-    #_(when (seq devtools)
-        (let [snapshot (take-snapshot* svc)]
-          ;; FIXME: how often are these actually equal?
-          ;; snapshot can be a large structure, so trying to find a balance between sending
-          ;; it too often (which is expensive) and not missing updates too much
-          (when (not= snapshot last-snapshot)
-            (swap! devtools-ref assoc :last-snapshot snapshot)
-            (shared/relay-msg runtime
-              {:op ::m/work-finished
-               :to devtools
-               :snapshot snapshot}))))))
+    (when (seq devtools)
+      (let [snapshot (take-snapshot* svc)]
+        ;; FIXME: how often are these actually equal?
+        ;; snapshot can be a large structure, so trying to find a balance between sending
+        ;; it too often (which is expensive) and not missing updates too much
+        (when (not= snapshot last-snapshot)
+          (swap! devtools-ref assoc :last-snapshot snapshot)
+          (shared/relay-msg runtime
+            {:op ::m/work-finished
+             :to devtools
+             :snapshot snapshot}))))))
 
 
 ;; FIXME: this needs some kind of garbage collection
@@ -478,7 +478,8 @@
                  (notify-work-finished svc))
 
                ;; FIXME: feels bad in the UI if this waits too long
-               250))
+               ;; but sending too much slows everything down
+               1000))
 
            (shared/relay-msg runtime
              {:op :request-clients

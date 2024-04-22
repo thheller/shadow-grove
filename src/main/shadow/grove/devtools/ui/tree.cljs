@@ -14,6 +14,17 @@
     (assoc-in env [:db ident :snapshot] snapshot)
     ))
 
+(defn select-target!
+  {::ev/handle ::m/select-target!}
+  [env {:keys [target] :as ev}]
+  (assoc-in env [:db ::m/selected-target] target))
+
+(defn set-selection!
+  {::ev/handle ::m/set-selection!}
+  [env {:keys [target v] :as ev}]
+  (assoc-in env [:db target :selected] v))
+
+
 (defn load-snapshot [env {:keys [client-id] :as runtime}]
   (relay-ws/call! @(::rt/runtime-ref env)
     {:op ::m/take-snapshot
@@ -21,7 +32,7 @@
     {:e ::m/set-snapshot!
      :ident (:db/ident runtime)}))
 
-(defc ui-slot [item {:keys [type name value] :as slot} idx type]
+(defc ui-slot [runtime-ident item {:keys [type name value] :as slot} idx type]
   (bind expanded-ref (atom false))
   (bind expanded (sg/watch expanded-ref))
 
@@ -29,7 +40,7 @@
     (let [{:keys [preview edn]} value]
       (<< [:div {:class (css :py-0.5 :pr-2 :font-semibold :whitespace-nowrap :border-t :cursor-help)
                  :title (str "click to log " name " in runtime console")
-                 :on-click {:e ::m/request-log! :name name :instance-id (:instance-id item) :idx idx :type type}} name]
+                 :on-click {:e ::m/request-log! :target runtime-ident :name name :instance-id (:instance-id item) :idx idx :type type}} name]
         [:div {:class (css :py-0.5 :font-mono :overflow-auto :border-t)
                :style/max-height (when-not expanded "142px")
                :on-click #(swap! expanded-ref not)}
@@ -40,7 +51,7 @@
            (edn/render-edn-str edn))]
         ))))
 
-(defc ui-detail [{:keys [args slots] :as item}]
+(defc ui-component-info [runtime-ident {:keys [args slots] :as item}]
   (render
     (let [$section-label (css :font-semibold :py-2 {:grid-column "span 2"})]
       (<< [:div {:class (css :pl-2
@@ -51,11 +62,11 @@
                            :grid-row-gap "0"})}
            (when (seq args)
              (<< [:div {:class $section-label} "Arguments"]
-               (sg/simple-seq args #(ui-slot item %1 %2 :arg))))
+               (sg/simple-seq args #(ui-slot runtime-ident item %1 %2 :arg))))
 
            (when (seq slots)
              (<< [:div {:class $section-label} "Slots"]
-               (sg/simple-seq slots #(ui-slot item %1 %2 :slot))))]))))
+               (sg/simple-seq slots #(ui-slot runtime-ident item %1 %2 :slot))))]))))
 
 (declare ui-node)
 
@@ -66,7 +77,7 @@
 
 (defc ui-node [ctx item]
   (bind selected
-    (sg/db-read ::m/selected))
+    (sg/db-read [(:runtime-ident ctx) :selected]))
 
   (render
     (if-not item
@@ -117,7 +128,7 @@
             ;; which might still change and close the one we were looking at
             ;; but can't think of another way to do this currently
             (when (contains? selected (:path comp-ctx))
-              (ui-detail item))
+              (ui-component-info (:runtime-ident ctx) item))
             [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
              (ui-node-children comp-ctx item)]))
 
@@ -135,7 +146,7 @@
 
 
 (defc ui-panel [^:stable target-ident]
-  (bind {:keys [snapshot view] :as target}
+  (bind {:keys [snapshot view selected] :as target}
     (sg/db-read target-ident))
 
   (effect :mount [env]
@@ -145,16 +156,11 @@
   (event ::load-snapshot! [env ev e]
     (load-snapshot env target))
 
-  ;; FIXME: move this to proper db handlers
-  ;; component technically doesn't care about selected
-  (bind selected
-    (sg/db-read ::m/selected))
-
   (event ::select! [env {:keys [item] :as ev} e]
     (.preventDefault e)
     (sg/run-tx env
-      {:e :form/set-attr
-       :a ::m/selected
+      {:e ::m/set-selection!
+       :target target-ident
        :v (cond
             (contains? selected item)
             (disj selected item)
@@ -168,8 +174,8 @@
   (event ::deselect! [env ev e]
     (.preventDefault e)
     (sg/run-tx env
-      {:e :form/set-attr
-       :a [target-ident :selected]
+      {:e ::m/set-selection!
+       :target target-ident
        :v nil}))
 
   (event ::request-log! [env ev e]

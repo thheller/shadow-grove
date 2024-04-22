@@ -51,14 +51,13 @@
       (when-some [rt-id (.get params "runtime")]
         (let [ident (db/make-ident ::m/target (js/parseInt rt-id 10))]
           (sg/run-tx! env/rt-ref
-            {:e :form/set-attr
-             :a [::m/selected-runtime]
-             :v ident})
+            {:e ::m/select-target!
+             :target ident})
 
           (when-some [node-id (.get params "component")]
             (sg/run-tx! env/rt-ref
-              {:e :form/set-attr
-               :a ::m/selected
+              {:e ::m/set-selection!
+               :target ident
                :v #{node-id}})
             )))))
 
