@@ -4,6 +4,7 @@
     [shadow.cljs.modern :refer (js-await)]
     [shadow.grove.db :as db]
     [shadow.grove.history :as history]
+    [shadow.grove.http-fx :as http-fx]
     [shadow.grove.impl :as impl]
     [shadow.grove.runtime :as rt]
     [shadow.grove.events :as ev]
@@ -36,6 +37,12 @@
       {:start-token "/dashboard"
        :use-fragment true
        :root-el root-el})
+
+  (sg/reg-fx env/rt-ref :shadow-api
+    (http-fx/make-handler
+      {:on-error {:e ::m/request-error!}
+       :base-url "/api"
+       :request-format :transit}))
 
   (when ^boolean js/goog.DEBUG
     (set! impl/tx-reporter

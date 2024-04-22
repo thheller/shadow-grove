@@ -195,6 +195,9 @@
      :suspended? (.-suspended? this)
      :destroyed? (.-destroyed? this)
      :error? (.-error? this)
+     :file (some-> this .-config .-debug-info (:file))
+     :line (some-> this .-config .-debug-info (:line))
+     :column (some-> this .-config .-debug-info (:column))
      :args
      (let [args (.-args this)
            args-config (-> this .-config .-debug-info (:args))]

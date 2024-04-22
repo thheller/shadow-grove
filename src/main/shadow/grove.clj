@@ -3,7 +3,7 @@
 ;; just for convenience, less imports for the user
 
 (defmacro defc [& args]
-  `(shadow.grove.components/defc ~@args))
+  (with-meta `(shadow.grove.components/defc ~@args) (meta &form)))
 
 (defmacro << [& body]
   (with-meta `(shadow.arborist.fragments/html ~@body) (meta &form)))

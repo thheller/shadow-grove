@@ -605,7 +605,11 @@
          ~(reduce bit-set 0 render-deps)
          ~render-fn
          ~(:events state)
-         {:args ~(->> (:args state) (map :name) (mapv str))}
+         ~(let [m (meta comp-name)]
+            {:args (->> (:args state) (map :name) (mapv str))
+             :file (:file m)
+             :line (:line m)
+             :column (:column m)})
          ))))
 
 (comment
