@@ -23,5 +23,7 @@ pom.xml.asc
 .nrepl-*
 .DS_Store
 
+src/ui-release/shadow-css-index.edn
+
 .hgignore
 .hg/

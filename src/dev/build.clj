@@ -4,15 +4,20 @@
     [clojure.java.io :as io]))
 
 (defn css-release []
+
   (let [build-state
         (-> (cb/start)
-            (cb/index-path (io/file "src" "dev") {})
             (cb/index-path (io/file "src" "main") {}))]
 
+    (spit (io/file "src" "ui-release" "shadow-css-index.edn")
+      (pr-str
+        {:version 1
+         :namespaces (:namespaces build-state)}))
 
     ;; playground
     (let [build-state
           (-> build-state
+              (cb/index-path (io/file "src" "dev") {})
               (cb/generate
                 '{:ui
                   {:entries
@@ -26,6 +31,7 @@
     ;; dummy
     (let [build-state
           (-> build-state
+              (cb/index-path (io/file "src" "dev") {})
               (cb/generate '{:ui {:include [dummy*]}})
               (cb/write-outputs-to (io/file "examples" "dummy" "css")))]
 
