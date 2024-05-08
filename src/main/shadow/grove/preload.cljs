@@ -99,11 +99,11 @@
   ;; we don't have transit handlers for every possible thing that may show up
   ;; edn is more forgiving here
   ;; FIXME: figure out a good max size? make this configurable?
-  (let [[limit? edn] (lw/pr-str-limit value 10000)]
-    (if limit?
+  (let [s (lw/pr-str-limit value 10000)]
+    (if (str/starts-with? s "1,") ;; limit reached
       ;; FIXME: UI can't handle this yet, so no need to send for now
-      {:preview edn #_#_:oid (obj-support/register obj-support value {})}
-      {:edn edn})))
+      {:preview (subs s 2) #_#_:oid (obj-support/register obj-support value {})}
+      {:edn (subs s 2)})))
 
 (extend-protocol dp/ISnapshot
   default
@@ -338,17 +338,16 @@
 (defonce tx-seq-ref (atom 0))
 (defonce tx-ref (atom {}))
 
+(defn relevant-key? [x]
+  (or (db/ident? x) (keyword? x)))
+
 (defn as-stream-event [entry]
   (-> entry
       (select-keys
-        [:ts
-         :tx-id
-         :app-id
-         :event
-         :fx
-         :keys-new
-         :keys-updated
-         :keys-removed])
+        [:ts :tx-id :app-id :event :fx])
+      (assoc :count-new (count (filter relevant-key? (:keys-new entry))))
+      (assoc :count-updated (count (filter relevant-key? (:keys-updated entry))))
+      (assoc :count-removed (count (filter relevant-key? (:keys-removed entry))))
       (assoc :type :tx-report)))
 
 (defn stream-sub [{:keys [streams-ref runtime] :as svc} {:keys [from] :as msg}]
@@ -374,6 +373,58 @@
   (shared/reply runtime msg
     {:op ::m/db-copy
      :db (-> @rt/known-runtimes-ref (get app-id) (deref) (get ::rt/data-ref) (deref) (deref))}))
+
+(defn make-tx-diff [{:keys [db-before db-after keys-new keys-updated keys-removed] :as tx}]
+  (let [only-relevant-keys (filter relevant-key?)]
+    {:added
+     (into []
+       (comp only-relevant-keys
+         (map (fn [key]
+                {:key key
+                 :op :db-add
+                 :val (get db-after key)})))
+       keys-new)
+
+     :updated
+     (into []
+       (comp
+         only-relevant-keys
+         (map (fn [key]
+                {:key key
+                 :op :db-update
+                 :before (get db-before key)
+                 :after (get db-after key)})))
+       keys-updated)
+
+     :removed
+     (into []
+       (comp only-relevant-keys
+         (map (fn [key]
+                {:key key
+                 :op :db-remove
+                 :val (get db-before key)})))
+       keys-removed)}))
+
+(comment
+  (keys @tx-ref)
+  (make-tx-diff {} (get @tx-ref 9)))
+
+(defn get-tx-diff
+  [{:keys [runtime] :as svc} {:keys [event-id tx-id] :as msg}]
+
+  ;; FIXME: event-id is from the devtools ui, this should not be handled here
+
+  (let [tx (get @tx-ref tx-id)]
+    (if-not tx
+      (shared/reply runtime msg
+        {:op ::m/tx-not-found
+         :event-id event-id})
+
+      (shared/reply runtime msg
+        {:op ::m/tx-diff
+         :event-id event-id
+         :diff (make-tx-diff tx)}
+        ))))
 
 (defn tx-reporter [report]
   (let [tx-id
@@ -459,6 +510,7 @@
          {::m/take-snapshot #(take-snapshot svc %)
           ::runtime-notify #(runtime-notify svc %)
           ::clients #(clients svc %)
+          ::m/get-tx-diff #(get-tx-diff svc %)
           ::m/get-runtimes #(get-runtimes svc %)
           ::m/get-db-copy #(get-db-copy svc %)
           ::m/stream-sub #(stream-sub svc %)

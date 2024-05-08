@@ -96,7 +96,6 @@
         (update-in [:db runtime-ident :events] conj event-ident)
         )))
 
-
 (defmethod handle-msg ::m/work-finished
   [env {:keys [from snapshot] :as msg}]
   (assoc-in env [:db (db/make-ident ::m/target from) :snapshot] snapshot))

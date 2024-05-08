@@ -133,7 +133,7 @@
 
                      $map-val
                      (css :p-0 :pl-2 :w-full :border-b #_{:border-left "6px solid #eee"})]
-                 (<< [:div {:class (css :py-1 #_ {:position "sticky" :top "0px"})}
+                 (<< [:div {:class (css :py-1 #_{:position "sticky" :top "0px"})}
                       (render-edn k)]
                      [:div {:class $map-val}
                       (render-edn v)])
@@ -207,3 +207,169 @@
   (bind parsed (reader/read-string {:default tagged-literal} edn))
   (render
     (render-edn parsed)))
+
+(declare edn-diff)
+
+(def NOT-FOUND (js/Object.))
+
+(defc click-to-show [label val]
+  (bind show-ref
+    (atom false))
+
+  (bind show?
+    (sg/watch show-ref))
+
+  (render
+    (if show?
+      (<< [:div {:class (css {:border "2px solid red" :opacity "0.5"})}
+           (render-edn val)])
+      (<< [:div {:class (css :pl-1 :cursor-pointer {:opacity "0.5"})
+                 :title "click to show"
+                 :on-click #(reset! show-ref true)}
+           label]))))
+
+(defc edn-diff-map [left right]
+  (bind keys
+    (-> #{}
+        (into (keys left))
+        (into (keys right))
+        (attempt-to-sort)))
+
+  (render
+    (<< [:div {:class (css {:border-left "6px solid purple"})}
+         [:table {:class (css :border-collapse)}
+          (sg/simple-seq keys
+            (fn [k]
+              (let [lv (get left k NOT-FOUND)
+                    rv (get right k NOT-FOUND)
+
+                    [$map-key $map-val]
+                    (cond
+                      ;; new key
+                      (identical? lv NOT-FOUND)
+                      [(css :align-top {:padding "1px 0.5rem 1px 0"})
+                       (css :p-0 :w-full)]
+
+                      ;; removed key
+                      (identical? rv NOT-FOUND)
+                      [(css :align-top {:padding "1px 0.5rem 1px 0"})
+                       (css :p-0 :w-full)]
+
+                      (= lv rv)
+                      [(css :align-top {:opacity "0.5" :padding "1px 0.5rem 1px 0"})
+                       (css :p-0 :w-full {:opacity "0.5"})]
+
+                      :else-is-update
+                      [(css :align-top {:opacity "0.5" :padding "1px 0.5rem 1px 0"})
+                       (css :p-0 :w-full)])]
+
+
+                (<< [:tr {:class (css :border-b
+                                   ["&:last-child" {:border "none"}])}
+                     [:td {:class (css :align-top)}
+                      [:div
+                       {:class (css :px-1 {:position "sticky" :top "0px"})}
+                       (cond
+                         ;; new key
+                         (identical? lv NOT-FOUND)
+                         "+"
+
+                         ;; removed key
+                         (identical? rv NOT-FOUND)
+                         "-"
+
+                         (= lv rv)
+                         "="
+
+                         :else-is-update
+                         "%")]]
+
+                     [:td {:class $map-key}
+                      [:div {:class (css {:position "sticky" :top "0px"})}
+                       (render-edn k)]]
+
+                     [:td {:class $map-val}
+                      (cond
+                        ;; new key
+                        (identical? lv NOT-FOUND)
+                        (<< [:div {:class (css {:border "2px solid green"})}
+                             (render-edn rv)])
+
+                        ;; removed key
+                        (identical? rv NOT-FOUND)
+                        (click-to-show "key was removed from map" lv)
+
+                        (= lv rv)
+                        (render-edn rv)
+
+                        :else-is-update
+                        (edn-diff lv rv))]])
+                )))]])))
+
+(defc edn-diff-vec [left right]
+  (bind indexes
+    (vec (range (max (count left) (count right)))))
+
+  (render
+    (<< [:div {:class (css {:border-left "6px solid green"
+                            :display "grid"
+                            :grid-template-columns "min-content 1fr"})}
+         (sg/simple-seq
+           indexes
+           (fn [idx]
+             (let [lv (get left idx NOT-FOUND)
+                   rv (get right idx NOT-FOUND)
+
+                   $seq-val
+                   (css :pl-1 :border-b ["&:last-child" {:border "none"}])]
+
+               (<< [:div {:class (css :border-b)}
+                    [:div {:class (css :px-1 :text-right :text-gray-500 {:position "sticky" :top "0px" :width "40px"})}
+                     [:div
+                      (cond
+                        (identical? lv NOT-FOUND)
+                        (str idx " +")
+
+                        (= lv rv)
+                        (str idx " =")
+
+                        :else
+                        (str idx " %"))]]]
+
+                   [:div {:class $seq-val
+                          :style/opacity (when (= lv rv) "0.5")}
+                    (cond
+                      (identical? lv NOT-FOUND)
+                      (render-edn rv)
+
+                      (= lv rv)
+                      (render-edn rv)
+
+                      :else
+                      (edn-diff lv rv))]))
+             ))])))
+
+(defn edn-diff [left right]
+  (cond
+    (and (map? left) (map? right))
+    (edn-diff-map left right)
+
+    (and (vector? left) (vector? right))
+    (edn-diff-vec left right)
+
+    :else
+    (<< [:div {:class (css :flex :border-b {:border-left "6px dashed red"})}
+         [:div
+          {:class (css :px-1)
+           :title "this value was removed"}
+          "<<"]
+         (render-edn left)]
+
+        [:div
+         {:class (css :flex :border-b {:border-left "6px dashed green"})}
+         [:div
+          {:class (css :px-1)
+           :title "and replaced with this value"}
+          ">>"]
+         (render-edn right)]))
+  )
