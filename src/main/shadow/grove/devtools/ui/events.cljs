@@ -38,8 +38,7 @@
 
   (render
     (<< [:div {:class (css :border-b-2)}
-         [:div {:class (css :cursor-pointer :flex)
-                :on-click #(swap! show-ref not)}
+         [:div {:class (css :flex)}
           [:div {:class (css :p-1)}
            ;; FIXME: some actual icons would be nice
            (case op
@@ -48,7 +47,8 @@
              :db-update "%"
              "?")]
           [:div {:class (css :flex-1)}
-           [:div {:class (css :py-1 :font-bold)} (pr-str (:key entry))]
+           [:div {:class (css :cursor-pointer :py-1 :font-bold)
+                  :on-click #(swap! show-ref not)} (pr-str (:key entry))]
 
            (when show?
              (case op

@@ -9,7 +9,6 @@
     [shadow.grove.runtime :as rt]
     [shadow.grove.events :as ev]
     [shadow.grove.devtools :as-alias m]
-    [shadow.grove.devtools.env :as env]
     [shadow.grove.devtools.ui :as ui]
     [shadow.grove.devtools.relay-ws :as relay-ws]
     [shadow.grove :as sg :refer (defc << css)]
@@ -18,33 +17,49 @@
 (defonce root-el
   (js/document.getElementById "root"))
 
+(defonce rt-ref
+  (sg/get-runtime ::m/ui))
+
 (defn render []
-  (sg/render env/rt-ref root-el (ui/ui-root)))
+  (sg/render rt-ref root-el (ui/ui-root)))
 
 (defn register-events! []
-  (ev/register-events! env/rt-ref))
+  (ev/register-events! rt-ref))
 
 (defn ^:dev/after-load reload! []
   (register-events!)
   (render))
 
 (defn init []
+
+  (sg/add-db-type rt-ref ::m/target
+    {:primary-key :client-id})
+
+  (sg/add-db-type rt-ref ::m/event
+    {:primary-key :event-id})
+
+  (sg/db-init rt-ref
+    {::m/selected #{}})
+
   (register-events!)
 
-  (transit/init! env/rt-ref)
+  (transit/init! rt-ref)
 
   #_(history/init! env/rt-ref
       {:start-token "/dashboard"
        :use-fragment true
        :root-el root-el})
 
-  (sg/reg-fx env/rt-ref :shadow-api
+  (sg/reg-fx rt-ref :shadow-api
     (http-fx/make-handler
       {:on-error {:e ::m/request-error!}
        :base-url "/api"
        :request-format :transit}))
 
   (when ^boolean js/goog.DEBUG
+    ;; can't use devtools for this since it creates a recursive infinite loop
+    ;; inspecting its own data causes more data, which then causes more data, ...
+    ;; being limited to console.log sucks
     (set! impl/tx-reporter
       (fn [report]
         (let [e (-> report :event :e)]
@@ -57,12 +72,12 @@
     (let [params (js/URLSearchParams. search)]
       (when-some [rt-id (.get params "runtime")]
         (let [ident (db/make-ident ::m/target (js/parseInt rt-id 10))]
-          (sg/run-tx! env/rt-ref
+          (sg/run-tx! rt-ref
             {:e ::m/select-target!
              :target ident})
 
           (when-some [node-id (.get params "component")]
-            (sg/run-tx! env/rt-ref
+            (sg/run-tx! rt-ref
               {:e ::m/set-selection!
                :target ident
                :v #{node-id}})
@@ -70,7 +85,7 @@
 
   (js-await [req (js/fetch "/api/token")]
     (js-await [server-token (.text req)]
-      (relay-ws/init env/rt-ref server-token
+      (relay-ws/init rt-ref server-token
         (fn []
           ))))
 

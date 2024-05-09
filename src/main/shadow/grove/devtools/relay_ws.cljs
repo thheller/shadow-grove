@@ -4,7 +4,6 @@
     [shadow.grove.db :as db]
     [shadow.grove.runtime :as rt]
     [shadow.grove.events :as ev]
-    [shadow.grove.devtools.env :as env]
     [shadow.grove.devtools :as-alias m]
     [clojure.string :as str]))
 
@@ -128,11 +127,7 @@
                               :result-data result-data})
     (cast! env (assoc msg :call-id mid))))
 
-(ev/reg-fx env/rt-ref :relay-send
-  (fn [env msg]
-    (if-some [result (::result msg)]
-      (call! env (dissoc msg ::result) result)
-      (cast! env msg))))
+
 
 (defn init [rt-ref server-token on-welcome]
   (let [socket (js/WebSocket.
@@ -140,7 +135,14 @@
                       "//" js/self.location.host
                       "/api/remote-relay"
                       "?server-token=" server-token))
+
         ws-ref (atom socket)]
+
+    (ev/reg-fx rt-ref :relay-send
+      (fn [env msg]
+        (if-some [result (::result msg)]
+          (call! env (dissoc msg ::result) result)
+          (cast! env msg))))
 
     (sg/reg-event rt-ref
       ::m/relay-ws-close
@@ -173,13 +175,13 @@
               (let [{:keys [result-data] :as call-data} (get @rpc-ref call-id)]
                 (if (fn? result-data)
                   (result-data msg)
-                  (sg/run-tx! env/rt-ref (assoc result-data :call-result msg))))
+                  (sg/run-tx! rt-ref (assoc result-data :call-result msg))))
 
               (= :ping op)
               (cast! @rt-ref {:op :pong})
 
               :else
-              (sg/run-tx! env/rt-ref {:e ::m/relay-ws :msg msg}))))))
+              (sg/run-tx! rt-ref {:e ::m/relay-ws :msg msg}))))))
 
     (.addEventListener socket "open"
       (fn [e]
@@ -188,7 +190,7 @@
 
     (.addEventListener socket "close"
       (fn [e]
-        (sg/run-tx! env/rt-ref {:e ::m/relay-ws-close})
+        (sg/run-tx! rt-ref {:e ::m/relay-ws-close})
         (js/console.log "tool-close" e)))
 
     (.addEventListener socket "error"

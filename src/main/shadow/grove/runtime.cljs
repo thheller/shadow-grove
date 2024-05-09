@@ -3,7 +3,8 @@
     [goog.async.nextTick]
     [shadow.grove.protocols :as gp]))
 
-(defonce known-runtimes-ref (atom {}))
+(defonce known-runtimes-ref
+  (atom {}))
 
 (defn ref? [x]
   (and (atom x)
@@ -21,7 +22,6 @@
 
 (defn microtask [callback]
   (.then ticker callback))
-
 
 (def ^:dynamic ^not-native *env* nil)
 (def ^:dynamic ^gp/IProvideSlot *slot-provider* nil)

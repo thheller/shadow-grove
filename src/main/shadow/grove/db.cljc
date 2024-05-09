@@ -10,8 +10,11 @@
 
 (defprotocol ITransactable
   (tx-begin [this])
-  (tx-snapshot [this])
-  (db-schema [this]))
+  (tx-snapshot [this]))
+
+(defprotocol ISchema
+  (db-schema [this])
+  (update-db-schema [this update-fn]))
 
 (defprotocol ITransactableCommit
   (tx-commit! [this]))
@@ -109,6 +112,12 @@
     {:entities {}}
     spec))
 
+(defn add-type [db entity-type spec]
+  (update-db-schema db
+    (fn [schema]
+      (assoc-in schema [:entities entity-type]
+        (parse-entity-spec entity-type spec)))))
+
 (defn nav-fn [db key val]
   (cond
     (ident? val)
@@ -128,12 +137,9 @@
     :else
     val))
 
-
 (defn coll-key [thing]
   {:pre [(ident? thing)]}
   [::all (ident-key thing)])
-
-
 
 #?(:clj
    (deftype ObservedData
@@ -540,9 +546,16 @@
                    (throw (js/Error. "conj on a map takes map entries or seqables of map entries"))))))))
        ])
 
-  ITransactable
+  ISchema
   (db-schema [this]
     schema)
+  (update-db-schema [this update-fn]
+    (GroveDB.
+      (update-fn schema)
+      data
+      tx))
+
+  ITransactable
   (tx-snapshot [this]
     (when tx
       @tx))

@@ -24,6 +24,9 @@
 
 (set! *warn-on-infer* false)
 
+(defn vec-conj [x y]
+  (if (nil? x) [y] (conj x y)))
+
 ;; used by shadow.grove.preload to funnel debug messages to devtools
 (def dev-log-handler nil)
 
@@ -257,8 +260,7 @@
     (let [new-env (make-root-env rt-ref root-el)
           new-root (sa/dom-root root-el new-env)]
       (sa/update! new-root root-node)
-      (when ^boolean js/goog.DEBUG
-        (swap! rt-ref assoc ::rt/root new-root))
+      (swap! rt-ref update ::rt/roots conj new-root)
       (set! (.-sg$root root-el) new-root)
       (set! (.-sg$env root-el) new-env)
       ::started)))
@@ -318,6 +320,12 @@
   ([data-ref app-id]
    (prepare {} data-ref app-id))
   ([init data-ref app-id]
+   (when (get @rt/known-runtimes-ref app-id)
+     (throw
+       (ex-info
+         (str "app " app-id " already registered!")
+         {:app-id app-id})))
+
    (let [root-scheduler
          (RootScheduler. false (js/Set.))
 
@@ -325,6 +333,7 @@
          (atom
            (assoc init
              ::rt/rt true
+             ::rt/roots #{}
              ::rt/scheduler root-scheduler
              ::rt/app-id app-id
              ::rt/data-ref data-ref
@@ -339,35 +348,52 @@
              ::rt/query-index-ref (atom {})
              ::rt/env-init []))]
 
-     (when ^boolean js/goog.DEBUG
-       (swap! rt/known-runtimes-ref assoc app-id rt-ref))
+     (swap! rt/known-runtimes-ref assoc app-id rt-ref)
 
      rt-ref)))
 
-(defn valid-interceptor? [x]
-  (or (nil? x)
-      (and (map? x)
-           (or (fn? (:before x))
-               (fn? (:after x))))))
+(defn make-blank-runtime [app-id]
+  (let [schema
+        {}
 
-(defn set-interceptors! [rt-ref interceptors]
-  {:pre [(vector? interceptors)
-         (every? valid-interceptor? interceptors)]}
-  (swap! rt-ref assoc ::rt/event-interceptors interceptors))
+        data-ref
+        (-> {}
+            (db/configure schema)
+            (atom))]
 
-(defn vec-conj [x y]
-  (if (nil? x) [y] (conj x y)))
+    ;; prepare registers runtime and returns it
+    (prepare {} data-ref app-id)))
+
+(defn get-runtime [app-id]
+  (cond
+    (keyword? app-id)
+    (or (get @rt/known-runtimes-ref app-id)
+        (make-blank-runtime app-id))
+
+    (rt/ref? app-id)
+    app-id
+
+    :else
+    (throw (ex-info "invalid app-id" {:app-id app-id}))))
+
+;; for convenience allowing these to use runtime keywords
+;; instead of only rt-ref. saves user having to juggle the rt-ref too much
+;; since events may be spread between many namespaces
+(defn reg-event
+  ([ev-id handler-fn]
+   (reg-event :default ev-id handler-fn))
+  ([app-id ev-id handler-fn]
+   {:pre [(keyword? ev-id)
+          (ifn? handler-fn)]}
+   (let [rt-ref (get-runtime app-id)]
+     (swap! rt-ref assoc-in [::rt/event-config ev-id] handler-fn)
+     rt-ref)))
 
 (defn queue-fx [env fx-id fx-val]
   (update env ::rt/fx vec-conj [fx-id fx-val]))
 
-(defn reg-event [rt-ref ev-id handler-fn]
-  {:pre [(keyword? ev-id)
-         (ifn? handler-fn)]}
-  (swap! rt-ref assoc-in [::rt/event-config ev-id] handler-fn)
-  rt-ref)
-
-(defn reg-fx [rt-ref fx-id handler-fn]
+(defn reg-fx
+  [rt-ref fx-id handler-fn]
   (swap! rt-ref assoc-in [::rt/fx-config fx-id] handler-fn)
   rt-ref)
 
@@ -411,3 +437,62 @@
 ;; I prefer an API that lets me def an animation and then apply it to a node on demand
 (defn prepare-animation [keyframes options]
   (->PreparedAnimation (clj->js keyframes) (clj->js options)))
+
+
+(defn check-unmounted! [rt-ref]
+  (when (seq (::rt/roots rt-ref))
+    (throw (ex-info "operation not allowed, runtime already mounted" {:rt-ref rt-ref}))))
+
+;; these are only supposed to run once in init
+
+;; adding a db type to a db that already has data is possible
+;; but would potentially mess with normalization which cannot be corrected
+;; so instead disallowing it outright
+(defn add-db-type [rt-ref entity-type spec]
+  (check-unmounted! rt-ref)
+
+  (let [data-ref (::rt/data-ref @rt-ref)]
+    (swap! data-ref db/add-type entity-type spec)
+    rt-ref))
+
+;; just more convenient to do this directly
+(defn db-init
+  [rt-ref init-fn]
+  (check-unmounted! rt-ref)
+
+  (let [data-ref (::rt/data-ref @rt-ref)]
+    (swap! data-ref
+      (fn [db]
+        (cond
+          (map? init-fn)
+          (merge db init-fn)
+
+          (fn? init-fn)
+          (let [after (init-fn db)]
+            (cond
+              (instance? db/GroveDB after)
+              after
+
+              (map? after)
+              (merge db after)
+
+              :else
+              (throw (ex-info "invalid db-init result" {:result after}))
+              ))
+
+          :else
+          (throw (ex-info "invalid init-fn argument" {:init-fn init-fn})))))
+
+    rt-ref
+    ))
+
+(defn valid-interceptor? [x]
+  (or (nil? x)
+      (and (map? x)
+           (or (fn? (:before x))
+               (fn? (:after x))))))
+
+(defn set-interceptors! [rt-ref interceptors]
+  {:pre [(vector? interceptors)
+         (every? valid-interceptor? interceptors)]}
+  (swap! rt-ref assoc ::rt/event-interceptors interceptors))
