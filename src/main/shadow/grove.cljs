@@ -440,7 +440,7 @@
 
 
 (defn check-unmounted! [rt-ref]
-  (when (seq (::rt/roots rt-ref))
+  (when (seq (::rt/roots @rt-ref))
     (throw (ex-info "operation not allowed, runtime already mounted" {:rt-ref rt-ref}))))
 
 ;; these are only supposed to run once in init

@@ -116,10 +116,10 @@
     {:type 'shadow.arborist/TreeRoot
      :container (let [container (.-container this)]
                   (str "[:" (.toLowerCase (.-tagName container))
-                       (when-some [id (.-id container)]
-                         (str "#" id))
-                       " ...]")
-                  )
+                       (when-let [id (.-id container)]
+                         (when (not= id "")
+                           (str "#" id)))
+                       " ...]"))
      ;; always managed root, can skip it in UI
      :children [(dp/snapshot (-> this .-root .-node) ctx)]})
 
@@ -526,6 +526,10 @@
 
          :on-welcome
          (fn []
+           (js/console.log "shadow-grove devtools ready!"
+             (str (client-env/get-url-base)
+                  "/classpath/shadow/grove/devtools.html?runtime="
+                  (:client-id @(:state-ref runtime))))
            (set! sg/work-finish-trigger
              ;; don't want to spam the devtools too much, this might be called a lot
              (gfn/debounce

@@ -89,9 +89,10 @@
              [:button {:class $button
                        :on-click {:e ::m/switch-view! :runtime runtime-ident :view :data}} "Data"]]]
            (case view
-             :tree (ui-tree/ui-panel runtime-ident)
+             ;; :tree (ui-tree/ui-panel runtime-ident)
              :data (ui-data/ui-panel runtime-ident)
-             (ui-events/ui-panel runtime-ident)
+             :events (ui-events/ui-panel runtime-ident)
+             (ui-tree/ui-panel runtime-ident)
              )]))))
 
 (defn suitable-targets [env db]

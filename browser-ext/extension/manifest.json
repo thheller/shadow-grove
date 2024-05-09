@@ -1,0 +1,7 @@
+{
+  "name": "shadow-grove devtools",
+  "description": "Loads shadow-cljs UI as a devtools panel",
+  "version": "0.5",
+  "manifest_version": 3,
+  "devtools_page": "devtools.html"
+}
