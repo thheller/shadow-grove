@@ -486,7 +486,20 @@
 (cljs-shared/add-plugin! ::tree #{:obj-support}
   (fn [{:keys [runtime obj-support] :as env}]
     (cljs-shared/add-transit-writers! runtime
-      {ident/Ident
+      ;; FIXME: installing a default handler may not be a good idea
+      ;; It is often way better to error out early, since likely it was a value what wasn't supposed to be sent anyway
+      ;; but for our case grove tx events may contain anything
+      ;; and UI just wants to display them in some way
+      {"default"
+       (transit/write-handler
+         (fn [x]
+           "transit-unknown")
+         (fn [x]
+           ;; fallback to EDN, so that unknown things do not error out
+           ;; edn prints everything, so more forgiving for types we don't care to restore anyway
+           (pr-str x)))
+
+       ident/Ident
        (transit/write-handler
          (fn tag-fn [x]
            "gdb/ident")

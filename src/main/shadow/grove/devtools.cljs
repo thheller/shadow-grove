@@ -43,7 +43,17 @@
 
   (register-events!)
 
-  (transit/init! rt-ref)
+  (transit/init! rt-ref
+    {:reader-opts
+     {:handlers
+      {"transit-unknown"
+       (fn [x]
+         ;; FIXME: should it make an attempt at reading?
+         ;; sender side used pr-str to convert
+         ;; installing this only so that a transit internal TaggedValue type doesn't leak out
+         ;; don't wanna be handling transit types anywhere else
+         ;; shouldn't just pretend that it got a string, so abusing cljs tagged-literal for now
+         (tagged-literal 'unsupported x))}}})
 
   #_(history/init! env/rt-ref
       {:start-token "/dashboard"
