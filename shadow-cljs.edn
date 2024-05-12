@@ -48,6 +48,7 @@
   {:target :esm
    :output-dir "src/ui-release/shadow/grove/devtools/dist/js"
    :dev {:output-dir "src/gen/shadow/grove/devtools/dist/js"}
+   :compiler-options {:source-map true}
    :devtools {:watch-dir "src/ui-release"
               :watch-path "/classpath"}
    :modules {:main {:init-fn shadow.grove.devtools/init}}}
