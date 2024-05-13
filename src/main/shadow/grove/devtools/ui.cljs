@@ -6,7 +6,8 @@
     [shadow.grove.devtools.ui.events :as ui-events]
     [shadow.grove.devtools.ui.tree :as ui-tree]
     [shadow.grove.devtools.ui.data :as ui-data]
-    [shadow.grove :as sg :refer (defc << css)]))
+    [shadow.grove :as sg :refer (defc << css)]
+    [shadow.grove.ui.edn :as edn]))
 
 (defn form-set-attr!
   {::ev/handle :form/set-attr}
@@ -73,11 +74,11 @@
              )]))))
 
 (defn suitable-targets [env]
+  (js/console.log "suitable runtimes" env)
   (->> (::m/target env)
        (vals)
        (filter #(contains? (:supported-ops %) ::m/take-snapshot))
        (remove :disconnected)
-       (sort-by :client-id)
        (vec)))
 
 (defc ui-root []
@@ -97,14 +98,14 @@
       (ui-target selected)
 
       :else
-      (<< [:div {:class (css :p-4)}
+      (<< [:div {:class (css :p-4 :overflow-auto)}
            [:h1 {:class (css :font-bold :text-2xl :pb-4)} "Runtimes"]
            (sg/simple-seq targets
-             (fn [{:keys [client-id client-info supported-ops] :as target}]
+             (fn [{:keys [target-id target-info] :as target}]
                (<< [:div {:class (css :cursor-pointer :border :p-2 :mb-2 [:hover :border-green-500])
                           :on-click
                           {:e ::m/select-target!
-                           :target-id client-id}}
-                    (str "#" client-id " - " (pr-str (dissoc client-info :since :proc-id)))
+                           :target-id target-id}}
+                    (str "#" target-id " - " (pr-str (dissoc target-info :since :proc-id)))
                     ])))
            ]))))

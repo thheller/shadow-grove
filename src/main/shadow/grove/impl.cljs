@@ -165,8 +165,12 @@
               keys-removed (:keys-removed tx-info)
               add (fn [key] (.push keys-to-invalidate (IndexKey. kv-id key)))]
 
-          ;; using kv-id as marker if something traversed all and needs to be notified for new entries
-          (when (seq keys-new)
+          ;; using kv-id as marker when kv seq was used (e.g. keys/vals)
+          ;; tracking every single entry is expensive, so just assuming
+          ;; there was interest in all when seq was used
+          (when (or (seq keys-updated)
+                    (seq keys-new)
+                    (seq keys-removed))
             (.push keys-to-invalidate kv-id))
 
           (run! add keys-new)
@@ -402,7 +406,7 @@
 
         (:return result)))))
 
-(defn slot-query [read-fn args]
+(defn slot-query [args read-fn]
   (let [ref
         (rt/claim-slot! ::slot-query)
 

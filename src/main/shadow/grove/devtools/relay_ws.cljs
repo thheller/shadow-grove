@@ -33,7 +33,12 @@
 (defmethod handle-msg :clients
   [env {:keys [clients]}]
   (-> env
-      (kv/merge-seq ::m/target clients)
+      (kv/merge-seq ::m/target
+        (->> clients
+             (mapv (fn [{:keys [client-id client-info]}]
+                     ;; FIXME: ugh key conversion, should really stick to original names
+                     {:target-id client-id
+                      :target-info client-info}))))
       (sg/queue-fx :relay-send
         {:op :request-supported-ops
          :to (into #{} (map :client-id) clients)})
@@ -50,11 +55,11 @@
           (update :db dissoc ::m/selected-target)))
     :client-connect
     (-> env
-        (kv/add ::m/target (select-keys msg [:client-id :client-info]))
+        (kv/add ::m/target {:target-id client-id
+                            :target-info (:client-info msg)})
         (sg/queue-fx :relay-send
           {:op :request-supported-ops
-           :to (:client-id msg)}))
-    ))
+           :to client-id}))))
 
 (defmethod handle-msg :supported-ops
   [env {:keys [from ops] :as msg}]

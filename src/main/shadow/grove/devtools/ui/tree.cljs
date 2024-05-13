@@ -41,12 +41,12 @@
                       :column column}}
      :on-success {:e ::m/open-result!}}))
 
-(defn load-snapshot [tx {:keys [client-id] :as target}]
+(defn load-snapshot [tx {:keys [target-id] :as target}]
   (relay-ws/call! (::rt/runtime-ref tx)
     {:op ::m/take-snapshot
-     :to client-id}
+     :to target-id}
     {:e ::m/set-snapshot!
-     :target-id client-id}))
+     :target-id target-id}))
 
 (defc ui-slot [target-id item {:keys [type name value] :as slot} idx type]
   (bind expanded-ref (atom false))

@@ -24,7 +24,7 @@
       ;; FIXME: use a better mechanism to extend request formats
       ;; shouldn't just use some keyword and hope the thing to be there
       (= :transit request-format)
-      (let [{::rt/keys [^function transit-str]} env]
+      (let [{::rt/keys [^function transit-str]} @(::rt/runtime-ref env)]
         ["application/transit+json; charset=utf-8"
          (transit-str body)])
 
@@ -217,13 +217,13 @@
 ;; there are also several other places that will require these fns anyways
 ;; FIXME: realld should find a better way to handle this, harcoded these like this is bad
 (defn parse-edn [env ^js xhr-req]
-  (let [read-fn (::rt/edn-read env)]
+  (let [read-fn (::rt/edn-read @(::rt/runtime-ref env))]
     (when-not read-fn
       (throw (ex-info "received a EDN response but didn't have edn-read fn" {})))
     (read-fn (.-responseText xhr-req))))
 
 (defn parse-transit [env ^js xhr-req]
-  (let [read-fn (::rt/transit-read env)]
+  (let [read-fn (::rt/transit-read @(::rt/runtime-ref env))]
     (when-not read-fn
       (throw (ex-info "received a transit response but didn't have transit-read fn" {})))
     (read-fn (.-responseText xhr-req))))

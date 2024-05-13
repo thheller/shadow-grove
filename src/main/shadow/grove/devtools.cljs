@@ -35,7 +35,7 @@
     {:validate-key keyword?})
 
   (sg/add-kv-store rt-ref ::m/target
-    {:primary-key :client-id})
+    {:primary-key :target-id})
 
   (sg/add-kv-store rt-ref ::m/event
     {:primary-key :event-id})

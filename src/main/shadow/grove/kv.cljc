@@ -384,7 +384,7 @@
              (throw (ex-info "tried to insert invalid key" {:kv-id (:kv-id config) :key key :val val}))))
 
          (when-some [validate-val (:validate-val config)]
-           (when-not (validate-val val)
+           (when-not (validate-val value)
              (throw (ex-info "tried to insert invalid val" {:kv-id (:kv-id config) :key key :val val}))))
 
          (let [prev-val (-lookup data key NOT-FOUND)]
@@ -492,10 +492,6 @@
         next-val (apply update-fn val args )]
     (assoc env kv-id (assoc kv key next-val))))
 
-(defn add [env kv-id val]
-  (js/console.warn "supposed to add" kv-id val)
-  env)
-
 (defn- normalize* [imports-ref env kv-id item]
   (let [kv
         (get-kv! env kv-id)
@@ -600,6 +596,10 @@
            (vector? target-path-or-fn)
            (assoc-in target-path-or-fn coll-keys)
            )))))
+
+(defn add [env kv-id val]
+  (let [imports (normalize env kv-id [val])]
+    (merge-imports env imports)))
 
 (comment
   (let [obs (observe {1 :foo 2 :bar})]

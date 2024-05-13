@@ -39,7 +39,12 @@
 
 (defn query
   [query-fn & args]
-  (impl/slot-query query-fn args))
+  (impl/slot-query args query-fn))
+
+(defn kv-lookups [kv-id keys]
+  (impl/slot-query nil
+    (fn [env]
+      (select-keys (get env kv-id) keys))))
 
 (defn kv-lookup
   ;; (sg/kv-lookup :db 1 :foo)
