@@ -9,31 +9,31 @@
 
 (defn set-snapshot!
   {::ev/handle ::m/set-snapshot!}
-  [env {:keys [ident call-result] :as msg}]
+  [tx {:keys [target-id call-result] :as msg}]
   (let [snapshot (:snapshot call-result)]
-    (assoc-in env [:db ident :snapshot] snapshot)
+    (assoc-in tx [::m/target target-id :snapshot] snapshot)
     ))
 
 (defn select-target!
   {::ev/handle ::m/select-target!}
-  [env {:keys [target] :as ev}]
-  (assoc-in env [:db ::m/selected-target] target))
+  [tx {:keys [target-id] :as ev}]
+  (assoc-in tx [:db ::m/selected-target] target-id))
 
 (defn set-selection!
   {::ev/handle ::m/set-selection!}
-  [env {:keys [target v] :as ev}]
-  (assoc-in env [:db target :selected] v))
+  [tx {:keys [target-id v] :as ev}]
+  (assoc-in tx [::m/target target-id :selected] v))
 
 (defn open-result!
   {::ev/handle ::m/open-result!}
-  [env msg]
+  [tx msg]
   (js/console.log "open result" msg)
-  env)
+  tx)
 
 (defn open-in-editor!
   {::ev/handle ::m/open-in-editor!}
-  [env {:keys [target file line column]}]
-  (sg/queue-fx env :shadow-api
+  [tx {:keys [file line column]}]
+  (sg/queue-fx tx :shadow-api
     {:request {:uri "/open-file"
                :method :POST
                :body {:file file
@@ -41,14 +41,14 @@
                       :column column}}
      :on-success {:e ::m/open-result!}}))
 
-(defn load-snapshot [env {:keys [client-id] :as runtime}]
-  (relay-ws/call! @(::rt/runtime-ref env)
+(defn load-snapshot [tx {:keys [client-id] :as target}]
+  (relay-ws/call! (::rt/runtime-ref tx)
     {:op ::m/take-snapshot
      :to client-id}
     {:e ::m/set-snapshot!
-     :ident (:db/ident runtime)}))
+     :target-id client-id}))
 
-(defc ui-slot [runtime-ident item {:keys [type name value] :as slot} idx type]
+(defc ui-slot [target-id item {:keys [type name value] :as slot} idx type]
   (bind expanded-ref (atom false))
   (bind expanded (sg/watch expanded-ref))
 
@@ -56,7 +56,7 @@
     (let [{:keys [preview edn]} value]
       (<< [:div {:class (css :py-0.5 :pr-2 :font-semibold :whitespace-nowrap :border-t :cursor-help)
                  :title (str "click to log " name " in runtime console")
-                 :on-click {:e ::m/request-log! :target runtime-ident :name name :instance-id (:instance-id item) :idx idx :type type}} name]
+                 :on-click {:e ::m/request-log! :target-id target-id :name name :instance-id (:instance-id item) :idx idx :type type}} name]
           [:div {:class (css :py-0.5 :font-mono :overflow-auto :border-t)
                  :style/max-height (when-not expanded "142px")
                  :on-click #(swap! expanded-ref not)}
@@ -67,7 +67,7 @@
              (edn/render-edn-str edn))]
           ))))
 
-(defc ui-component-info [runtime-ident {:keys [args slots] :as item}]
+(defc ui-component-info [target-id {:keys [args slots] :as item}]
   (render
     (let [$section-label (css :font-semibold :py-2 {:grid-column "span 2"})]
       (<< [:div
@@ -76,7 +76,7 @@
             {:class (css :cursor-pointer :underline :pt-2)
              :title "click to open file in editor"
              :on-click {:e ::m/open-in-editor!
-                        :target runtime-ident
+                        :target-id target-id
                         :file (:file item)
                         :line (:line item)
                         :column (:column item)}}
@@ -89,11 +89,11 @@
                             :grid-row-gap "0"})}
             (when (seq args)
               (<< [:div {:class $section-label} "Arguments"]
-                  (sg/simple-seq args #(ui-slot runtime-ident item %1 %2 :arg))))
+                  (sg/simple-seq args #(ui-slot target-id item %1 %2 :arg))))
 
             (when (seq slots)
               (<< [:div {:class $section-label} "Slots"]
-                  (sg/simple-seq slots #(ui-slot runtime-ident item %1 %2 :slot))))]]))))
+                  (sg/simple-seq slots #(ui-slot target-id item %1 %2 :slot))))]]))))
 
 (declare ui-node)
 
@@ -103,8 +103,8 @@
       (ui-node (update ctx :path conj idx) item))))
 
 (defc ui-node [ctx item]
-  (bind selected
-    (sg/db-read [(:runtime-ident ctx) :selected]))
+  (bind {:keys [selected]}
+    (sg/kv-lookup ::m/target (:target-id ctx)))
 
   (render
     (if-not item
@@ -146,8 +146,8 @@
         (let [comp-ctx (update ctx :path conj (:name item))]
           (<< [:div {:class (css :font-semibold :cursor-pointer :whitespace-nowrap)
                      :on-click {:e ::select! :item (:path comp-ctx)}
-                     :on-mouseout {:e ::m/remove-highlight! :runtime (:runtime-ident ctx) :item (:instance-id item)}
-                     :on-mouseenter {:e ::m/highlight! :runtime (:runtime-ident ctx) :item (:instance-id item)}}
+                     :on-mouseout {:e ::m/remove-highlight! :target-id (:target-id ctx) :item (:instance-id item)}
+                     :on-mouseenter {:e ::m/highlight! :target-id (:target-id ctx) :item (:instance-id item)}}
                (:name item)]
               ;; can't use :instance-id for tracking which component should show details
               ;; as every hot-reload re-creates the component, thus changing the instance id
@@ -155,7 +155,7 @@
               ;; which might still change and close the one we were looking at
               ;; but can't think of another way to do this currently
               (when (contains? selected (:path comp-ctx))
-                (ui-component-info (:runtime-ident ctx) item))
+                (ui-component-info (:target-id ctx) item))
               [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
                (ui-node-children comp-ctx item)]))
 
@@ -172,9 +172,9 @@
             )))))
 
 
-(defc ui-panel [^:stable target-ident]
+(defc ui-panel [^:stable target-id]
   (bind {:keys [snapshot view selected] :as target}
-    (sg/db-read target-ident))
+    (sg/kv-lookup ::m/target target-id))
 
   (effect :mount [env]
     (when-not snapshot
@@ -187,7 +187,7 @@
     (.preventDefault e)
     (sg/run-tx env
       {:e ::m/set-selection!
-       :target target-ident
+       :target-id target-id
        :v (cond
             (contains? selected item)
             (disj selected item)
@@ -202,14 +202,14 @@
     (.preventDefault e)
     (sg/run-tx env
       {:e ::m/set-selection!
-       :target target-ident
+       :target-id target-id
        :v nil}))
 
   (event ::request-log! [env ev e]
-    (sg/dispatch-up! env (assoc ev :runtime target-ident)))
+    (sg/dispatch-up! env (assoc ev :target-id target-id)))
 
   (bind ctx
-    {:runtime-ident target-ident
+    {:target-id target-id
      :path []
      :level 0})
 

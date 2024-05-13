@@ -65,12 +65,6 @@
    :asset-path "/js"
    :modules {:main {:init-fn dummy.flex/init}}}
 
-  :replicant
-  {:target :browser
-   :output-dir "examples/replicant/js"
-   :asset-path "/js"
-   :modules {:main {:init-fn dummy.replicant/init}}}
-
   :examples-bootstrap
   {:target :bootstrap
    :output-dir "examples/app/public/bootstrap"

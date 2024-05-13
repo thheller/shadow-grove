@@ -1,6 +1,5 @@
 (ns shadow.grove.devtools.ui.events
   (:require
-    [shadow.grove.db :as db]
     [shadow.grove.devtools :as-alias m]
     [shadow.grove :as sg :refer (defc << css)]
     [shadow.grove.devtools.relay-ws :as relay-ws]
@@ -10,27 +9,26 @@
 
 (defn select-event!
   {::ev/handle ::select-event!}
-  [env {:keys [runtime event] :as ev}]
+  [env {:keys [target-id event-id] :as ev}]
 
-  (let [ev (get-in env [:db event])]
+  (let [ev (get-in env [::m/event event-id])]
     (-> env
-        (assoc-in [:db runtime :selected-event] event)
+        (assoc-in [::m/target target-id :selected-event] event-id)
         (cond->
           (and (= :tx-report (:type ev))
                (not (:diff ev)))
           (sg/queue-fx
             :relay-send
             {:op ::m/get-tx-diff
-             :event-id (:event-id ev)
+             :event-id event-id
              :tx-id (:tx-id ev)
-             :to (get-in env [:db runtime :client-id])})
+             :to target-id})
           ))))
 
 
 (defmethod relay-ws/handle-msg ::m/tx-diff
   [env {:keys [from event-id diff] :as msg}]
-  (let [event-ident (db/make-ident ::m/event event-id)]
-    (assoc-in env [:db event-ident :diff] diff)))
+  (assoc-in env [::m/event event-id :diff] diff))
 
 (defc ui-diff-entry [{:keys [op] :as entry}]
   (bind show-ref (atom false))
@@ -61,10 +59,9 @@
   (<< [:div
        [:div (edn/render-edn fx-key)]
        [:div (edn/render-edn fx-val)]
-       ])
-  )
+       ]))
 
-(defc ui-tx-report [^:stable event-ident entry]
+(defc ui-tx-report [^:stable event-id entry]
   (bind tab-ref
     (atom :event))
 
@@ -72,7 +69,7 @@
     (sg/watch tab-ref))
 
   (bind diff
-    (sg/db-read [event-ident :diff]))
+    (:diff (sg/kv-lookup ::m/event event-id)))
 
   (render
     (let [{:keys [ts event count-new count-updated count-removed fx]} entry
@@ -102,9 +99,9 @@
              (edn/render-edn event))]
           ))))
 
-(defc ui-dev-log [event-ident entry]
+(defc ui-dev-log [event-id entry]
   (bind event
-    (sg/db-read event-ident))
+    (sg/kv-lookup ::m/event event-id))
 
   (render
     (let [{:keys [ns line column file]} (:src-info entry)]
@@ -126,9 +123,9 @@
            (edn/render-edn
              (:log entry))]))))
 
-(defc ui-event-details [event-ident]
+(defc ui-event-details [event-id]
   (bind entry
-    (sg/db-read event-ident))
+    (sg/kv-lookup ::m/event event-id))
 
   (bind tab-ref
     (atom :event))
@@ -138,13 +135,12 @@
 
   (render
     (case (:type entry)
-      :tx-report (ui-tx-report event-ident entry)
-      :dev-log (ui-dev-log event-ident entry)
+      :tx-report (ui-tx-report event-id entry)
+      :dev-log (ui-dev-log event-id entry)
       (<< [:div {:class (css :flex-1)}
            [:div "Unknown Entry"]
            [:div (edn/render-edn entry)]]))
     ))
-
 
 (defn pad2 [num]
   (.padStart (js/String num) 2 "0"))
@@ -159,9 +155,9 @@
          "."
          (.getMilliseconds d))))
 
-(defc ui-log-item [event-ident]
+(defc ui-log-item [event-id]
   (bind entry
-    (sg/db-read event-ident))
+    (sg/kv-lookup ::m/event event-id))
 
   (render
     (let [{:keys [ts]} entry
@@ -169,8 +165,8 @@
 
           select-ev
           {:e ::select-event!
-           :runtime (:runtime entry)
-           :event event-ident}]
+           :target-id (:target-id entry)
+           :event-id event-id}]
 
       (case (:type entry)
         :dev-log
@@ -196,17 +192,14 @@
 
         (<< [:div (pr-str entry)])))))
 
-(defc ui-panel [runtime-ident]
-  (bind events
-    (sg/db-read [runtime-ident :events]))
-
-  (bind selected
-    (sg/db-read [runtime-ident :selected-event]))
+(defc ui-panel [target-id]
+  (bind {:keys [events selected-event] :as target}
+    (sg/kv-lookup ::m/target target-id))
 
   (event ::close! [env ev e]
     (sg/run-tx env
       {:e ::select-event!
-       :runtime runtime-ident
+       :runtime target-id
        :event nil}))
 
   (render
@@ -218,8 +211,8 @@
 
         [:div {:class (css :flex :flex-col :overflow-auto
                         {:border-top "4px solid #eee"})
-               :style/height (if selected "80%" "0%")}
-         (when selected
-           (ui-event-details selected))])))
+               :style/height (if selected-event "80%" "0%")}
+         (when selected-event
+           (ui-event-details selected-event))])))
 
 

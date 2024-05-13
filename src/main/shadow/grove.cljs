@@ -17,7 +17,7 @@
     [shadow.grove.ui.atoms :as atoms]
     [shadow.grove.ui.portal :as portal]
     [shadow.arborist.attributes :as a]
-    [shadow.grove.db :as db]
+    [shadow.grove.kv :as kv]
     [shadow.grove.impl :as impl]
     [shadow.css] ;; used in macro ns
     ))
@@ -37,51 +37,18 @@
   ;; FIXME: should schedule properly when it isn't in event handler already
   (gp/handle-event! parent ev-map nil env))
 
-(defn query-ident
-  ;; shortcut for ident lookups that can skip EQL queries
-  ([ident]
-   {:pre [(db/ident? ident)]}
-   (impl/slot-query ident nil {}))
-  ;; EQL queries
-  ([ident query]
-   {:pre [(db/ident? ident)
-          (vector? query)]}
-   (impl/slot-query ident query {}))
-  ([ident query config]
-   {:pre [(db/ident? ident)
-          (vector? query)
-          (map? config)]}
-   (impl/slot-query ident query config)))
+(defn query
+  [query-fn & args]
+  (impl/slot-query query-fn args))
 
-(defn query-root
-  ([query]
-   (impl/slot-query nil query {}))
-  ([query config]
-   (impl/slot-query nil query config)))
-
-(defn db-read
-  [what & args]
-  (let [read-fn
-        (cond
-          (fn? what)
-          what
-
-          (seq args)
-          (throw (ex-info "only functions can receive extra arguments" {:what what :args args}))
-
-          (db/ident? what)
-          (fn [env db] (get db what))
-
-          (keyword? what)
-          (fn [env db] (get db what))
-
-          (vector? what)
-          (fn [env db] (get-in db what))
-
-          :else
-          (throw (ex-info "unrecognized db-read argument" {:what what})))]
-
-    (impl/slot-db-read args read-fn)))
+(defn kv-lookup
+  ;; (sg/kv-lookup :db 1 :foo)
+  ;; bit more convenient than
+  ;; (:foo (sg/kv-lookup :db 1))
+  ([kv-id key & path]
+   (get-in (kv-lookup kv-id key) path))
+  ([kv-id key]
+   (impl/slot-kv-lookup kv-id key)))
 
 (defn use-state
   ([]
@@ -316,59 +283,42 @@
       (finally
         (set! update-pending? false)))))
 
-(defn prepare
-  ([data-ref app-id]
-   (prepare {} data-ref app-id))
-  ([init data-ref app-id]
-   (when (get @rt/known-runtimes-ref app-id)
-     (throw
-       (ex-info
-         (str "app " app-id " already registered!")
-         {:app-id app-id})))
+(defn- prepare [app-id]
+  (when (get @rt/known-runtimes-ref app-id)
+    (throw
+      (ex-info
+        (str "app " app-id " already registered!")
+        {:app-id app-id})))
 
-   (let [root-scheduler
-         (RootScheduler. false (js/Set.))
+  (let [root-scheduler
+        (RootScheduler. false (js/Set.))
 
-         rt-ref
-         (atom
-           (assoc init
-             ::rt/rt true
-             ::rt/roots #{}
-             ::rt/scheduler root-scheduler
-             ::rt/app-id app-id
-             ::rt/data-ref data-ref
-             ::rt/event-config {}
-             ::rt/event-interceptors []
-             ::rt/fx-config {}
-             ::rt/tx-seq-ref (atom 0)
-             ::rt/active-queries-map (js/Map.)
-             ::rt/key-index-seq (atom 0)
-             ::rt/key-index-ref (atom {})
-             ::rt/query-index-map (js/Map.)
-             ::rt/query-index-ref (atom {})
-             ::rt/env-init []))]
+        rt-ref
+        (atom
+          {::rt/rt true
+           ::rt/roots #{}
+           ::rt/scheduler root-scheduler
+           ::rt/app-id app-id
+           ::rt/kv-ref (atom {})
+           ::rt/event-config {}
+           ::rt/event-interceptors [#(impl/kv-interceptor %1)]
+           ::rt/fx-config {}
+           ::rt/tx-seq-ref (atom 0)
+           ::rt/active-queries-map (js/Map.)
+           ::rt/key-index-ref (volatile! {})
+           ::rt/query-index-map (js/Map.)
+           ::rt/query-index-ref (atom {})
+           ::rt/env-init []})]
 
-     (swap! rt/known-runtimes-ref assoc app-id rt-ref)
+    (swap! rt/known-runtimes-ref assoc app-id rt-ref)
 
-     rt-ref)))
-
-(defn make-blank-runtime [app-id]
-  (let [schema
-        {}
-
-        data-ref
-        (-> {}
-            (db/configure schema)
-            (atom))]
-
-    ;; prepare registers runtime and returns it
-    (prepare {} data-ref app-id)))
+    rt-ref))
 
 (defn get-runtime [app-id]
   (cond
     (keyword? app-id)
     (or (get @rt/known-runtimes-ref app-id)
-        (make-blank-runtime app-id))
+        (prepare app-id))
 
     (rt/ref? app-id)
     app-id
@@ -444,53 +394,27 @@
     (throw (ex-info "operation not allowed, runtime already mounted" {:rt-ref rt-ref}))))
 
 ;; these are only supposed to run once in init
+;; will overwrite with no attempts at merging
+(defn add-kv-store
+  ([rt-ref kv-id config]
+   (add-kv-store rt-ref kv-id config {}))
+  ([rt-ref kv-id config init-data]
+   (let [kv-ref (::rt/kv-ref @rt-ref)]
+     (swap! kv-ref assoc kv-id (kv/init kv-id config init-data)))
 
-;; adding a db type to a db that already has data is possible
-;; but would potentially mess with normalization which cannot be corrected
-;; so instead disallowing it outright
-(defn add-db-type [rt-ref entity-type spec]
-  (check-unmounted! rt-ref)
-
-  (let [data-ref (::rt/data-ref @rt-ref)]
-    (swap! data-ref db/add-type entity-type spec)
-    rt-ref))
+   rt-ref))
 
 ;; just more convenient to do this directly
-(defn db-init
+(defn kv-init
   [rt-ref init-fn]
   (check-unmounted! rt-ref)
-
-  (let [data-ref (::rt/data-ref @rt-ref)]
-    (swap! data-ref
-      (fn [db]
-        (cond
-          (map? init-fn)
-          (merge db init-fn)
-
-          (fn? init-fn)
-          (let [after (init-fn db)]
-            (cond
-              (instance? db/GroveDB after)
-              after
-
-              (map? after)
-              (merge db after)
-
-              :else
-              (throw (ex-info "invalid db-init result" {:result after}))
-              ))
-
-          :else
-          (throw (ex-info "invalid init-fn argument" {:init-fn init-fn})))))
-
+  (let [kv-ref (::rt/kv-ref @rt-ref)]
+    (swap! kv-ref init-fn)
     rt-ref
     ))
 
 (defn valid-interceptor? [x]
-  (or (nil? x)
-      (and (map? x)
-           (or (fn? (:before x))
-               (fn? (:after x))))))
+  (fn? x))
 
 (defn set-interceptors! [rt-ref interceptors]
   {:pre [(vector? interceptors)

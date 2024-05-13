@@ -1,7 +1,7 @@
 (ns shadow.grove.devtools.relay-ws
   (:require
     [shadow.grove :as sg]
-    [shadow.grove.db :as db]
+    [shadow.grove.kv :as kv]
     [shadow.grove.runtime :as rt]
     [shadow.grove.events :as ev]
     [shadow.grove.devtools :as-alias m]
@@ -17,10 +17,11 @@
   env)
 
 (defmethod handle-msg :welcome
-  [{::keys [on-welcome] :as env} {:keys [client-id]}]
+  [env {:keys [client-id]}]
 
   ;; FIXME: call this via fx
-  (on-welcome)
+  (let [{::keys [on-welcome]} @(::rt/runtime-ref env)]
+    (on-welcome))
 
   (-> env
       (update :db assoc ::m/tool-id client-id ::m/relay-ws-connected true)
@@ -32,25 +33,24 @@
 (defmethod handle-msg :clients
   [env {:keys [clients]}]
   (-> env
-      (update :db db/merge-seq ::m/target clients)
+      (kv/merge-seq ::m/target clients)
       (sg/queue-fx :relay-send
         {:op :request-supported-ops
          :to (into #{} (map :client-id) clients)})
       ))
 
 (defmethod handle-msg :notify
-  [env {:keys [event-op] :as msg}]
+  [env {:keys [event-op client-id] :as msg}]
   (case event-op
     :client-disconnect
-    (let [ident (db/make-ident ::m/target (:client-id msg))]
-      (-> env
-          (update :db dissoc ident)
-          (cond->
-            (= ident (get-in env [:db ::m/selected-target]))
-            (update :db dissoc ::m/selected-target))))
+    (-> env
+        (update ::m/target dissoc client-id)
+        (cond->
+          (= client-id (get-in env [:db ::m/selected-target]))
+          (update :db dissoc ::m/selected-target)))
     :client-connect
     (-> env
-        (update :db db/add ::m/target (select-keys msg [:client-id :client-info]))
+        (kv/add ::m/target (select-keys msg [:client-id :client-info]))
         (sg/queue-fx :relay-send
           {:op :request-supported-ops
            :to (:client-id msg)}))
@@ -59,7 +59,7 @@
 (defmethod handle-msg :supported-ops
   [env {:keys [from ops] :as msg}]
   (-> env
-      (assoc-in [:db (db/make-ident ::m/target from) :supported-ops] ops)
+      (assoc-in [::m/target from :supported-ops] ops)
       (cond->
         (contains? ops ::m/stream-sub)
         (sg/queue-fx :relay-send
@@ -74,50 +74,42 @@
 
 (defmethod handle-msg ::m/stream-start
   [env {:keys [from events] :as msg}]
-  (let [runtime-ident (db/make-ident ::m/target from)
-        events (mapv #(assoc % :event-id (random-uuid) :runtime runtime-ident) events)]
-
-    (-> env
-        (update :db db/merge-seq ::m/event events
-          (fn [db items]
-            (assoc-in db [runtime-ident :events] (into (list) items))
-            )))
-    ))
+  (kv/merge-seq env ::m/event
+    (mapv #(assoc % :event-id (random-uuid) :target-id from) events)
+    (fn [env items]
+      (assoc-in env [::m/target from :events] (into (list) items)))))
 
 (defmethod handle-msg ::m/stream-update
   [env {:keys [from event] :as msg}]
-  (let [event-id (random-uuid)
-        event-ident (db/make-ident ::m/event event-id)
-        runtime-ident (db/make-ident ::m/target from)]
-
+  (let [event-id (random-uuid)]
     (-> env
-        (update :db db/add ::m/event (assoc event :event-id event-id :runtime runtime-ident))
-        (update-in [:db runtime-ident :events] conj event-ident)
-        )))
+        (kv/add ::m/event (assoc event :event-id event-id :target-id from))
+        (update-in [::m/target from :events] conj event-id))))
 
 (defmethod handle-msg ::m/work-finished
   [env {:keys [from snapshot] :as msg}]
-  (assoc-in env [:db (db/make-ident ::m/target from) :snapshot] snapshot))
+  (assoc-in env [::m/target from :snapshot] snapshot))
 
 (defmethod handle-msg ::m/runtimes
   [env {:keys [from runtimes] :as msg}]
-  (assoc-in env [:db (db/make-ident ::m/target from) :runtimes] runtimes))
+  (assoc-in env [::m/target from :runtimes] runtimes))
 
 (defmethod handle-msg ::m/focus-component
   [env {:keys [from component snapshot] :as msg}]
-  (let [target-ident (db/make-ident ::m/target from)]
-    (-> env
-        (assoc-in [:db ::m/selected] #{component})
-        (assoc-in [:db ::m/selected-target] target-ident)
-        (update-in [:db target-ident] merge {:snapshot snapshot}))))
+  (-> env
+      (assoc-in [:db ::m/selected] #{component})
+      (assoc-in [:db ::m/selected-target] from)
+      (assoc-in [::m/target from :snapshot] snapshot)))
 
-(defn cast! [{::keys [ws-ref] ::rt/keys [transit-str] :as env} msg]
+(defn cast! [rt-ref msg]
   (when ^boolean js/goog.DEBUG
     (when (not= :pong (:op msg))
       (js/console.log "[WS-SEND]" (:op msg) msg)))
-  (.send @ws-ref (transit-str msg)))
 
-(defn call! [env msg result-data]
+  (let [{::keys [ws-ref] ::rt/keys [transit-str] :as env} @rt-ref]
+    (.send @ws-ref (transit-str msg))))
+
+(defn call! [rt-ref msg result-data]
   {:pre [(map? msg)
          (or (fn? result-data)
              (and (map? result-data)
@@ -125,9 +117,7 @@
   (let [mid (str (random-uuid))]
     (swap! rpc-ref assoc mid {:msg msg
                               :result-data result-data})
-    (cast! env (assoc msg :call-id mid))))
-
-
+    (cast! rt-ref (assoc msg :call-id mid))))
 
 (defn init [rt-ref server-token on-welcome]
   (let [socket (js/WebSocket.
@@ -141,8 +131,8 @@
     (ev/reg-fx rt-ref :relay-send
       (fn [env msg]
         (if-some [result (::result msg)]
-          (call! env (dissoc msg ::result) result)
-          (cast! env msg))))
+          (call! (::rt/runtime-ref env) (dissoc msg ::result) result)
+          (cast! (::rt/runtime-ref env) msg))))
 
     (sg/reg-event rt-ref
       ::m/relay-ws-close
@@ -161,8 +151,8 @@
       ::server-token server-token
       ::on-welcome
       (fn []
-        (cast! @rt-ref {:op :hello
-                        :client-info {:type :shadow.grove.devtools}})
+        (cast! rt-ref {:op :hello
+                       :client-info {:type :shadow.grove.devtools}})
         (on-welcome)))
 
     (let [{::rt/keys [^function transit-read]} @rt-ref]
@@ -178,7 +168,7 @@
                   (sg/run-tx! rt-ref (assoc result-data :call-result msg))))
 
               (= :ping op)
-              (cast! @rt-ref {:op :pong})
+              (cast! rt-ref {:op :pong})
 
               :else
               (sg/run-tx! rt-ref {:e ::m/relay-ws :msg msg}))))))

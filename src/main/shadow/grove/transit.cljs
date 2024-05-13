@@ -1,30 +1,17 @@
 (ns shadow.grove.transit
   (:require
     [cognitect.transit :as transit]
-    [shadow.grove.runtime :as rt]
-    [shadow.grove.db.ident :as ident]
-    [shadow.grove.db :as db]))
+    [shadow.grove.runtime :as rt]))
 
 (defn init!
   ([rt-ref]
    (init! rt-ref {}))
   ([rt-ref {:keys [reader-opts writer-opts]}]
-   ;; FIXME: take more handlers from config somehow
-   ;; maybe make tag used for idents configurable?
    (let [tr
-         (transit/reader :json
-           (assoc-in reader-opts [:handlers "gdb/ident"]
-             (fn [[key val]]
-               (db/make-ident key val))))
+         (transit/reader :json reader-opts)
 
          tw
-         (transit/writer :json
-           (assoc-in writer-opts [:handlers ident/Ident]
-             (transit/write-handler
-               (constantly "gdb/ident")
-               db/ident-as-vec
-               nil
-               nil)))
+         (transit/writer :json writer-opts)
 
          transit-read
          (fn transit-read [data]
