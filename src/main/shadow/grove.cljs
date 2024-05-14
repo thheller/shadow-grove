@@ -37,6 +37,19 @@
   ;; FIXME: should schedule properly when it isn't in event handler already
   (gp/handle-event! parent ev-map nil env))
 
+;; the idea is that query (and potentially others) can call suspend!
+;; to let runtime know that data it required was still loading
+;; components will stop processing slots that suspend and will resume once the slot self invalidates
+;; FIXME: suspend is currently only checked while mounting
+;; but the idea with default-return is so that while suspended it keeps returning the previous value
+;; so that it at least can still proceed with the old value without the user having to hold on to that
+(defn suspend!
+  ([]
+   (suspend! nil))
+  ([default-return]
+   (set! rt/*ready* false)
+   (or rt/*slot-value* default-return)))
+
 (defn query
   [query-fn & args]
   (impl/slot-query args query-fn))
@@ -330,13 +343,6 @@
 
     :else
     (throw (ex-info "invalid app-id" {:app-id app-id}))))
-
-(defn suspend!
-  ([]
-   (suspend! nil))
-  ([default-return]
-   (set! rt/*ready* false)
-   (or rt/*slot-value* default-return)))
 
 ;; for convenience allowing these to use runtime keywords
 ;; instead of only rt-ref. saves user having to juggle the rt-ref too much

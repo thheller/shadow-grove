@@ -231,9 +231,10 @@
                     rt/*claimed* false
                     rt/*ready* true]
 
+            ;; sg/suspend! may set this to false
             [rt/*ready* (read-fn query-opts)])]
 
-
+      ;; only update when ready, otherwise wait for invalidation to trigger again
       ;; FIXME: maybe after a delay show loading spinner?
       (when ready
 

@@ -30,7 +30,7 @@
   [env {:keys [from event-id diff] :as msg}]
   (assoc-in env [::m/event event-id :diff] diff))
 
-(defc ui-diff-entry [{:keys [op] :as entry}]
+(defc ui-diff-entry [entry op]
   (bind show-ref (atom false))
   (bind show? (sg/watch show-ref))
 
@@ -40,19 +40,20 @@
           [:div {:class (css :p-1)}
            ;; FIXME: some actual icons would be nice
            (case op
-             :db-add "+"
-             :db-remove "-"
-             :db-update "%"
+             :add "+"
+             :remove "-"
+             :update "%"
              "?")]
           [:div {:class (css :flex-1)}
-           [:div {:class (css :cursor-pointer :py-1 :font-bold)
-                  :on-click #(swap! show-ref not)} (pr-str (:key entry))]
+           [:div {:class (css :cursor-pointer :py-1 :font-semibold)
+                  :on-click #(swap! show-ref not)}
+            (str (:kv-id entry) " - " (pr-str (:key entry)))]
 
            (when show?
              (case op
-               :db-update (edn/edn-diff (:before entry) (:after entry))
-               :db-add (edn/render-edn (:val entry))
-               :db-remove (edn/render-edn (:val entry))
+               :update (edn/edn-diff (:before entry) (:after entry))
+               :add (edn/render-edn (:val entry))
+               :remove (edn/render-edn (:val entry))
                (edn/render-edn entry)))]]])))
 
 (defc ui-fx-entry [[fx-key fx-val]]
@@ -92,9 +93,9 @@
 
           [:div {:class (css :flex-1 :overflow-auto)}
            (case tab
-             :added (sg/simple-seq (:added diff) ui-diff-entry)
-             :updated (sg/simple-seq (:updated diff) ui-diff-entry)
-             :removed (sg/simple-seq (:removed diff) ui-diff-entry)
+             :added (sg/simple-seq (:added diff) #(ui-diff-entry %1 :add))
+             :updated (sg/simple-seq (:updated diff) #(ui-diff-entry %1 :update))
+             :removed (sg/simple-seq (:removed diff) #(ui-diff-entry %1 :update))
              :fx (sg/simple-seq fx ui-fx-entry)
              (edn/render-edn event))]
           ))))

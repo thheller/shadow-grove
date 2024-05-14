@@ -18,8 +18,6 @@
     [shadow.arborist.common]
     [shadow.arborist.collections]
     [shadow.grove :as sg]
-    [shadow.grove.db :as db]
-    [shadow.grove.db.ident :as db-ident]
     [shadow.grove.runtime :as rt]
     [shadow.grove.ui.portal]
     [shadow.grove.ui.suspense]
@@ -65,32 +63,6 @@
           (conj! s v))
         (transient #{})
         (.values this)))))
-
-(extend-type db-ident/Ident
-  cp/Datafiable
-  (datafy [this]
-    [(db/ident-key this)
-     (db/ident-val this)]))
-
-(deftype IdentFormatter []
-  Object
-  (header [this obj]
-    (when (db/ident? obj)
-      #js ["span" "#gbd/ident ["
-           #js ["object" #js {:object (db/ident-key obj)}]
-           " "
-           #js ["object" #js {:object (db/ident-val obj)}]
-           "]"]))
-
-  (hasBody [this obj]
-    false)
-  (body [this m]
-    nil))
-
-(when-let [^js f js/goog.global.devtoolsFormatters]
-  (doto f
-    (.push (IdentFormatter.))
-    ))
 
 (set! *warn-on-infer* false)
 
@@ -338,16 +310,21 @@
 (defonce tx-seq-ref (atom 0))
 (defonce tx-ref (atom {}))
 
-(defn relevant-key? [x]
-  (or (db/ident? x) (keyword? x)))
+(defn count-tx-keys [tx-info key]
+  (reduce-kv
+    (fn [c kv-id kv-summary]
+      (let [key-set (get kv-summary key)]
+        (+ c (count key-set))))
+    0
+    tx-info))
 
-(defn as-stream-event [entry]
+(defn as-stream-event [{::impl/keys [tx-info] :as entry}]
   (-> entry
       (select-keys
         [:ts :tx-id :app-id :event :fx])
-      (assoc :count-new (count (filter relevant-key? (:keys-new entry))))
-      (assoc :count-updated (count (filter relevant-key? (:keys-updated entry))))
-      (assoc :count-removed (count (filter relevant-key? (:keys-removed entry))))
+      (assoc :count-new (count-tx-keys tx-info :keys-new))
+      (assoc :count-updated (count-tx-keys tx-info :keys-updated))
+      (assoc :count-removed (count-tx-keys tx-info :keys-removed))
       (assoc :type :tx-report)))
 
 (defn stream-sub [{:keys [streams-ref runtime] :as svc} {:keys [from] :as msg}]
@@ -374,40 +351,37 @@
     {:op ::m/db-copy
      :db (-> @rt/known-runtimes-ref (get app-id) (deref) (get ::rt/data-ref) (deref) (deref))}))
 
-(defn make-tx-diff [{:keys [db-before db-after keys-new keys-updated keys-removed] :as tx}]
-  (let [only-relevant-keys (filter relevant-key?)]
-    {:added
-     (into []
-       (comp only-relevant-keys
-         (map (fn [key]
-                {:key key
-                 :op :db-add
-                 :val (get db-after key)})))
-       keys-new)
-
-     :updated
-     (into []
-       (comp
-         only-relevant-keys
-         (map (fn [key]
-                {:key key
-                 :op :db-update
-                 :before (get db-before key)
-                 :after (get db-after key)})))
-       keys-updated)
-
-     :removed
-     (into []
-       (comp only-relevant-keys
-         (map (fn [key]
-                {:key key
-                 :op :db-remove
-                 :val (get db-before key)})))
-       keys-removed)}))
+(defn make-tx-diff [{::impl/keys [tx-info] :as tx}]
+  (reduce-kv
+    (fn [m kv-id {:keys [data data-before] :as kv-summary}]
+      (-> m
+          (update :added into
+            (->> (:keys-new kv-summary)
+                 (mapv (fn [key]
+                         {:key key
+                          :kv-id kv-id
+                          :val (get data key)}))))
+          (update :updated into
+            (->> (:keys-updated kv-summary)
+                 (mapv (fn [key]
+                         {:key key
+                          :kv-id kv-id
+                          :before (get data-before key)
+                          :after (get data key)}))))
+          (update :removed into
+            (->> (:keys-removed kv-summary)
+                 (mapv (fn [key]
+                         {:key key
+                          :kv-id kv-id
+                          :val (get data-before key)}))))))
+    {:added []
+     :updated []
+     :removed []}
+    tx-info))
 
 (comment
   (keys @tx-ref)
-  (make-tx-diff {} (get @tx-ref 9)))
+  (make-tx-diff (get @tx-ref 9)))
 
 (defn get-tx-diff
   [{:keys [runtime] :as svc} {:keys [event-id tx-id] :as msg}]
@@ -497,14 +471,7 @@
          (fn [x]
            ;; fallback to EDN, so that unknown things do not error out
            ;; edn prints everything, so more forgiving for types we don't care to restore anyway
-           (pr-str x)))
-
-       ident/Ident
-       (transit/write-handler
-         (fn tag-fn [x]
-           "gdb/ident")
-         (fn rep-fn [x]
-           [(db/ident-key x) (db/ident-val x)]))})
+           (pr-str x)))})
 
     (let [streams-ref
           (atom #{})
