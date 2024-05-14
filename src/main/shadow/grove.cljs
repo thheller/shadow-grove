@@ -331,6 +331,13 @@
     :else
     (throw (ex-info "invalid app-id" {:app-id app-id}))))
 
+(defn suspend!
+  ([]
+   (suspend! nil))
+  ([default-return]
+   (set! rt/*ready* false)
+   (or rt/*slot-value* default-return)))
+
 ;; for convenience allowing these to use runtime keywords
 ;; instead of only rt-ref. saves user having to juggle the rt-ref too much
 ;; since events may be spread between many namespaces

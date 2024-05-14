@@ -223,7 +223,7 @@
           {:offset visible-offset
            :num visible-count}
 
-          result
+          [ready result]
           (binding [rt/*slot-provider* this
                     rt/*env* env
                     rt/*slot-idx* 0
@@ -231,12 +231,11 @@
                     rt/*claimed* false
                     rt/*ready* true]
 
-            ;; FIXME: tie into suspense gp/*ready* might be set to false
-            (read-fn query-opts))]
+            [rt/*ready* (read-fn query-opts)])]
 
 
       ;; FIXME: maybe after a delay show loading spinner?
-      (when (not= :db/loading result)
+      (when ready
 
         (let [item-count (:item-count result)
               item-height (:item-height opts)]

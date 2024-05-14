@@ -73,8 +73,7 @@
              (ui-tree/ui-panel target-id)
              )]))))
 
-(defn suitable-targets [env]
-  (js/console.log "suitable runtimes" env)
+(defn ?suitable-targets [env]
   (->> (::m/target env)
        (vals)
        (filter #(contains? (:supported-ops %) ::m/take-snapshot))
@@ -83,7 +82,7 @@
 
 (defc ui-root []
   (bind targets
-    (sg/query suitable-targets))
+    (sg/query ?suitable-targets))
 
   (bind selected
     (sg/kv-lookup :db ::m/selected-target))

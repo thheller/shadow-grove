@@ -489,7 +489,7 @@
 (defn update-val [env kv-id key update-fn & args]
   (let [kv (get-kv! env kv-id)
         val (get kv key)
-        next-val (apply update-fn val args )]
+        next-val (apply update-fn val args)]
     (assoc env kv-id (assoc kv key next-val))))
 
 (defn- normalize* [imports-ref env kv-id item]
@@ -551,15 +551,10 @@
     @imports-ref
     ))
 
-(defn merge-or-replace [left right]
-  (if (keyword-identical? :db/loading left)
-    right
-    (merge left right)))
-
 (defn- merge-imports [env imports]
   (reduce
     (fn [env [kv-id pkey item]]
-      (update-in env [kv-id pkey] merge-or-replace item))
+      (update-in env [kv-id pkey] merge item))
     env
     imports))
 
