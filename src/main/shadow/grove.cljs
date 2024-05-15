@@ -60,13 +60,15 @@
       (select-keys (get env kv-id) keys))))
 
 (defn kv-lookup
+  ([kv-id]
+   (impl/slot-kv-get kv-id))
+  ([kv-id key]
+   (impl/slot-kv-lookup kv-id key))
   ;; (sg/kv-lookup :db 1 :foo)
   ;; bit more convenient than
   ;; (:foo (sg/kv-lookup :db 1))
   ([kv-id key & path]
-   (get-in (kv-lookup kv-id key) path))
-  ([kv-id key]
-   (impl/slot-kv-lookup kv-id key)))
+   (get-in (kv-lookup kv-id key) path)))
 
 (defn use-state
   ([]

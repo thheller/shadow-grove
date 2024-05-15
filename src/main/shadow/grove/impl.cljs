@@ -466,6 +466,50 @@
       result
       )))
 
+(defn slot-kv-get [kv-id]
+  (let [ref
+        (rt/claim-slot! ::slot-kv-get)
+
+        rt-ref
+        (::rt/runtime-ref rt/*env*)
+
+        {::rt/keys [active-queries-map] :as query-env}
+        @rt-ref]
+
+    ;; setup only once
+    (when (nil? @ref)
+      (comp/set-cleanup! ref
+        (fn [{:keys [query-id read-keys] :as last-state}]
+          (unindex-query @rt-ref query-id read-keys)
+          (.delete active-queries-map query-id)
+          ))
+
+      (let [query-id (rt/next-id)]
+        (swap! ref assoc :query-id query-id)
+        (.set active-queries-map query-id #(gp/invalidate! ref))))
+
+    (let [all
+          @(::rt/kv-ref query-env)
+
+          {:keys [query-id read-keys]}
+          @ref
+
+          kv
+          (kv/get-kv! all kv-id)
+
+          new-keys
+          #{kv-id}]
+
+      ;; FIXME: only need to call this again if kv-id changed
+      (index-query rt-ref query-id read-keys new-keys)
+
+      (swap! ref assoc :read-keys new-keys)
+
+      ;; don't leak GroveKV instance
+      ;; user just wants the data as no further access can be recorded
+      @kv
+      )))
+
 (defn slot-kv-lookup [kv-id key]
   (let [ref
         (rt/claim-slot! ::slot-kv-lookup)
@@ -498,9 +542,6 @@
           kv
           (kv/get-kv! all kv-id)
 
-          result
-          (get kv key)
-
           new-keys
           #{(IndexKey. kv-id key)}]
 
@@ -510,8 +551,7 @@
 
       (swap! ref assoc :read-keys new-keys)
 
-      result
-      )))
+      (get kv key))))
 
 (defn slot-state [init-state merge-fn]
   (let [ref (rt/claim-slot! ::slot-state)
