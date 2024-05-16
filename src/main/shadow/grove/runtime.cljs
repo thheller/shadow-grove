@@ -8,7 +8,7 @@
   (atom {}))
 
 (defn ref? [x]
-  (and (atom x)
+  (and (instance? cljs.core/Atom x)
        (::sg/runtime @x)))
 
 (defonce id-seq (volatile! 0))
