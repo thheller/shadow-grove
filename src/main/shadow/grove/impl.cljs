@@ -240,13 +240,14 @@
   (reduce
     (fn [tx-env ^function handler]
       ;; allow nils, easier to do (when DEBUG extra-interceptor) kind of handlers
-      (if-not handler
+      (if (nil? handler)
         tx-env
         (try
-          (let [result (try
-                         (handler tx-env)
-                         (catch :default e
-                           (throw (ex-info "interceptor failed" {:interceptor handler} e))))]
+          (let [result
+                (try
+                  (handler tx-env)
+                  (catch :default e
+                    (throw (ex-info "interceptor failed" {:interceptor handler} e))))]
 
             (when-not (identical? (::tx-guard result) (::tx-guard tx-env))
               (throw (ex-info "interceptor didn't return tx-env" {:interceptor handler :result result})))
@@ -264,6 +265,9 @@
         (tx-reporter tx-env)))))
 
 
+;; FIXME: I'm unsure it was worth extracting this into an interceptor
+;; might be better if still handled in process-event directly
+;; but this technically allows users to run stuff after/before this is done
 (defn kv-interceptor [tx-env]
   (let [rt-ref (::rt/runtime-ref tx-env)
         kv-ref (::rt/kv-ref @rt-ref)
@@ -277,7 +281,7 @@
           before)]
 
     (update tx-env ::tx-after conj
-      (fn kv-after [tx-env]
+      (fn kv-interceptor-after [tx-env]
         (when-not (identical? @kv-ref before)
           (throw (ex-info "someone messed with kv state while in tx" {})))
 

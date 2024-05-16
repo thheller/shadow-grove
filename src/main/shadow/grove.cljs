@@ -321,7 +321,7 @@
            ::rt/app-id app-id
            ::rt/kv-ref (atom {})
            ::rt/event-config {}
-           ::rt/event-interceptors [#(impl/kv-interceptor %1)]
+           ::rt/event-interceptors [impl/kv-interceptor]
            ::rt/fx-config {}
            ::rt/tx-seq-ref (atom 0)
            ::rt/active-queries-map (js/Map.)
@@ -415,9 +415,9 @@
 
 ;; these are only supposed to run once in init
 ;; will overwrite with no attempts at merging
-(defn add-kv-store
+(defn add-kv-table
   ([rt-ref kv-id config]
-   (add-kv-store rt-ref kv-id config {}))
+   (add-kv-table rt-ref kv-id config {}))
   ([rt-ref kv-id config init-data]
    (let [kv-ref (::rt/kv-ref @rt-ref)]
      (swap! kv-ref assoc kv-id (kv/init kv-id config init-data)))
@@ -436,7 +436,14 @@
 (defn valid-interceptor? [x]
   (fn? x))
 
+;; FIXME: exposing this here to that users don't need to require impl namespace when using interceptors
+(def kv-interceptor impl/kv-interceptor)
+
 (defn set-interceptors! [rt-ref interceptors]
   {:pre [(vector? interceptors)
          (every? valid-interceptor? interceptors)]}
   (swap! rt-ref assoc ::rt/event-interceptors interceptors))
+
+(defn queue-after-interceptor [tx-env interceptor]
+  {:pre [(fn? interceptor)]}
+  (update tx-env ::impl/tx-after conj interceptor))

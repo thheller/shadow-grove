@@ -31,13 +31,13 @@
   (render))
 
 (defn init []
-  (sg/add-kv-store rt-ref :db
+  (sg/add-kv-table rt-ref :db
     {:validate-key keyword?})
 
-  (sg/add-kv-store rt-ref ::m/target
+  (sg/add-kv-table rt-ref ::m/target
     {:primary-key :target-id})
 
-  (sg/add-kv-store rt-ref ::m/event
+  (sg/add-kv-table rt-ref ::m/event
     {:primary-key :event-id})
 
   (sg/kv-init rt-ref
