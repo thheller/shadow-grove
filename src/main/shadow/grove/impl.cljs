@@ -1,6 +1,5 @@
 (ns shadow.grove.impl
   (:require
-    [clojure.set :as set]
     [shadow.grove :as-alias sg]
     [shadow.grove.kv :as kv]
     [shadow.grove.protocols :as gp]
@@ -94,7 +93,7 @@
 
 (defn index-query*
   [rt-ref query-id prev-keys next-keys]
-  (let [{::rt/keys [active-queries-map key-index-ref]} @rt-ref]
+  (let [{::sg/keys [active-queries-map key-index-ref]} @rt-ref]
     ;; this is done async, query might be gone since index was queued
     (when (.has active-queries-map query-id)
       ;; index keys that weren't used previously
@@ -124,7 +123,7 @@
   (index-queue-some!))
 
 (defn unindex-query*
-  [{::rt/keys [key-index-ref]} query-id keys]
+  [{::sg/keys [key-index-ref]} query-id keys]
   (reduce
     (fn [_ key]
       (when-some [s (get @key-index-ref key)]
@@ -146,10 +145,10 @@
   (index-work-all!)
 
   (let [key-index
-        @(::rt/key-index-ref @rt-ref)
+        @(::sg/key-index-ref @rt-ref)
 
         active-queries-map
-        (::rt/active-queries-map @rt-ref)
+        (::sg/active-queries-map @rt-ref)
 
         ;; using mutable things since they are a bit faster and time matters here
         keys-to-invalidate
@@ -269,8 +268,8 @@
 ;; might be better if still handled in process-event directly
 ;; but this technically allows users to run stuff after/before this is done
 (defn kv-interceptor [tx-env]
-  (let [rt-ref (::rt/runtime-ref tx-env)
-        kv-ref (::rt/kv-ref @rt-ref)
+  (let [rt-ref (::sg/runtime-ref tx-env)
+        kv-ref (::sg/kv-ref @rt-ref)
         before @kv-ref
 
         tx-env
@@ -335,7 +334,7 @@
 
   ;; (js/console.log ev-id ev origin @rt-ref)
 
-  (let [{::rt/keys [event-config event-interceptors fx-config] :as env}
+  (let [{::sg/keys [event-config event-interceptors fx-config] :as env}
         @rt-ref
 
         ev-id
@@ -356,7 +355,7 @@
             (atom false)
 
             tx-env
-            (-> {::rt/runtime-ref rt-ref
+            (-> {::sg/runtime-ref rt-ref
                  ::tx-guard tx-guard
                  ::tx-after (list) ;; FILO
                  ::fx []
@@ -391,7 +390,7 @@
         ;; dispatching these async since they can never do anything that affects the current render right?
         (rt/next-tick
           (fn []
-            (doseq [[fx-key value] (::rt/fx result)]
+            (doseq [[fx-key value] (::sg/fx result)]
               (let [fx-fn (get fx-config fx-key)
 
                     fx-env
@@ -407,7 +406,7 @@
                         (when-not @tx-done-ref
                           (throw (ex-info "cannot start another tx yet, current one is still running. transact! is meant for async events" {})))
 
-                        (gp/run-now! ^not-native (::rt/scheduler env) #(process-event rt-ref fx-tx origin) [::fx-transact! fx-key])))]
+                        (gp/run-now! ^not-native (::sg/scheduler env) #(process-event rt-ref fx-tx origin) [::fx-transact! fx-key])))]
 
                 (if-not fx-fn
                   (throw (ex-info (str "unknown fx " fx-key) {:fx-key fx-key :fx-value value}))
@@ -425,9 +424,9 @@
         (rt/claim-slot! ::slot-query)
 
         rt-ref
-        (::rt/runtime-ref rt/*env*)
+        (::sg/runtime-ref rt/*env*)
 
-        {::rt/keys [active-queries-map] :as query-env}
+        {::sg/keys [active-queries-map] :as query-env}
         @rt-ref]
 
     ;; setup only once
@@ -445,7 +444,7 @@
 
     ;; perform query
     (let [kv
-          @(::rt/kv-ref query-env)
+          @(::sg/kv-ref query-env)
 
           {:keys [query-id read-keys]}
           @ref
@@ -454,7 +453,7 @@
           (reduce-kv
             (fn [query-env kv-table ^not-native kv]
               (assoc query-env kv-table (kv/observed kv)))
-            {::rt/runtime-ref rt-ref}
+            {::sg/runtime-ref rt-ref}
             kv)
 
           result
@@ -485,9 +484,9 @@
         (rt/claim-slot! ::slot-kv-get)
 
         rt-ref
-        (::rt/runtime-ref rt/*env*)
+        (::sg/runtime-ref rt/*env*)
 
-        {::rt/keys [active-queries-map] :as query-env}
+        {::sg/keys [active-queries-map] :as query-env}
         @rt-ref]
 
     ;; setup only once
@@ -503,7 +502,7 @@
         (.set active-queries-map query-id #(gp/invalidate! ref))))
 
     (let [all
-          @(::rt/kv-ref query-env)
+          @(::sg/kv-ref query-env)
 
           {:keys [query-id read-keys]}
           @ref
@@ -527,9 +526,9 @@
         (rt/claim-slot! ::slot-kv-lookup)
 
         rt-ref
-        (::rt/runtime-ref rt/*env*)
+        (::sg/runtime-ref rt/*env*)
 
-        {::rt/keys [active-queries-map] :as query-env}
+        {::sg/keys [active-queries-map] :as query-env}
         @rt-ref]
 
     ;; setup only once
@@ -546,7 +545,7 @@
 
     ;; perform query
     (let [all
-          @(::rt/kv-ref query-env)
+          @(::sg/kv-ref query-env)
 
           {:keys [query-id read-keys]}
           @ref

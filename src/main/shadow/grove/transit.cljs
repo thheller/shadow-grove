@@ -1,7 +1,7 @@
 (ns shadow.grove.transit
   (:require
     [cognitect.transit :as transit]
-    [shadow.grove.runtime :as rt]))
+    [shadow.grove :as sg]))
 
 (defn init!
   ([rt-ref]
@@ -22,7 +22,7 @@
            (transit/write tw obj))]
 
      (swap! rt-ref assoc
-       ::rt/transit-read transit-read
-       ::rt/transit-str transit-str))))
+       ::sg/transit-read transit-read
+       ::sg/transit-str transit-str))))
 
 

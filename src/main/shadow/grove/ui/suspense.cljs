@@ -2,6 +2,7 @@
   (:require
     [shadow.arborist.common :as common]
     [shadow.arborist.protocols :as ap]
+    [shadow.grove :as-alias sg]
     [shadow.grove.runtime :as rt]
     [shadow.grove.protocols :as gp]
     [shadow.grove.components :as comp]
@@ -91,7 +92,7 @@
                 (SuspenseScheduler. parent-scheduler this false #{})
 
                 offscreen-env
-                (assoc parent-env ::rt/scheduler scheduler)
+                (assoc parent-env ::sg/scheduler scheduler)
 
                 next-managed
                 (ap/as-managed vnode offscreen-env)]
@@ -114,7 +115,7 @@
             (SuspenseScheduler. parent-scheduler this false #{})
 
             offscreen-env
-            (assoc parent-env ::rt/scheduler scheduler)
+            (assoc parent-env ::sg/scheduler scheduler)
 
             next-managed
             (ap/as-managed vnode offscreen-env)]
@@ -162,7 +163,7 @@
           (SuspenseScheduler. parent-scheduler this false #{})
 
           offscreen-env
-          (assoc parent-env ::rt/scheduler scheduler)
+          (assoc parent-env ::sg/scheduler scheduler)
 
           next-managed
           (ap/as-managed vnode offscreen-env)]
@@ -221,7 +222,7 @@
             vnode
             (common/dom-marker env)
             env
-            (::rt/scheduler env)
+            (::sg/scheduler env)
             nil ;; display
             nil ;; offscreen
             nil ;; offscreen-scheduler

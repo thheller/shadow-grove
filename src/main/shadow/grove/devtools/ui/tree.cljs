@@ -42,7 +42,7 @@
      :on-success {:e ::m/open-result!}}))
 
 (defn load-snapshot [tx {:keys [target-id] :as target}]
-  (relay-ws/call! (::rt/runtime-ref tx)
+  (relay-ws/call! (::sg/runtime-ref tx)
     {:op ::m/take-snapshot
      :to target-id}
     {:e ::m/set-snapshot!

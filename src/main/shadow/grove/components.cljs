@@ -7,6 +7,7 @@
     [shadow.arborist.common :as common]
     [shadow.arborist.protocols :as ap]
     [shadow.arborist.attributes :as a]
+    [shadow.grove :as-alias sg]
     [shadow.grove.runtime :as rt]
     [shadow.grove.protocols :as gp]))
 
@@ -148,7 +149,7 @@
     (set! parent-env e)
     (set! config c)
     (set! args a)
-    (set! scheduler (::rt/scheduler parent-env))
+    (set! scheduler (::sg/scheduler parent-env))
     (when DEBUG
       ;; only keeping this info for debugging purposes currently, don't think its needed otherwise
       ;; use js/Set since it always maintains insertion order which makes debugging easier
@@ -163,7 +164,7 @@
                  ::ap/dom-event-handler this
                  ::component this
                  ::event-target this
-                 ::rt/scheduler this)))
+                 ::sg/scheduler this)))
 
     ;; marks component boundaries in dev mode for easier inspect
     (when DEBUG

@@ -90,12 +90,12 @@
         (apply update-fn state args)))))
 
 (defn run-tx
-  [{::rt/keys [runtime-ref] :as env} tx]
+  [{::keys [runtime-ref] :as env} tx]
   (impl/process-event runtime-ref tx env))
 
 (defn run-tx! [runtime-ref tx]
   (assert (rt/ref? runtime-ref) "expected runtime ref?")
-  (let [{::rt/keys [scheduler]} @runtime-ref]
+  (let [{::keys [scheduler]} @runtime-ref]
     (gp/run-now! scheduler #(impl/process-event runtime-ref tx nil) ::run-tx!)))
 
 (defn unmount-root [^js root-el]
@@ -213,18 +213,18 @@
         (RootEventTarget. rt-ref)
 
         env-init
-        (::rt/env-init @rt-ref)]
+        (::env-init @rt-ref)]
 
     (reduce
       (fn [env init-fn]
         (init-fn env))
 
       ;; base env, using init-fn to customize
-      {::rt/scheduler (::rt/scheduler @rt-ref)
+      {::scheduler (::scheduler @rt-ref)
        ::comp/event-target event-target
        ::suspense-keys (atom {})
-       ::rt/root-el root-el
-       ::rt/runtime-ref rt-ref
+       ::root-el root-el
+       ::runtime-ref rt-ref
        ;; FIXME: get this from rt-ref?
        ::comp/error-handler default-error-handler}
 
@@ -247,14 +247,14 @@
     (let [new-env (make-root-env rt-ref root-el)
           new-root (sa/dom-root root-el new-env)]
       (sa/update! new-root root-node)
-      (swap! rt-ref update ::rt/roots conj new-root)
+      (swap! rt-ref update ::roots conj new-root)
       (set! (.-sg$root root-el) new-root)
       (set! (.-sg$env root-el) new-env)
       ::started)))
 
 (defn render [rt-ref ^js root-el root-node]
   {:pre [(rt/ref? rt-ref)]}
-  (gp/run-now! ^not-native (::rt/scheduler @rt-ref) #(render* rt-ref root-el root-node) ::render))
+  (gp/run-now! ^not-native (::scheduler @rt-ref) #(render* rt-ref root-el root-node) ::render))
 
 ;; for devtools, so it can add listener to be notified when work happened
 (def work-finish-trigger nil)
@@ -315,20 +315,20 @@
 
         rt-ref
         (atom
-          {::rt/rt true
-           ::rt/roots #{}
-           ::rt/scheduler root-scheduler
-           ::rt/app-id app-id
-           ::rt/kv-ref (atom {})
-           ::rt/event-config {}
-           ::rt/event-interceptors [impl/kv-interceptor]
-           ::rt/fx-config {}
-           ::rt/tx-seq-ref (atom 0)
-           ::rt/active-queries-map (js/Map.)
-           ::rt/key-index-ref (volatile! {})
-           ::rt/query-index-map (js/Map.)
-           ::rt/query-index-ref (atom {})
-           ::rt/env-init []})]
+          {::runtime true
+           ::roots #{}
+           ::scheduler root-scheduler
+           ::app-id app-id
+           ::kv-ref (atom {})
+           ::event-config {}
+           ::event-interceptors [impl/kv-interceptor]
+           ::fx-config {}
+           ::tx-seq-ref (atom 0)
+           ::active-queries-map (js/Map.)
+           ::key-index-ref (volatile! {})
+           ::query-index-map (js/Map.)
+           ::query-index-ref (atom {})
+           ::env-init []})]
 
     (swap! rt/known-runtimes-ref assoc app-id rt-ref)
 
@@ -356,15 +356,15 @@
    {:pre [(keyword? ev-id)
           (ifn? handler-fn)]}
    (let [rt-ref (get-runtime app-id)]
-     (swap! rt-ref assoc-in [::rt/event-config ev-id] handler-fn)
+     (swap! rt-ref assoc-in [::event-config ev-id] handler-fn)
      rt-ref)))
 
 (defn queue-fx [env fx-id fx-val]
-  (update env ::rt/fx vec-conj [fx-id fx-val]))
+  (update env ::fx vec-conj [fx-id fx-val]))
 
 (defn reg-fx
   [rt-ref fx-id handler-fn]
-  (swap! rt-ref assoc-in [::rt/fx-config fx-id] handler-fn)
+  (swap! rt-ref assoc-in [::fx-config fx-id] handler-fn)
   rt-ref)
 
 
@@ -410,7 +410,7 @@
 
 
 (defn check-unmounted! [rt-ref]
-  (when (seq (::rt/roots @rt-ref))
+  (when (seq (::roots @rt-ref))
     (throw (ex-info "operation not allowed, runtime already mounted" {:rt-ref rt-ref}))))
 
 ;; these are only supposed to run once in init
@@ -419,7 +419,7 @@
   ([rt-ref kv-table config]
    (add-kv-table rt-ref kv-table config {}))
   ([rt-ref kv-table config init-data]
-   (let [kv-ref (::rt/kv-ref @rt-ref)]
+   (let [kv-ref (::kv-ref @rt-ref)]
      (swap! kv-ref assoc kv-table (kv/init kv-table config init-data)))
 
    rt-ref))
@@ -428,7 +428,7 @@
 (defn kv-init
   [rt-ref init-fn]
   (check-unmounted! rt-ref)
-  (let [kv-ref (::rt/kv-ref @rt-ref)]
+  (let [kv-ref (::kv-ref @rt-ref)]
     (swap! kv-ref init-fn)
     rt-ref
     ))
@@ -442,7 +442,7 @@
 (defn set-interceptors! [rt-ref interceptors]
   {:pre [(vector? interceptors)
          (every? valid-interceptor? interceptors)]}
-  (swap! rt-ref assoc ::rt/event-interceptors interceptors))
+  (swap! rt-ref assoc ::event-interceptors interceptors))
 
 (defn queue-after-interceptor [tx-env interceptor]
   {:pre [(fn? interceptor)]}

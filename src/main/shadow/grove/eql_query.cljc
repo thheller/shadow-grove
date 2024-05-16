@@ -31,7 +31,7 @@
        (not (realized? thing))))
 
 (declare
-  ^{:arglists '([env db query-data] [env db current query-data])}
+  ^{:arglists '([env table query-data] [env table current query-data])}
   query)
 
 ;; assoc'd into the query env as ::trace, so that later parts

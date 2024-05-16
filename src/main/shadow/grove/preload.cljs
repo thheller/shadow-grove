@@ -200,7 +200,7 @@
 (defn take-snapshot* [env]
   (->> (vals @rt/known-runtimes-ref)
        (mapcat (fn [rt-ref]
-                 (::rt/roots @rt-ref)))
+                 (::sg/roots @rt-ref)))
        (map #(dp/snapshot % env))
        (vec)))
 

@@ -1,5 +1,6 @@
 (ns shadow.grove.runtime
   (:require
+    [shadow.grove :as-alias sg]
     [goog.async.nextTick]
     [shadow.grove.protocols :as gp]))
 
@@ -8,7 +9,7 @@
 
 (defn ref? [x]
   (and (atom x)
-       (::rt @x)))
+       (::sg/runtime @x)))
 
 (defonce id-seq (volatile! 0))
 

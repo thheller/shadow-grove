@@ -10,6 +10,7 @@
     [shadow.arborist.common :as common]
     [shadow.arborist.attributes :as a]
     [shadow.arborist.collections :as coll]
+    [shadow.grove :as-alias sg]
     [shadow.grove.devtools.protocols :as devp]
     [shadow.grove.keyboard :as keyboard]
     [shadow.grove.runtime :as rt]
@@ -154,7 +155,7 @@
     slot-ref)
 
   (-invalidate-slot! [this idx]
-    (gp/run-now! (::rt/scheduler env)
+    (gp/run-now! (::sg/scheduler env)
       #(.update-query! this)
       ::slot-invalidate!))
 

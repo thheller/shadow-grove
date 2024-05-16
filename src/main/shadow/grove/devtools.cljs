@@ -5,8 +5,6 @@
     [shadow.grove.history :as history]
     [shadow.grove.http-fx :as http-fx]
     [shadow.grove.impl :as impl]
-    [shadow.grove.kv :as kv]
-    [shadow.grove.runtime :as rt]
     [shadow.grove.events :as ev]
     [shadow.grove.devtools :as-alias m]
     [shadow.grove.devtools.ui :as ui]
@@ -32,17 +30,14 @@
 
 (defn init []
   (sg/add-kv-table rt-ref :db
-    {:validate-key keyword?})
+    {:validate-key keyword?}
+    {::m/selected #{}})
 
   (sg/add-kv-table rt-ref ::m/target
     {:primary-key :target-id})
 
   (sg/add-kv-table rt-ref ::m/event
     {:primary-key :event-id})
-
-  (sg/kv-init rt-ref
-    (fn [env]
-      (kv/set env :db ::m/selected #{})))
 
   (register-events!)
 

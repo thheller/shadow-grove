@@ -20,7 +20,7 @@
   [env {:keys [client-id]}]
 
   ;; FIXME: call this via fx
-  (let [{::keys [on-welcome]} @(::rt/runtime-ref env)]
+  (let [{::keys [on-welcome]} @(::sg/runtime-ref env)]
     (on-welcome))
 
   (-> env
@@ -111,7 +111,7 @@
     (when (not= :pong (:op msg))
       (js/console.log "[WS-SEND]" (:op msg) msg)))
 
-  (let [{::keys [ws-ref] ::rt/keys [transit-str] :as env} @rt-ref]
+  (let [{::keys [ws-ref] ::sg/keys [transit-str] :as env} @rt-ref]
     (.send @ws-ref (transit-str msg))))
 
 (defn call! [rt-ref msg result-data]
@@ -136,8 +136,8 @@
     (ev/reg-fx rt-ref :relay-send
       (fn [env msg]
         (if-some [result (::result msg)]
-          (call! (::rt/runtime-ref env) (dissoc msg ::result) result)
-          (cast! (::rt/runtime-ref env) msg))))
+          (call! (::sg/runtime-ref env) (dissoc msg ::result) result)
+          (cast! (::sg/runtime-ref env) msg))))
 
     (sg/reg-event rt-ref
       ::m/relay-ws-close
@@ -160,7 +160,7 @@
                        :client-info {:type :shadow.grove.devtools}})
         (on-welcome)))
 
-    (let [{::rt/keys [^function transit-read]} @rt-ref]
+    (let [^function transit-read (::sg/transit-read @rt-ref)]
       (.addEventListener socket "message"
         (fn [e]
           (let [{:keys [call-id op] :as msg} (transit-read (.-data e))]

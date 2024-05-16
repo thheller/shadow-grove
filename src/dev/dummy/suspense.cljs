@@ -80,5 +80,5 @@
 (defn init []
   ;; functions in env-init are called once on first render for a new root
   ;; we use this to provide data-ref access via component env
-  (swap! rt-ref update ::rt/env-init conj #(assoc % :data-ref data-ref))
+  (swap! rt-ref update ::sg/env-init conj #(assoc % :data-ref data-ref))
   (start))
