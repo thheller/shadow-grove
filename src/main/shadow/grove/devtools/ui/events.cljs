@@ -47,7 +47,7 @@
           [:div {:class (css :flex-1)}
            [:div {:class (css :cursor-pointer :py-1 :font-semibold)
                   :on-click #(swap! show-ref not)}
-            (str (:kv-id entry) " - " (pr-str (:key entry)))]
+            (str (:kv-table entry) " - " (pr-str (:key entry)))]
 
            (when show?
              (case op

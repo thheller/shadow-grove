@@ -54,21 +54,21 @@
   [query-fn & args]
   (impl/slot-query args query-fn))
 
-(defn kv-lookups [kv-id keys]
+(defn kv-lookups [kv-table keys]
   (impl/slot-query nil
     (fn [env]
-      (select-keys (get env kv-id) keys))))
+      (select-keys (get env kv-table) keys))))
 
 (defn kv-lookup
-  ([kv-id]
-   (impl/slot-kv-get kv-id))
-  ([kv-id key]
-   (impl/slot-kv-lookup kv-id key))
+  ([kv-table]
+   (impl/slot-kv-get kv-table))
+  ([kv-table key]
+   (impl/slot-kv-lookup kv-table key))
   ;; (sg/kv-lookup :db 1 :foo)
   ;; bit more convenient than
   ;; (:foo (sg/kv-lookup :db 1))
-  ([kv-id key & path]
-   (get-in (kv-lookup kv-id key) path)))
+  ([kv-table key & path]
+   (get-in (kv-lookup kv-table key) path)))
 
 (defn use-state
   ([]
@@ -416,11 +416,11 @@
 ;; these are only supposed to run once in init
 ;; will overwrite with no attempts at merging
 (defn add-kv-table
-  ([rt-ref kv-id config]
-   (add-kv-table rt-ref kv-id config {}))
-  ([rt-ref kv-id config init-data]
+  ([rt-ref kv-table config]
+   (add-kv-table rt-ref kv-table config {}))
+  ([rt-ref kv-table config init-data]
    (let [kv-ref (::rt/kv-ref @rt-ref)]
-     (swap! kv-ref assoc kv-id (kv/init kv-id config init-data)))
+     (swap! kv-ref assoc kv-table (kv/init kv-table config init-data)))
 
    rt-ref))
 

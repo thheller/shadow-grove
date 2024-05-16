@@ -13,48 +13,10 @@
 (defprotocol IObserved
   (observed-keys [this]))
 
-(defprotocol IWriteLog
-  (tx-log-new [this key])
-  (tx-log-modified [this key])
-  (tx-log-removed [this key])
-  (tx-check-completed! [this])
-  (tx-complete! [this]))
-
-(defprotocol IObservable
-  (observe [this]))
-
-(defprotocol ITransactable
-  (tx-begin [this])
-  (tx-snapshot [this])
-  (tx-commit! [this]))
-
-(defprotocol IConfigured
-  (get-config [this]))
-
-;; FIXME: make clj variant seqable as well
-#?(:cljs
-   (deftype ObservedDataSeq
-     [^not-native data ^not-native key-seq]
-     ISeqable
-     (-seq [this]
-       this)
-
-     ISeq
-     (-first [this]
-       (let [k (-first key-seq)]
-         ;; do lookup so that it is recorded as used key
-         (MapEntry. k (-lookup data k) nil)))
-
-     (-rest [this]
-       (let [r (-rest key-seq)]
-         (if (not= r ())
-           (ObservedDataSeq. data r)
-           ())))))
-
 #?(:clj
    (deftype ObservedData
-     [^:unsynchronized-mutable keys-used
-      ^:unsynchornized-mutable seq-used
+     [^:unsynchronized-mutable seq-used
+      ^:unsynchronized-mutable keys-used
       ^clojure.lang.IPersistentMap data]
      IObserved
      (observed-keys [_]
@@ -64,7 +26,10 @@
      (meta [_]
        (.meta data))
 
-     ;; FIXME: implement rest of seq functions
+     clojure.lang.Seqable
+     (seq [this]
+       (set! seq-used true)
+       (seq data))
 
      clojure.lang.IPersistentMap
      (assoc [this key val]
@@ -144,366 +109,325 @@
        (set! keys-used (conj! keys-used key))
        (-lookup data key default))))
 
-(deftype WriteLog
-  #?@(:cljs
-      [[data-before
-        ^:mutable keys-new
-        ^:mutable keys-updated
-        ^:mutable keys-removed
-        completed-ref]]
+(defn observed [data]
+  (ObservedData. false (transient #{}) data))
 
-      :clj
-      [[data-before
-        ^:unsynchronized-mutable keys-new
-        ^:unsynchronized-mutable keys-updated
-        ^:unsynchronized-mutable keys-removed
-        completed-ref]])
+#?(:clj
+   (defprotocol ITxCheck
+     (check-completed! [this])))
 
-  #?(:cljs IDeref :clj clojure.lang.IDeref)
-  (#?(:cljs -deref :clj deref) [this]
-    ;; FIXME: is this the only way to get a persistent snapshot, but continue with the transient?
-    ;; can't be handing out the transient and can't turn into new set via (set keys-new) or whatever
-    ;; FIXME: figure out if this transient handling is even worth, it likely never is the bottleneck
-    (let [new (persistent! keys-new)
-          updated (persistent! keys-updated)
-          removed (persistent! keys-removed)]
+(defprotocol ITxCommit
+  (commit! [this]))
 
-      (set! keys-new (transient new))
-      (set! keys-updated (transient updated))
-      (set! keys-removed (transient removed))
+(declare ->TransactedData)
 
-      {:data-before data-before
-       :keys-new new
-       :keys-updated updated
-       :keys-removed removed}))
+(defn tx-log-new [data-before data key keys-new keys-updated keys-removed completed-ref]
+  (->TransactedData
+    data-before
+    data
+    (conj! keys-new key)
+    keys-updated
+    keys-removed
+    completed-ref))
 
-  IWriteLog
-  (tx-check-completed! [this]
-    (when @completed-ref
-      (throw (ex-info "tx already commited!" {}))))
+(defn tx-log-modified [data-before data key keys-new keys-updated keys-removed completed-ref]
+  (->TransactedData
+    data-before
+    data
+    keys-new
+    ;; new keys are only recorded as new, not modified in the same tx
+    (if (contains? keys-new key)
+      keys-updated
+      (conj! keys-updated key))
+    keys-removed
+    completed-ref))
 
-  (tx-log-new [this key]
-    (WriteLog.
+(defn tx-log-removed [data-before data key keys-new keys-updated keys-removed completed-ref]
+  (let [was-added-in-tx? (contains? keys-new key)]
+    (->TransactedData
       data-before
-      (conj! keys-new key)
+      data
+      ;; removal means the key is no longer new or modified
+      (disj! keys-new key)
+      (disj! keys-updated key)
+      ;; if created and removed in same tx, just don't record it at all
+      (if was-added-in-tx?
+        keys-removed
+        (conj! keys-removed key))
+      completed-ref)))
+
+#?(:clj
+   (deftype TransactedData
+     [^clojure.lang.IPersistentMap data-before
+      ^clojure.lang.IPersistentMap data
+      keys-new
       keys-updated
       keys-removed
-      completed-ref))
+      ;; using a ref not a mutable local since it must apply to all created instances of this
+      ;; every "write" creates a new instance
+      completed-ref]
 
-  (tx-log-modified [this key]
-    (WriteLog.
-      data-before
-      keys-new
-      ;; new keys are only recorded as new, not modified in the same tx
-      (if (contains? keys-new key)
-        keys-updated
-        (conj! keys-updated key))
-      keys-removed
-      completed-ref))
+     ;; useful for debugging purposes that want the actual data
+     clojure.lang.IDeref
+     (deref [_]
+       data)
 
-  (tx-log-removed [this key]
-    (let [was-added-in-tx? (contains? keys-new key)]
-      (WriteLog.
-        data-before
-        ;; removal means the key is no longer new or modified
-        (disj! keys-new key)
-        (disj! keys-updated key)
-        ;; if created and removed in same tx, just don't record it at all
-        (if was-added-in-tx?
-          keys-removed
-          (conj! keys-removed key))
-        completed-ref)))
+     clojure.lang.IMeta
+     (meta [_]
+       (.meta data))
 
-  (tx-complete! [this]
-    (vreset! completed-ref true)
-    {:data-before data-before
-     :keys-new (persistent! keys-new)
-     :keys-updated (persistent! keys-updated)
-     :keys-removed (persistent! keys-removed)}))
+     clojure.lang.IPersistentMap
+     (count [this]
+       (.count data))
 
-(deftype GroveKV
-  #?@(:clj
-      [[config
-        ^clojure.lang.IPersistentMap data
-        ^WriteLog tx]
+     (containsKey [this key]
+       (when (nil? key)
+         (throw (ex-info "cannot read nil key" {})))
+       (.containsKey data key))
 
-       clojure.lang.IDeref
-       (deref [_]
-         data)
+     (valAt [this key]
+       (when (nil? key)
+         (throw (ex-info "cannot read nil key" {})))
+       (.valAt data key))
 
-       clojure.lang.Seqable
-       (seq [this]
-         (seq data))
+     (valAt [this key not-found]
+       (when (nil? key)
+         (throw (ex-info "cannot read nil key" {})))
+       (.valAt data key not-found))
 
-       clojure.lang.IPersistentMap
-       (count [this]
-         (.count data))
+     (entryAt [this key]
+       (when (nil? key)
+         (throw (ex-info "cannot read nil key" {})))
+       (.entryAt data key))
 
-       (containsKey [this key]
-         (when (nil? key)
-           (throw (ex-info "cannot read nil key" {})))
-         (.containsKey data key))
+     (assoc [this key value]
+       (check-completed! this)
 
-       (valAt [this key]
-         (when (nil? key)
-           (throw (ex-info "cannot read nil key" {})))
-         (.valAt data key))
+       (when (nil? key)
+         (throw (ex-info "nil key not allowed" {:value value})))
 
-       (valAt [this key not-found]
-         (when (nil? key)
-           (throw (ex-info "cannot read nil key" {})))
-         (.valAt data key not-found))
-
-       (entryAt [this key]
-         (when (nil? key)
-           (throw (ex-info "cannot read nil key" {})))
-         (.entryAt data key))
-
-       (assoc [this key value]
-         (when tx
-           (tx-check-completed! tx))
-
-         (when (nil? key)
-           (throw (ex-info "nil key not allowed" {:value value})))
-
-         (let [prev-val (.valAt data key NOT-FOUND)]
-           (if (identical? prev-val value)
-             this
-             (if (identical? NOT-FOUND prev-val)
-               ;; new
-               (GroveKV.
-                 config
-                 (assoc data key value)
-                 (when tx
-                   (tx-log-new tx key)))
-               ;; update
-               (GroveKV.
-                 config
-                 (assoc data key value)
-                 (when tx
-                   (tx-log-modified tx key))))
-             )))
-
-       ;; FIXME: whats the difference between assoc and assocEx again?
-       (assocEx [this key value]
-         (when tx
-           (tx-check-completed! tx))
-
-         (when (nil? key)
-           (throw (ex-info "nil key not allowed" {:value value})))
-
-         (let [prev-val (.valAt data key NOT-FOUND)]
-
-           (if (identical? prev-val value)
-             this
-             (if (identical? NOT-FOUND prev-val)
-               ;; new
-               (GroveKV.
-                 config
-                 (.assocEx data key value)
-                 (when tx
-                   (tx-log-new tx key)))
-               ;; update
-               (GroveKV.
-                 config
-                 (.assocEx data key value)
-                 (when tx
-                   (tx-log-modified tx key)))))))
-
-       (without [this key]
-         (when tx
-           (tx-check-completed! tx))
-
-         (GroveKV.
-           config
-           (.without data key)
-           (when tx
-             (tx-log-removed tx key))))]
-
-      :cljs
-      [[config
-        ^not-native data
-        ^not-native tx]
-
-       IDeref
-       (-deref [_]
-         data)
-
-       ILookup
-       (-lookup [this key]
-         (when tx
-           (tx-check-completed! tx))
-         (-lookup data key))
-
-       (-lookup [this key default]
-         (when tx
-           (tx-check-completed! tx))
-         (-lookup data key default))
-
-       ICounted
-       (-count [this]
-         (when tx
-           (tx-check-completed! tx))
-         (-count data))
-
-       ISeqable
-       (-seq [this]
-         (-seq data))
-
-       IMap
-       (-dissoc [this key]
-         (when tx
-           (tx-check-completed! tx))
-
-         (GroveKV.
-           config
-           (-dissoc data key)
-           (when tx
-             (tx-log-removed tx key))))
-
-       IAssociative
-       (-contains-key? [coll k]
-         (-contains-key? data k))
-
-       (-assoc [this key value]
-         (when tx
-           (tx-check-completed! tx))
-
-         (when (nil? key)
-           (throw (ex-info "nil key not allowed" {:value value})))
-
-         ;; FIXME: only allow modifications while in tx?
-
-         ;; validation should be done here and not in tx interceptor
-         ;; should fail as soon as possible so dev knows where invalid data was written
+       ;; validation should be done here and not in tx interceptor after
+       ;; should fail as soon as possible, so dev knows where invalid data was written
+       (let [config (::config (meta data))]
 
          ;; FIXME: would be nice if validate could supply some info why it was rejected?
          ;; maybe swap it so that any true-ish return is treated as an error and added to ex-data?
          (when-some [validate-key (:validate-key config)]
            (when-not (validate-key key)
-             (throw (ex-info "tried to insert invalid key" {:kv-id (:kv-id config) :key key :val val}))))
+             (throw (ex-info "tried to insert invalid key" {:kv-table (:kv-table config) :key key :val val}))))
 
          (when-some [validate-val (:validate-val config)]
            (when-not (validate-val value)
-             (throw (ex-info "tried to insert invalid val" {:kv-id (:kv-id config) :key key :val val}))))
+             (throw (ex-info "tried to insert invalid val" {:kv-table (:kv-table config) :key key :val val})))))
 
-         (let [prev-val (-lookup data key NOT-FOUND)]
-           (if (identical? prev-val value)
-             this
-             (GroveKV.
-               config
-               (-assoc data key value)
-               (when tx
-                 (if (identical? NOT-FOUND prev-val)
-                   (tx-log-new tx key)
-                   (tx-log-modified tx key))))
-             )))
+       (let [prev-val (.valAt data key NOT-FOUND)]
+         (if (identical? prev-val value)
+           this
+           (if (identical? NOT-FOUND prev-val)
+             (tx-log-new data-before (assoc data key value) key keys-new keys-updated keys-removed completed-ref)
+             (tx-log-modified data-before (assoc data key value) key keys-new keys-updated keys-removed completed-ref)
+             ))))
 
-       ICollection
-       (-conj [coll ^not-native entry]
-         (if (vector? entry)
-           (-assoc coll (-nth entry 0) (-nth entry 1))
-           (loop [^not-native ret coll
-                  es (seq entry)]
-             (if (nil? es)
-               ret
-               (let [^not-native e (first es)]
-                 (if (vector? e)
-                   (recur
-                     (-assoc ret (-nth e 0) (-nth e 1))
-                     (next es))
-                   (throw (js/Error. "conj on a map takes map entries or seqables of map entries"))))))))
-       ])
+     (assocEx [this key value]
+       (check-completed! this)
 
-  IConfigured
-  (get-config [this]
-    config)
+       (when (nil? key)
+         (throw (ex-info "nil key not allowed" {:value value})))
 
-  IObservable
-  (observe [this]
-    (when tx
-      (throw (ex-info "cannot be observed while in tx" {})))
-    (ObservedData. false (transient #{}) data))
+       (let [prev-val (.valAt data key NOT-FOUND)]
+         (if (identical? prev-val value)
+           this
+           (if (identical? NOT-FOUND prev-val)
+             (tx-log-new data-before (.assocEx data key value) key keys-new keys-updated keys-removed completed-ref)
+             (tx-log-modified data-before (.assocEx data key value) key keys-new keys-updated keys-removed completed-ref)
+             ))))
 
-  ITransactable
-  (tx-snapshot [this]
-    (when tx
-      @tx))
+     (without [this key]
+       (check-completed! this)
+       (tx-log-removed
+         data-before
+         (.without data key)
+         keys-new keys-removed keys-updated completed-ref))
 
-  (tx-begin [this]
-    (when tx
-      (throw (ex-info "already in tx" {})))
+     ITxCheck
+     (check-completed! [this]
+       (when @completed-ref
+         (throw (ex-info "transaction concluded, don't hold on to db while in tx" {}))))
 
-    (GroveKV.
-      config
-      data
-      (WriteLog.
-        data
-        (transient #{})
-        (transient #{})
-        (transient #{})
-        (volatile! false))))
+     ITxCommit
+     (commit! [_]
+       (vreset! completed-ref true)
+       {:data-before data-before
+        :data data
+        :keys-new (persistent! keys-new)
+        :keys-updated (persistent! keys-updated)
+        :keys-removed (persistent! keys-removed)}))
 
-  (tx-commit! [_]
-    (when-not tx
-      (throw (ex-info "not in transaction" {})))
+   :cljs
+   (deftype TransactedData
+     [data-before
+      ^not-native data
+      ^not-native keys-new
+      ^not-native keys-updated
+      ^not-native keys-removed
+      ;; using a ref not a mutable local since it must apply to all created instances of this
+      ;; every "write" creates a new instance
+      completed-ref]
 
-    (assoc (tx-complete! tx)
-      :kv (GroveKV. config data nil)
-      ;; expose data and data-before (from tx)
-      ;; so that other places can cheaply check if changes occurred via identical?
-      ;; and can get values for changed keys from the regular maps
-      :data data)))
+     ;; useful for debugging purposes that want the actual data
+     IDeref
+     (-deref [_]
+       data)
 
-#?(:clj
-   ;; need this as GroveKV implements IPersistentMap and IDeref
-   ;; print otherwise throws since multimethod can't decide which
-   (defmethod print-method GroveKV [tbl ^java.io.Writer writer]
-     (.write writer "#grove/kv [")
-     (print-method (.-data tbl) writer)
-     (.write writer " ")
-     ;; FIXME: need print-method for Transaction
-     ;; not yet sure what to expose, so waiting till actually used someplace
-     (print-method (.-tx tbl) writer)
-     (.write writer "]")))
+     IMeta
+     (-meta [_]
+       (-meta data))
 
+     IWithMeta
+     (-with-meta [this meta]
+       (.check-completed! this)
+       (TransactedData.
+         data-before
+         (-with-meta data meta)
+         keys-new
+         keys-updated
+         keys-removed
+         completed-ref))
 
-(defn get-kv! [env kv-id]
-  (let [kv (get env kv-id)]
-    (when-not (instance? GroveKV kv)
-      (throw (ex-info "can only work with grove-kv" {:kv-id kv-id :not-kv kv})))
+     ILookup
+     (-lookup [this key]
+       (.check-completed! this)
+       (-lookup data key))
+
+     (-lookup [this key default]
+       (.check-completed! this)
+       (-lookup data key default))
+
+     ICounted
+     (-count [this]
+       (.check-completed! this)
+       (-count data))
+
+     IMap
+     (-dissoc [this key]
+       (.check-completed! this)
+
+       (TransactedData.
+         data-before
+         (-dissoc data key)
+         (-disjoin! keys-new key)
+         (-disjoin! keys-updated key)
+         (-conj! keys-removed key)
+         completed-ref))
+
+     IAssociative
+     (-contains-key? [coll k]
+       (-contains-key? data k))
+
+     (-assoc [this key value]
+       (.check-completed! this)
+
+       (when (nil? key)
+         (throw (ex-info "nil key not allowed" {:value value})))
+
+       ;; validation should be done here and not in tx interceptor after
+       ;; should fail as soon as possible, so dev knows where invalid data was written
+       (let [config (::config (meta data))]
+
+         ;; FIXME: would be nice if validate could supply some info why it was rejected?
+         ;; maybe swap it so that any true-ish return is treated as an error and added to ex-data?
+         (when-some [validate-key (:validate-key config)]
+           (when-not (validate-key key)
+             (throw (ex-info "tried to insert invalid key" {:kv-table (:kv-table config) :key key :val val}))))
+
+         (when-some [validate-val (:validate-val config)]
+           (when-not (validate-val value)
+             (throw (ex-info "tried to insert invalid val" {:kv-table (:kv-table config) :key key :val val})))))
+
+       (let [prev-val (-lookup data key NOT-FOUND)]
+         (if (identical? prev-val value)
+           this
+           (if (identical? NOT-FOUND prev-val)
+             (tx-log-new data-before (-assoc data key value) key keys-new keys-updated keys-removed completed-ref)
+             (tx-log-modified data-before (-assoc data key value) key keys-new keys-updated keys-removed completed-ref)
+             ))))
+
+     ICollection
+     (-conj [coll ^not-native entry]
+       (if (vector? entry)
+         (-assoc coll (-nth entry 0) (-nth entry 1))
+         (loop [^not-native ret coll
+                es (seq entry)]
+           (if (nil? es)
+             ret
+             (let [^not-native e (first es)]
+               (if (vector? e)
+                 (recur
+                   (-assoc ret (-nth e 0) (-nth e 1))
+                   (next es))
+                 (throw (js/Error. "conj on a map takes map entries or seqables of map entries"))))))))
+
+     ITxCommit
+     (commit! [_]
+       (vreset! completed-ref true)
+
+       {:data-before data-before
+        :data data
+        :keys-new (persistent! keys-new)
+        :keys-updated (persistent! keys-updated)
+        :keys-removed (persistent! keys-removed)})
+
+     Object
+     (check-completed! [this]
+       (when @completed-ref
+         (throw (ex-info "transaction concluded, don't hold on to db while in tx" {}))))))
+
+(defn transacted [data]
+  {:pre [(map? data)]}
+  (TransactedData.
+    data
+    data
+    (transient #{})
+    (transient #{})
+    (transient #{})
+    (volatile! false)))
+
+(defn get-kv! [env kv-table]
+  (let [kv (get env kv-table)]
+    (when-not (and (map? kv) (::config (meta kv)))
+      (throw (ex-info "can only work with grove-kv" {:kv-table kv-table :not-kv kv})))
     kv))
-
 
 ;; utility fns to work with grove kv
 ;; although totally valid to just use assoc and stuff
 ;; this should make for a nicer API hopefully
 
-(defn init [kv-id config init-data]
-  (GroveKV. (assoc config :kv-id kv-id) init-data nil))
+(defn init [kv-table config init-data]
+  (vary-meta init-data assoc
+    ::config (assoc config :kv-table kv-table)))
 
-(defn set [env kv-id key val]
-  (let [kv (get-kv! env kv-id)]
-    (assoc env kv-id (assoc kv key val))))
+(defn set [env kv-table key val]
+  (let [kv (get-kv! env kv-table)]
+    (assoc env kv-table (assoc kv key val))))
 
-(defn update-val [env kv-id key update-fn & args]
-  (let [kv (get-kv! env kv-id)
+(defn update-val [env kv-table key update-fn & args]
+  (let [kv (get-kv! env kv-table)
         val (get kv key)
         next-val (apply update-fn val args)]
-    (assoc env kv-id (assoc kv key next-val))))
+    (assoc env kv-table (assoc kv key next-val))))
 
-(defn- normalize* [imports-ref env kv-id item]
+(defn- normalize* [imports-ref env kv-table item]
   (let [kv
-        (get-kv! env kv-id)
+        (get-kv! env kv-table)
 
         {:keys [primary-key joins]}
-        (get-config kv)
+        (::config (meta kv))
 
         pkey
         (primary-key item)
 
         _ (when-not pkey
-            (throw (ex-info "item with invalid primary key" {:kv-id kv-id :item item :pkey pkey})))
+            (throw (ex-info "item with invalid primary key" {:kv-table kv-table :item item :pkey pkey})))
 
         item
         (reduce-kv
@@ -528,51 +452,51 @@
           item
           joins)]
 
-    (swap! imports-ref conj [kv-id pkey item])
+    (swap! imports-ref conj [kv-table pkey item])
 
     pkey))
 
 (defn- normalize
   "returns a seq of [[ident item] ...] tuples"
-  [env kv-id vals]
+  [env kv-table vals]
   (let [imports-ref (atom [])]
 
     (cond
       (map? vals)
-      (normalize* imports-ref env kv-id vals)
+      (normalize* imports-ref env kv-table vals)
 
       (sequential? vals)
       (doseq [item vals]
-        (normalize* imports-ref env kv-id item))
+        (normalize* imports-ref env kv-table item))
 
       :else
-      (throw (ex-info "cannot import" {:kv-id kv-id :vals vals})))
+      (throw (ex-info "cannot import" {:kv-table kv-table :vals vals})))
 
     @imports-ref
     ))
 
 (defn- merge-imports [env imports]
   (reduce
-    (fn [env [kv-id pkey item]]
-      (update-in env [kv-id pkey] merge item))
+    (fn [env [kv-table pkey item]]
+      (update-in env [kv-table pkey] merge item))
     env
     imports))
 
 (defn merge-seq
-  ([env kv-id coll]
-   (merge-seq env kv-id coll (fn [env items] env)))
-  ([env kv-id coll target-path-or-fn]
+  ([env kv-table coll]
+   (merge-seq env kv-table coll (fn [env items] env)))
+  ([env kv-table coll target-path-or-fn]
    {:pre [(map? env)
-          (keyword? kv-id)
+          (keyword? kv-table)
           (sequential? coll)
           (or (fn? target-path-or-fn)
               (vector? target-path-or-fn))]}
 
    (let [^not-native kv
-         (get-kv! env kv-id)
+         (get-kv! env kv-table)
 
          {:keys [primary-key] :as config}
-         (get-config kv)
+         (::config (meta kv))
 
          coll-keys
          (->> coll
@@ -580,7 +504,7 @@
               (into []))
 
          imports
-         (normalize env kv-id coll)]
+         (normalize env kv-table coll)]
 
      (-> env
          (merge-imports imports)
@@ -592,8 +516,8 @@
            (assoc-in target-path-or-fn coll-keys)
            )))))
 
-(defn add [env kv-id val]
-  (let [imports (normalize env kv-id [val])]
+(defn add [env kv-table val]
+  (let [imports (normalize env kv-table [val])]
     (merge-imports env imports)))
 
 (comment

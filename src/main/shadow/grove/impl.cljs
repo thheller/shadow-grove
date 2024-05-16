@@ -18,7 +18,7 @@
 
 (set! *warn-on-infer* false)
 
-(defrecord IndexKey [kv-id key])
+(defrecord IndexKey [kv-table key])
 
 (def ^function
   work-queue-task!
@@ -159,19 +159,19 @@
         (js/Set.)]
 
     (reduce-kv
-      (fn [_ kv-id tx-info]
+      (fn [_ kv-table tx-info]
         (let [keys-new (:keys-new tx-info)
               keys-updated (:keys-updated tx-info)
               keys-removed (:keys-removed tx-info)
-              add (fn [key] (.push keys-to-invalidate (IndexKey. kv-id key)))]
+              add (fn [key] (.push keys-to-invalidate (IndexKey. kv-table key)))]
 
-          ;; using kv-id as marker when kv seq was used (e.g. keys/vals)
+          ;; using kv-table as marker when kv seq was used (e.g. keys/vals)
           ;; tracking every single entry is expensive, so just assuming
           ;; there was interest in all when seq was used
           (when (or (seq keys-updated)
                     (seq keys-new)
                     (seq keys-removed))
-            (.push keys-to-invalidate kv-id))
+            (.push keys-to-invalidate kv-table))
 
           (run! add keys-new)
           (run! add keys-updated)
@@ -275,8 +275,8 @@
 
         tx-env
         (reduce-kv
-          (fn [tx-env kv-id kv]
-            (assoc tx-env kv-id (kv/tx-begin kv)))
+          (fn [tx-env kv-table kv]
+            (assoc tx-env kv-table (kv/transacted kv)))
           tx-env
           before)]
 
@@ -287,21 +287,31 @@
 
         (let [tx-info
               (reduce-kv
-                (fn [tx-info kv-id _]
-                  (let [kv (get tx-env kv-id)
-                        commit (kv/tx-commit! kv)]
-                    (if (identical? (:data commit) (:data-before commit))
-                      ;; if no changes were done there should be no trace in tx-info
-                      ;; saves some time later in invalidate-kv!
-                      tx-info
-                      (assoc tx-info kv-id commit))))
+                (fn [tx-info kv-table _]
+                  (let [kv (get tx-env kv-table)]
+
+                    ;; completely disallow (assoc tx-env :a-defined-table {:a "new-map"})
+                    ;; FIXME: could actually allow that and so some sort of diff when getting a map?
+                    ;; but user should have merged instead
+                    (when-not (instance? kv/TransactedData kv)
+                      (throw (ex-info
+                               (str "during transaction the " kv-table " table was replaced. only a modified table can be returned.")
+                               {:kv-table kv-table
+                                :return kv})))
+
+                    (let [commit (kv/commit! kv)]
+                      (if (identical? (:data commit) (:data-before commit))
+                        ;; if no changes were done there should be no trace in tx-info
+                        ;; saves some time later in invalidate-kv!
+                        tx-info
+                        (assoc tx-info kv-table commit)))))
                 {}
                 before)
 
               kv-after
               (reduce-kv
-                (fn [m kv-id tx-info]
-                  (assoc m kv-id (:kv tx-info)))
+                (fn [m kv-table tx-info]
+                  (assoc m kv-table (:data tx-info)))
                 before
                 tx-info)]
 
@@ -310,9 +320,9 @@
           (invalidate-kv! rt-ref tx-info)
 
           (reduce-kv
-            (fn [tx-env kv-id _]
+            (fn [tx-env kv-table _]
               ;; just to avoid anyone touching this again
-              (dissoc tx-env kv-id))
+              (dissoc tx-env kv-table))
             (assoc tx-env ::tx-info tx-info)
             before)
           )))))
@@ -442,8 +452,8 @@
 
           query-env
           (reduce-kv
-            (fn [query-env kv-id ^not-native kv]
-              (assoc query-env kv-id (kv/observe kv)))
+            (fn [query-env kv-table ^not-native kv]
+              (assoc query-env kv-table (kv/observed kv)))
             {::rt/runtime-ref rt-ref}
             kv)
 
@@ -452,14 +462,14 @@
 
           new-keys
           (reduce-kv
-            (fn [key-set kv-id _]
-              (let [^not-native observed (get query-env kv-id)
+            (fn [key-set kv-table _]
+              (let [^not-native observed (get query-env kv-table)
                     [seq-used kv-keys] (kv/observed-keys observed)]
                 (-> key-set
                     (cond->
                       seq-used
-                      (conj kv-id))
-                    (into (map #(IndexKey. kv-id %)) kv-keys))))
+                      (conj kv-table))
+                    (into (map #(IndexKey. kv-table %)) kv-keys))))
             #{}
             kv)]
 
@@ -470,7 +480,7 @@
       result
       )))
 
-(defn slot-kv-get [kv-id]
+(defn slot-kv-get [kv-table]
   (let [ref
         (rt/claim-slot! ::slot-kv-get)
 
@@ -499,22 +509,20 @@
           @ref
 
           kv
-          (kv/get-kv! all kv-id)
+          (kv/get-kv! all kv-table)
 
           new-keys
-          #{kv-id}]
+          #{kv-table}]
 
-      ;; FIXME: only need to call this again if kv-id changed
+      ;; FIXME: only need to call this again if kv-table changed
       (index-query rt-ref query-id read-keys new-keys)
 
       (swap! ref assoc :read-keys new-keys)
 
-      ;; don't leak GroveKV instance
-      ;; user just wants the data as no further access can be recorded
-      @kv
-      )))
+      ;; no observation is performed, assuming the user wanted everything
+      kv)))
 
-(defn slot-kv-lookup [kv-id key]
+(defn slot-kv-lookup [kv-table key]
   (let [ref
         (rt/claim-slot! ::slot-kv-lookup)
 
@@ -544,10 +552,10 @@
           @ref
 
           kv
-          (kv/get-kv! all kv-id)
+          (kv/get-kv! all kv-table)
 
           new-keys
-          #{(IndexKey. kv-id key)}]
+          #{(IndexKey. kv-table key)}]
 
       ;; FIXME: would likely be a lot faster do have a dedicated fn for this
       ;; since this is only ever one going with the set is overkill

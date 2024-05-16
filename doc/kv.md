@@ -1,13 +1,16 @@
 # GroveKV
 
-`shadow.grove.kv` is the new data model in `shadow-grove`. It replaces the older `shadow.grove.db`, Idents and the somewhat related `shadow.grove.eql-query`.
+`shadow.grove.kv` is the new data model in `shadow-grove`. It replaces the older `shadow.grove.db` and Idents.
 
 ## What is KV?
 
-Basic concept of a key-value store, otherwise known as a map. Essentially all they are is a regular CLJS map, but they monitor updates made to them while in a transaction, so that we can easily get the modified values after the transaction concludes. This is identical to how `shadow.grove.db` used to do it, so nothing new there.
+Basic concept of a key-value store, otherwise known as a map. A table is a regular CLJS map.
+
+Grove will however expose a wrapped type instead to facilitate its data management. In `query` operations you'll get an `ObservedData` type, which will record which keys were accessed. In "write/transaction" (e.g. `reg-event` functions) operations you'll receive a `TransactedData` type, which will record which keys where added/removed/updated.
+
+This is an implementation detail, as both of these still act like regular maps, so all operations you'd normally use continue to work.
 
 ## Differences
-
 
 ### Idents are gone entirely
 
@@ -31,29 +34,6 @@ Other solutions would nest those maps inside ONE `app-db` (e.g. `re-frame`), so 
 ```
 
 Essentially it still looks like this, only the containing map is not accessible and top-level keys cannot be modified. Only the defined KV tables live there. You work with it in the exact same way, and they act just like regular CLJS maps. More on that later in the code examples.
-
-### EQL is gone too
-
-I still see EQL as a fantastic query language for remote data, however in a frontend context I no longer see it as useful. It just has way too much overhead for what it provided and was always overly verbose.
-
-Taking [this example from the shadow-cljs UI](https://github.com/thheller/shadow-cljs/blob/adcf8d7f5cd3df312099d9a0c8cacd9e967cbc0f/src/main/shadow/cljs/ui/components/builds.cljs#L39-L47) makes this somewhat apparent.
-
-```clojure
-(defc build-card [ident]
-  (bind {::m/keys [build-status build-id build-target build-warnings-count build-worker-active] :as data}
-    (sg/query-ident ident
-      [::m/build-id
-       ::m/build-target
-       ::m/build-worker-active
-       ::m/build-warnings-count
-       ::m/build-status
-       ::m/build-config-raw]))
-  ...)
-```
-
-All the component wanted was to get the data from the app DB for the `[:build :app]` ident. Essentially a `(get db ident)`, but since this also used a computed field, it had to go with the overly verbose EQL query. What bothered me the most repetition of the names with the keywords and destructured symbols. This was just bad.
-
-Where EQL was nice was joins, but they were used too rarely that in the end it is just better to do a separate `kv-lookup` when necessary. Also, one less concept to explain, since EQL joins are a bit mind bendy. EQL might still come back in a different form, but not as the primary way components get their data.
 
 ## API Walkthrough
 
@@ -127,7 +107,7 @@ This is from the grove devtools. I'm still experimenting with the naming, so tha
   ...)
 ```
 
-It should be somewhat evident what the query does, since it uses all the common CLJS function with regular CLJS data. So all the typical functions work. We of course need the query abstraction, so that grove can ensure to run this again should any used data change.
+It should be somewhat evident what the query does, since it uses all the common CLJS function with regular CLJS data. EQL is no longer the default, but can be used manually from within the query functions.
 
 `sg/query` optionally takes additional arguments, which will just be passed to the function when called.
 

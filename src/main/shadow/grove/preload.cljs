@@ -312,7 +312,7 @@
 
 (defn count-tx-keys [tx-info key]
   (reduce-kv
-    (fn [c kv-id kv-summary]
+    (fn [c kv-table kv-summary]
       (let [key-set (get kv-summary key)]
         (+ c (count key-set))))
     0
@@ -353,26 +353,26 @@
 
 (defn make-tx-diff [{::impl/keys [tx-info] :as tx}]
   (reduce-kv
-    (fn [m kv-id {:keys [data data-before] :as kv-summary}]
+    (fn [m kv-table {:keys [data data-before] :as kv-summary}]
       (-> m
           (update :added into
             (->> (:keys-new kv-summary)
                  (mapv (fn [key]
                          {:key key
-                          :kv-id kv-id
+                          :kv-table kv-table
                           :val (get data key)}))))
           (update :updated into
             (->> (:keys-updated kv-summary)
                  (mapv (fn [key]
                          {:key key
-                          :kv-id kv-id
+                          :kv-table kv-table
                           :before (get data-before key)
                           :after (get data key)}))))
           (update :removed into
             (->> (:keys-removed kv-summary)
                  (mapv (fn [key]
                          {:key key
-                          :kv-id kv-id
+                          :kv-table kv-table
                           :val (get data-before key)}))))))
     {:added []
      :updated []
