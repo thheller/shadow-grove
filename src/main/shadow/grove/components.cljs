@@ -168,8 +168,12 @@
 
     ;; marks component boundaries in dev mode for easier inspect
     (when DEBUG
-      (let [id (str (random-uuid))]
+      (let [id (str (.-component-name config) "@" (rt/next-id))]
         (set! this -instance-id id)
+
+        (when rt/*work-trace*
+          (.push rt/*work-trace* #js [::create! id a]))
+
         (swap! instances-ref assoc id this))
       (set! (.-marker-before this)
         (doto (js/document.createComment (str "component: " (.-component-name config)))
@@ -224,15 +228,27 @@
                (custom-check args (.-args next))))))
 
   (dom-sync! [this ^ComponentInit next]
+    ;; check args flips the dirty bits when needed
     (. config (check-args-fn this args (.-args next)))
+
     (set! args (.-args next))
+
     (when (.work-pending? this)
+
+      ;; no need for trace if no work was caused
+      (when DEBUG
+        (when rt/*work-trace*
+          (.push rt/*work-trace* #js [::sync! (.-instance-id this) args])))
+
       (.schedule! this ::dom-sync!)))
 
   (destroy! [this ^boolean dom-remove?]
     (.unschedule! this)
     (when DEBUG
       (swap! instances-ref dissoc (.-instance-id this))
+
+      (when rt/*work-trace*
+        (.push rt/*work-trace* #js [::destroy! (.-instance-id this)]))
 
       (when-some [parent (::parent component-env)]
         (.. parent -child-components (delete this)))
@@ -244,8 +260,13 @@
     (set! destroyed? true)
 
     (reduce
-      (fn [_ ref]
+      (fn [slot-idx ref]
         (when-some [cleanup (.-cleanup ref)]
+
+          (when DEBUG
+            (when rt/*work-trace*
+              (.push rt/*work-trace* #js [::slot-cleanup! (.-instance-id this) slot-idx])))
+
           (cleanup @ref)))
       nil
       slot-refs)
@@ -417,10 +438,12 @@
 
           (let [val (.run slot-config this)]
 
+            (when DEBUG
+              (when rt/*work-trace*
+                (.push rt/*work-trace* #js [::run-slot! (.-instance-id this) idx prev-val val])))
+
             (aset slot-values idx val)
 
-            ;; FIXME: suspense should really be tracked elsewhere
-            ;; stops processing slots until invalidated and resuming
             (if-not rt/*ready*
               (.suspend! this idx)
               ;; clear dirty bit
@@ -458,6 +481,9 @@
 
   (suspend! [this hook-causing-suspend]
     ;; (js/console.log "suspending" hook-causing-suspend this)
+    (when DEBUG
+      (when rt/*work-trace*
+        (.push rt/*work-trace* #js [::suspend! (.-instance-id this) hook-causing-suspend])))
 
     ;; just in case we were already scheduled. should really track this more efficiently
     (.unschedule! this)
@@ -478,6 +504,11 @@
     (set! dirty-from-args (int 0))
 
     (let [did-render? needs-render?]
+
+      (when DEBUG
+        (when rt/*work-trace*
+          (.push rt/*work-trace* #js [::render! (.-instance-id this)])))
+
       (when needs-render?
         (let [frag (. config (render-fn this))]
 

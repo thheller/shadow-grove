@@ -38,7 +38,9 @@
              (mapv (fn [{:keys [client-id client-info]}]
                      ;; FIXME: ugh key conversion, should really stick to original names
                      {:target-id client-id
-                      :target-info client-info}))))
+                      :target-info client-info
+                      :last-update (js/Date.now)
+                      :work-tasks 0}))))
       (sg/queue-fx :relay-send
         {:op :request-supported-ops
          :to (into #{} (map :client-id) clients)})
@@ -56,7 +58,9 @@
     :client-connect
     (-> env
         (kv/add ::m/target {:target-id client-id
-                            :target-info (:client-info msg)})
+                            :target-info (:client-info msg)
+                            :last-update (js/Date.now)
+                            :work-tasks 0})
         (sg/queue-fx :relay-send
           {:op :request-supported-ops
            :to client-id}))))
@@ -91,9 +95,19 @@
         (kv/add ::m/event (assoc event :event-id event-id :target-id from))
         (update-in [::m/target from :events] conj event-id))))
 
+(defn safe-inc [x y]
+  (if (nil? x)
+    y
+    (+ x y)))
+
 (defmethod handle-msg ::m/work-finished
-  [env {:keys [from snapshot] :as msg}]
-  (assoc-in env [::m/target from :snapshot] snapshot))
+  [env {:keys [from] :as msg}]
+  (update-in env [::m/target from]
+    (fn [x]
+      (-> x
+          (assoc :last-update (js/Date.now))
+          (update :work-tasks safe-inc (:work-tasks msg))
+          ))))
 
 (defmethod handle-msg ::m/runtimes
   [env {:keys [from runtimes] :as msg}]

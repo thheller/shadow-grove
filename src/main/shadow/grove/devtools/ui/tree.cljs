@@ -11,7 +11,7 @@
   {::ev/handle ::m/set-snapshot!}
   [tx {:keys [target-id call-result] :as msg}]
   (let [snapshot (:snapshot call-result)]
-    (assoc-in tx [::m/target target-id :snapshot] snapshot)
+    (update-in tx [::m/target target-id] merge {:snapshot snapshot :last-snapshot (js/Date.now)})
     ))
 
 (defn select-target!
@@ -171,17 +171,13 @@
                    (ui-node-children ctx item)]))
             )))))
 
-
-(defc ui-panel [^:stable target-id]
-  (bind {:keys [snapshot view selected] :as target}
+(defc ui-snapshot [target-id]
+  (bind {:keys [snapshot selected view] :as target}
     (sg/kv-lookup ::m/target target-id))
 
   (effect :mount [env]
     (when-not snapshot
       (load-snapshot env target)))
-
-  (event ::load-snapshot! [env ev e]
-    (load-snapshot env target))
 
   (event ::select! [env {:keys [item] :as ev} e]
     (.preventDefault e)
@@ -214,5 +210,30 @@
      :level 0})
 
   (render
-    (<< [:div {:class (css :flex-1 :overflow-auto :pl-2 :py-2)}
+    (<< [:div {:class (css :flex-1 :overflow-auto :pl-2)}
          (sg/simple-seq snapshot #(ui-node ctx %1))])))
+
+(defc ui-panel [^:stable target-id]
+  (bind {:keys [last-update last-snapshot work-tasks] :as target}
+    (sg/kv-lookup ::m/target target-id))
+
+  (event ::load-snapshot! [env ev e]
+    (load-snapshot env target))
+
+  (bind clean?
+    (> last-snapshot last-update))
+
+  (render
+    (<< [:div {:class (css :p-2 :flex)}
+         [:div
+          [:button {:class (css :inline-block :cursor-pointer :text-lg :border :px-4 :rounded :whitespace-nowrap :bg-blue-200 [:hover :bg-blue-400])
+                    :on-click {:e ::load-snapshot! :e/prevent-default true}
+                    :disabled clean?}
+           ;; FIXME: highlight via css not text
+           (if clean? "refresh" "refresh (dirty)")]]
+
+         [:div {:class (css :flex-1 :px-2)}
+
+          (str "Work Performed: " work-tasks " Last Update: " last-update)]]
+
+        (ui-snapshot target-id))))

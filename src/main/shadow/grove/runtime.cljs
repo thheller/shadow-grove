@@ -31,6 +31,9 @@
 (def ^:dynamic *claimed* nil)
 (def ^:dynamic *ready* true)
 
+;; for devtools debugging
+(def ^:dynamic *work-trace* nil)
+
 (deftype SlotRef
   [provider
    idx

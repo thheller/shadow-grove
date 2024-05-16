@@ -266,7 +266,7 @@
 
     (when-not update-pending?
       (set! update-pending? true)
-      (rt/microtask #(.process-work! this))))
+      (rt/microtask #(.process-work! this trigger))))
 
   (unschedule! [this work-task]
     (.delete work-set work-task))
@@ -280,11 +280,14 @@
     ;; work must happen immediately since (action) may need the DOM event that triggered it
     ;; any delaying the work here may result in additional paint calls (making things slower overall)
     ;; if things could have been async the work should have been queued as such and not ended up here
-    (.process-work! this))
+    (.process-work! this trigger))
 
   Object
-  (process-work! [this]
+  (process-work! [this trigger]
     (try
+      (when comp/DEBUG
+        (set! rt/*work-trace* #js [#js [::process-work! trigger]]))
+
       (let [iter (.values work-set)]
         (loop []
           (let [current (.next iter)]
@@ -296,7 +299,10 @@
               (recur)))))
 
       (when work-finish-trigger
-        (work-finish-trigger))
+        (work-finish-trigger rt/*work-trace*))
+
+      (when comp/DEBUG
+        (set! rt/*work-trace* nil))
 
       js/undefined
 

@@ -281,27 +281,24 @@
       (js/console.log val)
       (js/console.groupEnd))))
 
-(defn notify-work-finished [{:keys [runtime] :as svc}]
+
+(def traces (js/Array.))
+
+(defn notify-work-finished [{:keys [runtime] :as svc} trace-array]
   ;; FIXME: should the UI opt-in for these first?
 
-  (let [{:keys [devtools last-snapshot]} @devtools-ref]
+  (let [{:keys [devtools]} @devtools-ref]
 
-    ;; FIXME: this sends too much data too frequently
-    ;; shadow-cljs snapshot easily reaches 100k sometimes
-    ;; sending that for every UI update makes both the devtools and the app slow
-    ;; should just send a update signal and the devtools UI can request the full snapshot?
+    ;; devtools can request these when wanted
+    ;; sending them always leads to far too much data on the websocket
+    ;; and causes intermittent disconnects since it can't keep up
+    (.push traces trace-array)
 
     (when (seq devtools)
-      (let [snapshot (take-snapshot* svc)]
-        ;; FIXME: how often are these actually equal?
-        ;; snapshot can be a large structure, so trying to find a balance between sending
-        ;; it too often (which is expensive) and not missing updates too much
-        (when (not= snapshot last-snapshot)
-          (swap! devtools-ref assoc :last-snapshot snapshot)
-          (shared/relay-msg runtime
-            {:op ::m/work-finished
-             :to devtools
-             :snapshot snapshot}))))))
+      (shared/relay-msg runtime
+        {:op ::m/work-finished
+         :to devtools
+         :work-tasks (alength trace-array)}))))
 
 
 ;; FIXME: this needs some kind of garbage collection
@@ -510,15 +507,7 @@
              (str (client-env/get-url-base)
                   "/classpath/shadow/grove/devtools.html?runtime="
                   (:client-id @(:state-ref runtime))))
-           (set! sg/work-finish-trigger
-             ;; don't want to spam the devtools too much, this might be called a lot
-             (gfn/debounce
-               (fn []
-                 (notify-work-finished svc))
-
-               ;; FIXME: feels bad in the UI if this waits too long
-               ;; but sending too much slows everything down
-               1000))
+           (set! sg/work-finish-trigger #(notify-work-finished svc %))
 
            (shared/relay-msg runtime
              {:op :request-clients
