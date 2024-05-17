@@ -53,14 +53,15 @@
   (ObservedData. false (transient #{}) data))
 
 (defprotocol ITxCommit
-  (commit! [this]))
+  (tx-snapshot [this])
+  (tx-commit! [this]))
 
 (deftype TransactedData
   [data-before
    ^not-native data
-   ^not-native keys-new
-   ^not-native keys-updated
-   ^not-native keys-removed
+   ^:mutable ^not-native keys-new
+   ^:mutable ^not-native keys-updated
+   ^:mutable ^not-native keys-removed
    ;; using a ref not a mutable local since it must apply to all created instances of this
    ;; every "write" creates a new instance
    completed-ref]
@@ -176,7 +177,24 @@
               (throw (js/Error. "conj on a map takes map entries or seqables of map entries"))))))))
 
   ITxCommit
-  (commit! [_]
+  (tx-snapshot [this]
+    (let [new (persistent! keys-new)
+          updated (persistent! keys-updated)
+          removed (persistent! keys-removed)]
+
+      ;; FIXME: is there another way to have a persistent snapshot of a transient?
+      ;; doing this here kinda sucks
+      (set! keys-new (transient new))
+      (set! keys-updated (transient updated))
+      (set! keys-removed (transient removed))
+
+      {:data-before data-before
+       :data data
+       :keys-new new
+       :keys-updated updated
+       :keys-removed removed}))
+
+  (tx-commit! [_]
     (vreset! completed-ref true)
 
     {:data-before data-before

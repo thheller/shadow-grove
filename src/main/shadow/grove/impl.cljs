@@ -334,7 +334,7 @@
                                {:kv-table kv-table
                                 :return kv})))
 
-                    (let [commit (kv/commit! kv)]
+                    (let [commit (kv/tx-commit! kv)]
                       (if (identical? (:data commit) (:data-before commit))
                         ;; if no changes were done there should be no trace in tx-info
                         ;; saves some time later in invalidate-kv!
