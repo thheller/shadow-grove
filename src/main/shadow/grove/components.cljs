@@ -504,12 +504,11 @@
     (set! dirty-from-args (int 0))
 
     (let [did-render? needs-render?]
-
-      (when DEBUG
-        (when rt/*work-trace*
-          (.push rt/*work-trace* #js [::render! (rt/now) (.-component-name config) (.-instance-id this)])))
-
       (when needs-render?
+        (when DEBUG
+          (when rt/*work-trace*
+            (.push rt/*work-trace* #js [::render! (rt/now) (.-component-name config) (.-instance-id this)])))
+
         (let [frag (. config (render-fn this))]
 
           (set! rendered-args args)
