@@ -85,6 +85,10 @@
       keys-removed
       completed-ref))
 
+  ISeqable
+  (-seq [this]
+    (-seq data))
+
   ILookup
   (-lookup [this key]
     (.check-completed! this)
@@ -239,6 +243,12 @@
         next-val (apply update-fn val args)]
     (assoc env kv-table (assoc kv key next-val))))
 
+(defn remove-all [env kv-table]
+  (update env kv-table
+    (fn [kv]
+      (reduce dissoc kv (keys kv))
+      )))
+
 (defn- normalize* [imports-ref env kv-table item]
   (let [kv
         (get-kv! env kv-table)
@@ -344,6 +354,8 @@
            (vector? target-path-or-fn)
            (assoc-in target-path-or-fn coll-keys)
            )))))
+
+
 
 (defn add [env kv-table val]
   (let [imports (normalize env kv-table [val])]

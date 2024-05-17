@@ -113,6 +113,7 @@
 
   js/undefined)
 
+;; FIXME: this is likely overkill for a single key? might as well just do it immediately?
 (defn index-query-key [env query-id prev-key next-key]
   (.push index-queue #(index-query-key* env query-id prev-key next-key))
   (index-queue-some!))
@@ -537,8 +538,8 @@
     ;; setup only once
     (when (nil? @ref)
       (comp/set-cleanup! ref
-        (fn [{:keys [query-id read-keys] :as last-state}]
-          (unindex-query-keys @rt-ref query-id read-keys)
+        (fn [{:keys [query-id read-key] :as last-state}]
+          (unindex-query-key @rt-ref query-id read-key)
           (.delete active-queries-map query-id)
           ))
 
@@ -549,19 +550,15 @@
     (let [all
           @(::sg/kv-ref query-env)
 
-          {:keys [query-id read-keys]}
+          {:keys [query-id read-key]}
           @ref
 
           kv
-          (kv/get-kv! all kv-table)
+          (kv/get-kv! all kv-table)]
 
-          new-keys
-          #{kv-table}]
+      (index-query-key rt-ref query-id read-key kv-table)
 
-      ;; FIXME: only need to call this again if kv-table changed
-      (index-query-keys rt-ref query-id read-keys new-keys)
-
-      (swap! ref assoc :read-keys new-keys)
+      (swap! ref assoc :read-key kv-table)
 
       ;; no observation is performed, assuming the user wanted everything
       kv)))

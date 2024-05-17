@@ -95,7 +95,7 @@
            (case tab
              :added (sg/simple-seq (:added diff) #(ui-diff-entry %1 :add))
              :updated (sg/simple-seq (:updated diff) #(ui-diff-entry %1 :update))
-             :removed (sg/simple-seq (:removed diff) #(ui-diff-entry %1 :update))
+             :removed (sg/simple-seq (:removed diff) #(ui-diff-entry %1 :remove))
              :fx (sg/simple-seq fx ui-fx-entry)
              (edn/render-edn event))]
           ))))
