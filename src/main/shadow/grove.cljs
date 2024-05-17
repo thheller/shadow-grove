@@ -332,8 +332,6 @@
            ::tx-seq-ref (atom 0)
            ::active-queries-map (js/Map.)
            ::key-index-ref (volatile! {})
-           ::query-index-map (js/Map.)
-           ::query-index-ref (atom {})
            ::env-init []})]
 
     (swap! rt/known-runtimes-ref assoc app-id rt-ref)
@@ -452,4 +450,4 @@
 
 (defn queue-after-interceptor [tx-env interceptor]
   {:pre [(fn? interceptor)]}
-  (update tx-env ::impl/tx-after conj interceptor))
+  (update tx-env ::tx-after conj interceptor))

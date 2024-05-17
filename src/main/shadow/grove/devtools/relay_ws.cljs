@@ -81,10 +81,12 @@
            :to from})
         )))
 
+(defonce event-id-seq (atom 0))
+
 (defmethod handle-msg ::m/stream-start
   [env {:keys [from events] :as msg}]
   (kv/merge-seq env ::m/event
-    (mapv #(assoc % :event-id (random-uuid) :target-id from) events)
+    (mapv #(assoc % :event-id (swap! event-id-seq inc) :target-id from) events)
     (fn [env items]
       (assoc-in env [::m/target from :events] (into (list) items)))))
 

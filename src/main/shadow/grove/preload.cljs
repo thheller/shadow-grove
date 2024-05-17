@@ -315,10 +315,11 @@
     0
     tx-info))
 
-(defn as-stream-event [{::impl/keys [tx-info] :as entry}]
+(defn as-stream-event [{::sg/keys [tx-info] :as entry}]
   (-> entry
       (select-keys
-        [:ts :tx-id :app-id :event :fx])
+        ;; FIXME: event is possible very large, should maybe only send it in full when requested
+        [::m/ts ::m/tx-id ::sg/app-id ::sg/event ::sg/fx])
       (assoc :count-new (count-tx-keys tx-info :keys-new))
       (assoc :count-updated (count-tx-keys tx-info :keys-updated))
       (assoc :count-removed (count-tx-keys tx-info :keys-removed))
@@ -348,7 +349,7 @@
     {:op ::m/db-copy
      :db (-> @rt/known-runtimes-ref (get app-id) (deref) (get ::rt/data-ref) (deref) (deref))}))
 
-(defn make-tx-diff [{::impl/keys [tx-info] :as tx}]
+(defn make-tx-diff [{::sg/keys [tx-info] :as tx}]
   (reduce-kv
     (fn [m kv-table {:keys [data data-before] :as kv-summary}]
       (-> m
@@ -403,8 +404,8 @@
 
         report
         (assoc report
-          :tx-id tx-id
-          :ts (js/Date.now))]
+          ::m/tx-id tx-id
+          ::m/ts (js/Date.now))]
 
     ;; store so that devtools can query db diff on demand
     ;; FIXME: should really garbage collect these at some point, they are going to pile up quick

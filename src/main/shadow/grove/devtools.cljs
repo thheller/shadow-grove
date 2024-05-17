@@ -68,12 +68,13 @@
     ;; can't use devtools for this since it creates a recursive infinite loop
     ;; inspecting its own data causes more data, which then causes more data, ...
     ;; being limited to console.log sucks
+    (js/console.log rt-ref)
     (set! impl/tx-reporter
       (fn [tx-env]
-        (let [e (-> tx-env :event :e)]
+        (let [e (-> tx-env ::sg/event :e)]
           (case e
             ::relay-ws
-            (js/console.log "[WS]" (-> tx-env :event :msg :op) (-> tx-env :event :msg) tx-env)
+            (js/console.log "[WS]" (-> tx-env ::sg/event :msg :op) (-> tx-env ::sg/event :msg) tx-env)
             (js/console.log e tx-env))))))
 
   (when-some [search js/document.location.search]

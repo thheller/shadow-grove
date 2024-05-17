@@ -21,7 +21,7 @@
             :relay-send
             {:op ::m/get-tx-diff
              :event-id event-id
-             :tx-id (:tx-id ev)
+             :tx-id (::m/tx-id ev)
              :to target-id})
           ))))
 
@@ -73,7 +73,7 @@
     (:diff (sg/kv-lookup ::m/event event-id)))
 
   (render
-    (let [{:keys [ts event count-new count-updated count-removed fx]} entry
+    (let [{::m/keys [ts] ::sg/keys [event fx] :keys [count-new count-updated count-removed]} entry
           $label (css :px-4 :py-2 :border-l :text-center :cursor-pointer
                    ["&.active" :font-bold])]
       (<< [:div {:class (css :flex)
@@ -161,7 +161,7 @@
     (sg/kv-lookup ::m/event event-id))
 
   (render
-    (let [{:keys [ts]} entry
+    (let [ts (::m/ts entry)
           $numeric (css :text-center {:width "30px"})
 
           select-ev
@@ -177,7 +177,7 @@
              [:div {:class (css :flex-1 :truncate)} (:header entry)]])
 
         :tx-report
-        (let [{:keys [event count-new count-updated count-removed fx]} entry]
+        (let [{::sg/keys [event fx] :keys [count-new count-updated count-removed]} entry]
           (<< [:div {:class (css :flex :border-b :cursor-pointer [:hover :bg-gray-100])
                      :on-click select-ev}
                [:div {:class (css :px-2 {:width "95px"})} (time-ts ts)]

@@ -206,9 +206,28 @@
 ;; although totally valid to just use assoc and stuff
 ;; this should make for a nicer API hopefully
 
-(defn init [kv-table config init-data]
-  (vary-meta init-data assoc
-    ::config (assoc config :kv-table kv-table)))
+(defn make-primary-key-fn [x]
+  (cond
+    (keyword? x)
+    x
+
+    (and (vector? x) (every? keyword? x) (not (empty x)))
+    (fn [val]
+      (mapv #(get val %) x))
+
+    :else
+    (throw (ex-info "invalid :primary-key value" {:x x}))))
+
+(defn init [kv-table {:keys [primary-key] :as config} init-data]
+  (let [config
+        (-> config
+            (assoc :kv-table kv-table)
+            (cond->
+              primary-key
+              (assoc :primary-key-fn (make-primary-key-fn primary-key))))]
+
+    (vary-meta init-data assoc
+      ::config config)))
 
 (defn set [env kv-table key val]
   (let [kv (get-kv! env kv-table)]
@@ -224,11 +243,14 @@
   (let [kv
         (get-kv! env kv-table)
 
-        {:keys [primary-key joins]}
+        {:keys [primary-key-fn joins]}
         (::config (meta kv))
 
+        _ (when-not primary-key-fn
+            (throw (ex-info "no primary-key defined for table" {:kv-table kv-table})))
+
         pkey
-        (primary-key item)
+        (primary-key-fn item)
 
         _ (when-not pkey
             (throw (ex-info "item with invalid primary key" {:kv-table kv-table :item item :pkey pkey})))
@@ -299,12 +321,15 @@
    (let [^not-native kv
          (get-kv! env kv-table)
 
-         {:keys [primary-key] :as config}
+         {:keys [primary-key-fn] :as config}
          (::config (meta kv))
+
+         _ (when-not primary-key-fn
+             (throw (ex-info "no primary key defined for table" {:kv-table kv-table})))
 
          coll-keys
          (->> coll
-              (map primary-key)
+              (map primary-key-fn)
               (into []))
 
          imports

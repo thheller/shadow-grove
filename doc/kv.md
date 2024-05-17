@@ -2,6 +2,8 @@
 
 `shadow.grove.kv` is the new data model in `shadow-grove`. It replaces the older `shadow.grove.db` and Idents.
 
+**This will break everything. The old implementation is gone entirely.** I do not have the time or energy to maintain two competing data management solutions, and `shadow.grove.kv` fixes many issues `shadow.grove.db` used to have. It should be a straightforward migration and things should be simpler in the end.
+
 ## What is KV?
 
 Basic concept of a key-value store, otherwise known as a map. A table is a regular CLJS map.
@@ -37,9 +39,20 @@ Essentially it still looks like this, only the containing map is not accessible 
 
 ## API Walkthrough
 
+### get-runtime
+
+```clojure
+(def rt-ref (sg/get-runtime ::ui))
+```
+
+*This replaces the older manual `sg/prepare` and manual `data-ref` management.*
+
+`shadow.grove/get-runtime` takes one keyword argument defining the application id. It can be called however often you want, but the same keyword will always get the same runtime. A runtime holds all the application state and is required if you want to modify the application in any way. You can `defonce` this, but it is not required. The runtime is preserved for hot-reloads regardless.
+
+
 ### kv-lookup
 
-`shadow.grove/kv-lookup` is the primary way for components to get data they didn't already receive via arguments.
+`shadow.grove/kv-lookup` is the primary way for components to get data they didn't already receive via arguments, when they know the place to get it from.
 
 Translating the above component, we now get to
 
@@ -60,31 +73,28 @@ The "computed" `build-warnings-count` the component just does directly. No need 
 
 `kv-lookup` also takes additional arguments to dig deeper into the returned data if needed. `(sg/kv-lookup ::m/build build-id ::m/build-status)` is slightly prettier than `(::m/build-status (sg/kv-lookup ::m/build build-id))`, but the result is identical.
 
-
 ### add-kv-table
 
 During initialization of the application the KV tables need to be defined. Generally this will be done in `:init-fn`.
 
-```clojure
-(sg/add-kv-table rt-ref ::m/build
-  {:primary-key ::m/build-id
-   :validate-key keyword?
-   :validate-val map?})
-```
-
-`rt-ref` is the grove application defined via `(def rt-ref (sg/get-runtime :app))`. `::m/build` is the kv table id, which we already used above. `:validate-key` is an optional function to check keys that are being added. `:validate-val` does the same just for values. You could use spec/malli/etc here, that is just ouf of scope for this document.
-
 By default, no kv tables are defined, so we couldn't store any data. If you'd want to get back to the previous `:db` that is basically
 
 ```clojure
-(sg/add-kv-table rt-ref :db
-  {:validate-key any?
-   :validate-val any?})
+(sg/add-kv-table rt-ref
+  :db ;; kv-table id
+  {}  ;; options
+  {}) ;; initial data 
 ```
 
-Or just not specifying `:validate-key/:validate-val` at all, since those are pointless. You end up with a regular CLJS map that you can `assoc` anything in.
+`rt-ref` is the grove application defined via `(def rt-ref (sg/get-runtime :app))`. `:db` is the kv table id, which will be used to reference it later.
+
+The options maps allows providing some extra utilities such as a `:validate-fn`, or other helpers for normalization and so on. It is fine to not provide anything at first and add them later.
+
+The initial data map is just that. The data this table is supposed to have initially as a regular CLJS map.
 
 It is entirely up to the developer whether one or more tables are used. I find it logically useful to create one per "type", but this is not necessary. Unless your IDs potentially conflict of course.
+
+To create more tables `add-kv-table` is just called again with different arguments. In the above `kv-lookup` examples `::m/build` is a defined table.
 
 ### query
 
@@ -107,7 +117,7 @@ This is from the grove devtools. I'm still experimenting with the naming, so tha
   ...)
 ```
 
-It should be somewhat evident what the query does, since it uses all the common CLJS function with regular CLJS data. EQL is no longer the default, but can be used manually from within the query functions.
+`env` is a map, which contains all the defined kv tables. It should be somewhat evident what the query does, since it uses all the common CLJS function with regular CLJS data. `::m/target` is again a defined table. EQL is no longer the default, but can be used manually from within the query functions.
 
 `sg/query` optionally takes additional arguments, which will just be passed to the function when called.
 
@@ -120,7 +130,7 @@ It should be somewhat evident what the query does, since it uses all the common 
 (my-query env 1)
 ```
 
-`env` is a map, which contains all the defined kv tables. So, if it looks more familiar you could also use `(defn my-query [db some-param] ...)`, it may also include some other query related things and a reference back to the application `rt-ref`.
+If it looks more familiar you could also use `(defn my-query [db some-param] ...)`, it may also include some other query related things and a reference back to the application `rt-ref`.
 
 ### reg-event / tx functions
 

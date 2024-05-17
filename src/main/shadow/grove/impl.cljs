@@ -91,7 +91,42 @@
         (vswap! key-index-ref assoc key s)
         s)))
 
-(defn index-query*
+(defn index-query-key*
+  [rt-ref query-id prev-key next-key]
+  (let [{::sg/keys [active-queries-map key-index-ref]} @rt-ref]
+    ;; this is done async, query might be gone since index was queued
+    (when (.has active-queries-map query-id)
+      ;; index keys that weren't used previously
+
+      (cond
+        (nil? prev-key)
+        (let [set (mset key-index-ref next-key)]
+          (.add set query-id))
+
+        (not= prev-key next-key)
+        (let [prev-set (mset key-index-ref prev-key)
+              next-set (mset key-index-ref next-key)]
+          (.delete prev-set query-id)
+          (.add next-set query-id))
+
+        )))
+
+  js/undefined)
+
+(defn index-query-key [env query-id prev-key next-key]
+  (.push index-queue #(index-query-key* env query-id prev-key next-key))
+  (index-queue-some!))
+
+(defn unindex-query-key*
+  [{::sg/keys [key-index-ref]} query-id key]
+  (when-some [s (get @key-index-ref key)]
+    (.delete s query-id)))
+
+(defn unindex-query-key [env query-id key]
+  (.push index-queue #(unindex-query-key* env query-id key))
+  (index-queue-some!))
+
+(defn index-query-keys*
   [rt-ref query-id prev-keys next-keys]
   (let [{::sg/keys [active-queries-map key-index-ref]} @rt-ref]
     ;; this is done async, query might be gone since index was queued
@@ -118,11 +153,11 @@
 
   js/undefined)
 
-(defn index-query [env query-id prev-keys next-keys]
-  (.push index-queue #(index-query* env query-id prev-keys next-keys))
+(defn index-query-keys [env query-id prev-keys next-keys]
+  (.push index-queue #(index-query-keys* env query-id prev-keys next-keys))
   (index-queue-some!))
 
-(defn unindex-query*
+(defn unindex-query-keys*
   [{::sg/keys [key-index-ref]} query-id keys]
   (reduce
     (fn [_ key]
@@ -135,8 +170,8 @@
     nil
     keys))
 
-(defn unindex-query [env query-id keys]
-  (.push index-queue #(unindex-query* env query-id keys))
+(defn unindex-query-keys [env query-id keys]
+  (.push index-queue #(unindex-query-keys* env query-id keys))
   (index-queue-some!))
 
 (defn invalidate-kv! [rt-ref tx-info]
@@ -279,7 +314,7 @@
           tx-env
           before)]
 
-    (update tx-env ::tx-after conj
+    (update tx-env ::sg/tx-after conj
       (fn kv-interceptor-after [tx-env]
         (when-not (identical? @kv-ref before)
           (throw (ex-info "someone messed with kv state while in tx" {})))
@@ -322,7 +357,7 @@
             (fn [tx-env kv-table _]
               ;; just to avoid anyone touching this again
               (dissoc tx-env kv-table))
-            (assoc tx-env ::tx-info tx-info)
+            (assoc tx-env ::sg/tx-info tx-info)
             before)
           )))))
 
@@ -355,20 +390,16 @@
             (atom false)
 
             tx-env
-            (-> {::sg/runtime-ref rt-ref
-                 ::tx-guard tx-guard
-                 ::tx-after (list) ;; FILO
-                 ::fx []
-                 :origin origin
-                 ;; FIXME: should this be strict and only allow chaining tx from fx handlers?
-                 ;; should be forbidden to execute side effects directly in tx handlers?
-                 ;; but how do we enforce this cleanly? this feels kinda dirty maybe needless indirection?
-                 :transact!
-                 (fn [next-tx]
-                   (throw (ex-info "transact! only allowed from fx env" {:tx next-tx})))}
+            ;; only set use namespaced keys
+            ;; must avoid clashing with kv-tables overriding them
+            (-> {::tx-guard tx-guard
+                 ::sg/runtime-ref rt-ref
+                 ::sg/tx-after (list) ;; FILO
+                 ::sg/fx []
+                 ::sg/origin origin}
                 (cond->
                   (map? ev)
-                  (assoc :event ev)))
+                  (assoc ::sg/event ev)))
 
             tx-env
             (call-interceptors event-interceptors tx-env)
@@ -380,7 +411,7 @@
             (merge-result tx-env ev handler-result)
 
             result
-            (call-interceptors (::tx-after result) result)]
+            (call-interceptors (::sg/tx-after result) result)]
 
         ;; FIXME: re-frame allows fx to edit db but we already committed it
         ;; currently not checking fx-fn return value at all since they supposed to run side effects only
@@ -419,6 +450,10 @@
 
         (:return result)))))
 
+(defn lazy-seq? [thing]
+  (and (instance? cljs.core/LazySeq thing)
+       (not (realized? thing))))
+
 (defn slot-query [args read-fn]
   (let [ref
         (rt/claim-slot! ::slot-query)
@@ -433,7 +468,7 @@
     (when (nil? @ref)
       (comp/set-cleanup! ref
         (fn [{:keys [query-id read-keys] :as last-state}]
-          (unindex-query @rt-ref query-id read-keys)
+          (unindex-query-keys @rt-ref query-id read-keys)
           (.delete active-queries-map query-id)
           ))
 
@@ -453,11 +488,21 @@
           (reduce-kv
             (fn [query-env kv-table ^not-native kv]
               (assoc query-env kv-table (kv/observed kv)))
-            {::sg/runtime-ref rt-ref}
+            {::sg/runtime-ref rt-ref
+             ::sg/previous-result rt/*slot-value*}
             kv)
 
           result
           (apply read-fn query-env args)
+
+          ;; FIXME: could just force it?
+          ;; seems cleaner to let user handle it
+          ;; it needs to be forced since otherwise the key recording might miss something
+          _ (when (lazy-seq? result)
+              (throw
+                (ex-info
+                  "query functions are not allowed to return lazy sequences!"
+                  {:result result})))
 
           new-keys
           (reduce-kv
@@ -472,7 +517,7 @@
             #{}
             kv)]
 
-      (index-query rt-ref query-id read-keys new-keys)
+      (index-query-keys rt-ref query-id read-keys new-keys)
 
       (swap! ref assoc :read-keys new-keys)
 
@@ -493,7 +538,7 @@
     (when (nil? @ref)
       (comp/set-cleanup! ref
         (fn [{:keys [query-id read-keys] :as last-state}]
-          (unindex-query @rt-ref query-id read-keys)
+          (unindex-query-keys @rt-ref query-id read-keys)
           (.delete active-queries-map query-id)
           ))
 
@@ -514,7 +559,7 @@
           #{kv-table}]
 
       ;; FIXME: only need to call this again if kv-table changed
-      (index-query rt-ref query-id read-keys new-keys)
+      (index-query-keys rt-ref query-id read-keys new-keys)
 
       (swap! ref assoc :read-keys new-keys)
 
@@ -528,14 +573,14 @@
         rt-ref
         (::sg/runtime-ref rt/*env*)
 
-        {::sg/keys [active-queries-map] :as query-env}
+        {::sg/keys [active-queries-map] :as query-rt}
         @rt-ref]
 
     ;; setup only once
     (when (nil? @ref)
       (comp/set-cleanup! ref
-        (fn [{:keys [query-id read-keys] :as last-state}]
-          (unindex-query @rt-ref query-id read-keys)
+        (fn [{:keys [query-id read-key] :as last-state}]
+          (unindex-query-key @rt-ref query-id read-key)
           (.delete active-queries-map query-id)
           ))
 
@@ -545,22 +590,20 @@
 
     ;; perform query
     (let [all
-          @(::sg/kv-ref query-env)
+          @(::sg/kv-ref query-rt)
 
-          {:keys [query-id read-keys]}
+          {:keys [query-id read-key]}
           @ref
 
           kv
           (kv/get-kv! all kv-table)
 
-          new-keys
-          #{(IndexKey. kv-table key)}]
+          new-key
+          (IndexKey. kv-table key)]
 
-      ;; FIXME: would likely be a lot faster do have a dedicated fn for this
-      ;; since this is only ever one going with the set is overkill
-      (index-query rt-ref query-id read-keys new-keys)
+      (index-query-key rt-ref query-id read-key new-key)
 
-      (swap! ref assoc :read-keys new-keys)
+      (swap! ref assoc :read-key new-key)
 
       (get kv key))))
 
