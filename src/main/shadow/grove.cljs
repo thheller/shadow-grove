@@ -284,10 +284,10 @@
 
   Object
   (process-work! [this trigger]
-    (try
-      (when comp/DEBUG
-        (set! rt/*work-trace* #js [#js [::process-work! trigger]]))
+    (when comp/DEBUG
+      (set! rt/*work-trace* #js [#js [::process-work! (rt/now) trigger]]))
 
+    (try
       (let [iter (.values work-set)]
         (loop []
           (let [current (.next iter)]
@@ -301,12 +301,12 @@
       (when work-finish-trigger
         (work-finish-trigger rt/*work-trace*))
 
-      (when comp/DEBUG
-        (set! rt/*work-trace* nil))
-
       js/undefined
 
       (finally
+        (when comp/DEBUG
+          (set! rt/*work-trace* nil))
+
         (set! update-pending? false)))))
 
 (defn- prepare [app-id]

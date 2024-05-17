@@ -6,6 +6,7 @@
     [shadow.grove.devtools.ui.events :as ui-events]
     [shadow.grove.devtools.ui.tree :as ui-tree]
     [shadow.grove.devtools.ui.data :as ui-data]
+    [shadow.grove.devtools.ui.trace :as ui-trace]
     [shadow.grove :as sg :refer (defc << css)]
     [shadow.grove.ui.edn :as edn]))
 
@@ -65,11 +66,14 @@
              [:button {:class $button
                        :on-click {:e ::m/switch-view! :target-id target-id :view :events}} "Events"]
              [:button {:class $button
+                       :on-click {:e ::m/switch-view! :target-id target-id :view :trace}} "Trace"]
+             [:button {:class $button
                        :on-click {:e ::m/switch-view! :target-id target-id :view :data}} "Data"]]]
            (case view
              ;; :tree (ui-tree/ui-panel runtime-id)
              :data (ui-data/ui-panel target-id)
              :events (ui-events/ui-panel target-id)
+             :trace (ui-trace/ui-panel target-id)
              (ui-tree/ui-panel target-id)
              )]))))
 

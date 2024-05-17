@@ -284,6 +284,14 @@
 
 (def traces (js/Array.))
 
+(defn request-traces [{:keys [runtime] :as svc} {:keys [from] :as msg}]
+  (shared/relay-msg runtime
+    {:op ::m/traces
+     :to from
+     :traces traces})
+
+  (set! traces (js/Array.)))
+
 (defn notify-work-finished [{:keys [runtime] :as svc} trace-array]
   ;; FIXME: should the UI opt-in for these first?
 
@@ -493,6 +501,7 @@
           ::m/get-db-copy #(get-db-copy svc %)
           ::m/stream-sub #(stream-sub svc %)
           ::m/request-log #(request-log svc %)
+          ::m/request-traces #(request-traces svc %)
           ::m/highlight-component #(highlight-component svc %)
           ::m/remove-highlight #(remove-highlight svc %)}
 

@@ -97,6 +97,12 @@
         (kv/add ::m/event (assoc event :event-id event-id :target-id from))
         (update-in [::m/target from :events] conj event-id))))
 
+(defmethod handle-msg ::m/traces
+  [env {:keys [from traces] :as msg}]
+  (if-not (seq traces)
+    env
+    (assoc-in env [::m/target from :traces] traces)))
+
 (defn safe-inc [x y]
   (if (nil? x)
     y

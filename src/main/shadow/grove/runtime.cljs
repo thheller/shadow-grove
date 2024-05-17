@@ -7,6 +7,9 @@
 (defonce known-runtimes-ref
   (atom {}))
 
+(defn now []
+  (js/Date.now))
+
 (defn ref? [x]
   (and (instance? cljs.core/Atom x)
        (::sg/runtime @x)))

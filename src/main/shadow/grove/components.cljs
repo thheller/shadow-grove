@@ -168,11 +168,11 @@
 
     ;; marks component boundaries in dev mode for easier inspect
     (when DEBUG
-      (let [id (str (.-component-name config) "@" (rt/next-id))]
+      (let [id (rt/next-id)]
         (set! this -instance-id id)
 
         (when rt/*work-trace*
-          (.push rt/*work-trace* #js [::create! id a]))
+          (.push rt/*work-trace* #js [::create! (rt/now) (.-component-name config) id a]))
 
         (swap! instances-ref assoc id this))
       (set! (.-marker-before this)
@@ -238,7 +238,7 @@
       ;; no need for trace if no work was caused
       (when DEBUG
         (when rt/*work-trace*
-          (.push rt/*work-trace* #js [::sync! (.-instance-id this) args])))
+          (.push rt/*work-trace* #js [::sync! (rt/now) (.-component-name config) (.-instance-id this) args])))
 
       (.schedule! this ::dom-sync!)))
 
@@ -248,7 +248,7 @@
       (swap! instances-ref dissoc (.-instance-id this))
 
       (when rt/*work-trace*
-        (.push rt/*work-trace* #js [::destroy! (.-instance-id this)]))
+        (.push rt/*work-trace* #js [::destroy! (rt/now) (.-component-name config) (.-instance-id this)]))
 
       (when-some [parent (::parent component-env)]
         (.. parent -child-components (delete this)))
@@ -265,7 +265,7 @@
 
           (when DEBUG
             (when rt/*work-trace*
-              (.push rt/*work-trace* #js [::slot-cleanup! (.-instance-id this) slot-idx])))
+              (.push rt/*work-trace* #js [::slot-cleanup! (rt/now) (.-component-name config) (.-instance-id this) slot-idx])))
 
           (cleanup @ref)))
       nil
@@ -440,7 +440,7 @@
 
             (when DEBUG
               (when rt/*work-trace*
-                (.push rt/*work-trace* #js [::run-slot! (.-instance-id this) idx prev-val val])))
+                (.push rt/*work-trace* #js [::run-slot! (rt/now) (.-component-name config) (.-instance-id this) idx prev-val val])))
 
             (aset slot-values idx val)
 
@@ -483,7 +483,7 @@
     ;; (js/console.log "suspending" hook-causing-suspend this)
     (when DEBUG
       (when rt/*work-trace*
-        (.push rt/*work-trace* #js [::suspend! (.-instance-id this) hook-causing-suspend])))
+        (.push rt/*work-trace* #js [::suspend! (rt/now) (.-component-name config) (.-instance-id this) hook-causing-suspend])))
 
     ;; just in case we were already scheduled. should really track this more efficiently
     (.unschedule! this)
@@ -507,7 +507,7 @@
 
       (when DEBUG
         (when rt/*work-trace*
-          (.push rt/*work-trace* #js [::render! (.-instance-id this)])))
+          (.push rt/*work-trace* #js [::render! (rt/now) (.-component-name config) (.-instance-id this)])))
 
       (when needs-render?
         (let [frag (. config (render-fn this))]
