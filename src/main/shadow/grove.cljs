@@ -17,7 +17,7 @@
     [shadow.grove.ui.atoms :as atoms]
     [shadow.grove.ui.portal :as portal]
     [shadow.arborist.attributes :as a]
-    [shadow.grove.db :as db]
+    [shadow.grove.kv :as kv]
     [shadow.grove.impl :as impl]
     [shadow.css] ;; used in macro ns
     ))
@@ -37,51 +37,38 @@
   ;; FIXME: should schedule properly when it isn't in event handler already
   (gp/handle-event! parent ev-map nil env))
 
-(defn query-ident
-  ;; shortcut for ident lookups that can skip EQL queries
-  ([ident]
-   {:pre [(db/ident? ident)]}
-   (impl/slot-query ident nil {}))
-  ;; EQL queries
-  ([ident query]
-   {:pre [(db/ident? ident)
-          (vector? query)]}
-   (impl/slot-query ident query {}))
-  ([ident query config]
-   {:pre [(db/ident? ident)
-          (vector? query)
-          (map? config)]}
-   (impl/slot-query ident query config)))
+;; the idea is that query (and potentially others) can call suspend!
+;; to let runtime know that data it required was still loading
+;; components will stop processing slots that suspend and will resume once the slot self invalidates
+;; FIXME: suspend is currently only checked while mounting
+;; but the idea with default-return is so that while suspended it keeps returning the previous value
+;; so that it at least can still proceed with the old value without the user having to hold on to that
+(defn suspend!
+  ([]
+   (suspend! nil))
+  ([default-return]
+   (set! rt/*ready* false)
+   (or rt/*slot-value* default-return)))
 
-(defn query-root
-  ([query]
-   (impl/slot-query nil query {}))
-  ([query config]
-   (impl/slot-query nil query config)))
+(defn query
+  [query-fn & args]
+  (impl/slot-query args query-fn))
 
-(defn db-read
-  [what & args]
-  (let [read-fn
-        (cond
-          (fn? what)
-          what
+(defn kv-lookups [kv-table keys]
+  (impl/slot-query nil
+    (fn [env]
+      (select-keys (get env kv-table) keys))))
 
-          (seq args)
-          (throw (ex-info "only functions can receive extra arguments" {:what what :args args}))
-
-          (db/ident? what)
-          (fn [env db] (get db what))
-
-          (keyword? what)
-          (fn [env db] (get db what))
-
-          (vector? what)
-          (fn [env db] (get-in db what))
-
-          :else
-          (throw (ex-info "unrecognized db-read argument" {:what what})))]
-
-    (impl/slot-db-read args read-fn)))
+(defn kv-lookup
+  ([kv-table]
+   (impl/slot-kv-get kv-table))
+  ([kv-table key]
+   (impl/slot-kv-lookup kv-table key))
+  ;; (sg/kv-lookup :db 1 :foo)
+  ;; bit more convenient than
+  ;; (:foo (sg/kv-lookup :db 1))
+  ([kv-table key & path]
+   (get-in (kv-lookup kv-table key) path)))
 
 (defn use-state
   ([]
@@ -103,12 +90,12 @@
         (apply update-fn state args)))))
 
 (defn run-tx
-  [{::rt/keys [runtime-ref] :as env} tx]
+  [{::keys [runtime-ref] :as env} tx]
   (impl/process-event runtime-ref tx env))
 
 (defn run-tx! [runtime-ref tx]
   (assert (rt/ref? runtime-ref) "expected runtime ref?")
-  (let [{::rt/keys [scheduler]} @runtime-ref]
+  (let [{::keys [scheduler]} @runtime-ref]
     (gp/run-now! scheduler #(impl/process-event runtime-ref tx nil) ::run-tx!)))
 
 (defn unmount-root [^js root-el]
@@ -226,18 +213,18 @@
         (RootEventTarget. rt-ref)
 
         env-init
-        (::rt/env-init @rt-ref)]
+        (::env-init @rt-ref)]
 
     (reduce
       (fn [env init-fn]
         (init-fn env))
 
       ;; base env, using init-fn to customize
-      {::rt/scheduler (::rt/scheduler @rt-ref)
+      {::scheduler (::scheduler @rt-ref)
        ::comp/event-target event-target
        ::suspense-keys (atom {})
-       ::rt/root-el root-el
-       ::rt/runtime-ref rt-ref
+       ::root-el root-el
+       ::runtime-ref rt-ref
        ;; FIXME: get this from rt-ref?
        ::comp/error-handler default-error-handler}
 
@@ -260,14 +247,14 @@
     (let [new-env (make-root-env rt-ref root-el)
           new-root (sa/dom-root root-el new-env)]
       (sa/update! new-root root-node)
-      (swap! rt-ref update ::rt/roots conj new-root)
+      (swap! rt-ref update ::roots conj new-root)
       (set! (.-sg$root root-el) new-root)
       (set! (.-sg$env root-el) new-env)
       ::started)))
 
 (defn render [rt-ref ^js root-el root-node]
   {:pre [(rt/ref? rt-ref)]}
-  (gp/run-now! ^not-native (::rt/scheduler @rt-ref) #(render* rt-ref root-el root-node) ::render))
+  (gp/run-now! ^not-native (::scheduler @rt-ref) #(render* rt-ref root-el root-node) ::render))
 
 ;; for devtools, so it can add listener to be notified when work happened
 (def work-finish-trigger nil)
@@ -279,7 +266,7 @@
 
     (when-not update-pending?
       (set! update-pending? true)
-      (rt/microtask #(.process-work! this))))
+      (rt/microtask #(.process-work! this trigger))))
 
   (unschedule! [this work-task]
     (.delete work-set work-task))
@@ -293,11 +280,14 @@
     ;; work must happen immediately since (action) may need the DOM event that triggered it
     ;; any delaying the work here may result in additional paint calls (making things slower overall)
     ;; if things could have been async the work should have been queued as such and not ended up here
-    (.process-work! this))
+    (.process-work! this trigger))
 
   Object
-  (process-work! [this]
+  (process-work! [this trigger]
     (try
+      (when comp/DEBUG
+        (set! rt/*work-trace* #js [#js [::process-work! trigger]]))
+
       (let [iter (.values work-set)]
         (loop []
           (let [current (.next iter)]
@@ -309,66 +299,50 @@
               (recur)))))
 
       (when work-finish-trigger
-        (work-finish-trigger))
+        (work-finish-trigger rt/*work-trace*))
+
+      (when comp/DEBUG
+        (set! rt/*work-trace* nil))
 
       js/undefined
 
       (finally
         (set! update-pending? false)))))
 
-(defn prepare
-  ([data-ref app-id]
-   (prepare {} data-ref app-id))
-  ([init data-ref app-id]
-   (when (get @rt/known-runtimes-ref app-id)
-     (throw
-       (ex-info
-         (str "app " app-id " already registered!")
-         {:app-id app-id})))
+(defn- prepare [app-id]
+  (when (get @rt/known-runtimes-ref app-id)
+    (throw
+      (ex-info
+        (str "app " app-id " already registered!")
+        {:app-id app-id})))
 
-   (let [root-scheduler
-         (RootScheduler. false (js/Set.))
+  (let [root-scheduler
+        (RootScheduler. false (js/Set.))
 
-         rt-ref
-         (atom
-           (assoc init
-             ::rt/rt true
-             ::rt/roots #{}
-             ::rt/scheduler root-scheduler
-             ::rt/app-id app-id
-             ::rt/data-ref data-ref
-             ::rt/event-config {}
-             ::rt/event-interceptors []
-             ::rt/fx-config {}
-             ::rt/tx-seq-ref (atom 0)
-             ::rt/active-queries-map (js/Map.)
-             ::rt/key-index-seq (atom 0)
-             ::rt/key-index-ref (atom {})
-             ::rt/query-index-map (js/Map.)
-             ::rt/query-index-ref (atom {})
-             ::rt/env-init []))]
+        rt-ref
+        (atom
+          {::runtime true
+           ::roots #{}
+           ::scheduler root-scheduler
+           ::app-id app-id
+           ::kv-ref (atom {})
+           ::event-config {}
+           ::event-interceptors [impl/kv-interceptor]
+           ::fx-config {}
+           ::tx-seq-ref (atom 0)
+           ::active-queries-map (js/Map.)
+           ::key-index-ref (volatile! {})
+           ::env-init []})]
 
-     (swap! rt/known-runtimes-ref assoc app-id rt-ref)
+    (swap! rt/known-runtimes-ref assoc app-id rt-ref)
 
-     rt-ref)))
-
-(defn make-blank-runtime [app-id]
-  (let [schema
-        {}
-
-        data-ref
-        (-> {}
-            (db/configure schema)
-            (atom))]
-
-    ;; prepare registers runtime and returns it
-    (prepare {} data-ref app-id)))
+    rt-ref))
 
 (defn get-runtime [app-id]
   (cond
     (keyword? app-id)
     (or (get @rt/known-runtimes-ref app-id)
-        (make-blank-runtime app-id))
+        (prepare app-id))
 
     (rt/ref? app-id)
     app-id
@@ -386,15 +360,15 @@
    {:pre [(keyword? ev-id)
           (ifn? handler-fn)]}
    (let [rt-ref (get-runtime app-id)]
-     (swap! rt-ref assoc-in [::rt/event-config ev-id] handler-fn)
+     (swap! rt-ref assoc-in [::event-config ev-id] handler-fn)
      rt-ref)))
 
 (defn queue-fx [env fx-id fx-val]
-  (update env ::rt/fx vec-conj [fx-id fx-val]))
+  (update env ::fx vec-conj [fx-id fx-val]))
 
 (defn reg-fx
   [rt-ref fx-id handler-fn]
-  (swap! rt-ref assoc-in [::rt/fx-config fx-id] handler-fn)
+  (swap! rt-ref assoc-in [::fx-config fx-id] handler-fn)
   rt-ref)
 
 
@@ -440,59 +414,40 @@
 
 
 (defn check-unmounted! [rt-ref]
-  (when (seq (::rt/roots @rt-ref))
+  (when (seq (::roots @rt-ref))
     (throw (ex-info "operation not allowed, runtime already mounted" {:rt-ref rt-ref}))))
 
 ;; these are only supposed to run once in init
+;; will overwrite with no attempts at merging
+(defn add-kv-table
+  ([rt-ref kv-table config]
+   (add-kv-table rt-ref kv-table config {}))
+  ([rt-ref kv-table config init-data]
+   (let [kv-ref (::kv-ref @rt-ref)]
+     (swap! kv-ref assoc kv-table (kv/init kv-table config init-data)))
 
-;; adding a db type to a db that already has data is possible
-;; but would potentially mess with normalization which cannot be corrected
-;; so instead disallowing it outright
-(defn add-db-type [rt-ref entity-type spec]
-  (check-unmounted! rt-ref)
-
-  (let [data-ref (::rt/data-ref @rt-ref)]
-    (swap! data-ref db/add-type entity-type spec)
-    rt-ref))
+   rt-ref))
 
 ;; just more convenient to do this directly
-(defn db-init
+(defn kv-init
   [rt-ref init-fn]
   (check-unmounted! rt-ref)
-
-  (let [data-ref (::rt/data-ref @rt-ref)]
-    (swap! data-ref
-      (fn [db]
-        (cond
-          (map? init-fn)
-          (merge db init-fn)
-
-          (fn? init-fn)
-          (let [after (init-fn db)]
-            (cond
-              (instance? db/GroveDB after)
-              after
-
-              (map? after)
-              (merge db after)
-
-              :else
-              (throw (ex-info "invalid db-init result" {:result after}))
-              ))
-
-          :else
-          (throw (ex-info "invalid init-fn argument" {:init-fn init-fn})))))
-
+  (let [kv-ref (::kv-ref @rt-ref)]
+    (swap! kv-ref init-fn)
     rt-ref
     ))
 
 (defn valid-interceptor? [x]
-  (or (nil? x)
-      (and (map? x)
-           (or (fn? (:before x))
-               (fn? (:after x))))))
+  (fn? x))
+
+;; FIXME: exposing this here to that users don't need to require impl namespace when using interceptors
+(def kv-interceptor impl/kv-interceptor)
 
 (defn set-interceptors! [rt-ref interceptors]
   {:pre [(vector? interceptors)
          (every? valid-interceptor? interceptors)]}
-  (swap! rt-ref assoc ::rt/event-interceptors interceptors))
+  (swap! rt-ref assoc ::event-interceptors interceptors))
+
+(defn queue-after-interceptor [tx-env interceptor]
+  {:pre [(fn? interceptor)]}
+  (update tx-env ::tx-after conj interceptor))

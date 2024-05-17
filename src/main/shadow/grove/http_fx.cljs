@@ -1,7 +1,7 @@
 (ns shadow.grove.http-fx
   (:require
     [clojure.string :as str]
-    [shadow.grove.runtime :as rt]))
+    [shadow.grove :as sg]))
 
 ;; this is using XMLHttpRequest. no intent on making this usable with anything else.
 ;; might split this up into different namespace so there could be one variant using js/fetch
@@ -24,7 +24,7 @@
       ;; FIXME: use a better mechanism to extend request formats
       ;; shouldn't just use some keyword and hope the thing to be there
       (= :transit request-format)
-      (let [{::rt/keys [^function transit-str]} env]
+      (let [{::sg/keys [^function transit-str]} @(::sg/runtime-ref env)]
         ["application/transit+json; charset=utf-8"
          (transit-str body)])
 
@@ -217,13 +217,13 @@
 ;; there are also several other places that will require these fns anyways
 ;; FIXME: realld should find a better way to handle this, harcoded these like this is bad
 (defn parse-edn [env ^js xhr-req]
-  (let [read-fn (::rt/edn-read env)]
+  (let [read-fn (::sg/edn-read @(::sg/runtime-ref env))]
     (when-not read-fn
       (throw (ex-info "received a EDN response but didn't have edn-read fn" {})))
     (read-fn (.-responseText xhr-req))))
 
 (defn parse-transit [env ^js xhr-req]
-  (let [read-fn (::rt/transit-read env)]
+  (let [read-fn (::sg/transit-read @(::sg/runtime-ref env))]
     (when-not read-fn
       (throw (ex-info "received a transit response but didn't have transit-read fn" {})))
     (read-fn (.-responseText xhr-req))))

@@ -10,6 +10,7 @@
     [shadow.arborist.common :as common]
     [shadow.arborist.attributes :as a]
     [shadow.arborist.collections :as coll]
+    [shadow.grove :as-alias sg]
     [shadow.grove.devtools.protocols :as devp]
     [shadow.grove.keyboard :as keyboard]
     [shadow.grove.runtime :as rt]
@@ -154,7 +155,7 @@
     slot-ref)
 
   (-invalidate-slot! [this idx]
-    (gp/run-now! (::rt/scheduler env)
+    (gp/run-now! (::sg/scheduler env)
       #(.update-query! this)
       ::slot-invalidate!))
 
@@ -223,7 +224,7 @@
           {:offset visible-offset
            :num visible-count}
 
-          result
+          [ready result]
           (binding [rt/*slot-provider* this
                     rt/*env* env
                     rt/*slot-idx* 0
@@ -231,12 +232,12 @@
                     rt/*claimed* false
                     rt/*ready* true]
 
-            ;; FIXME: tie into suspense gp/*ready* might be set to false
-            (read-fn query-opts))]
+            ;; sg/suspend! may set this to false
+            [rt/*ready* (read-fn query-opts)])]
 
-
+      ;; only update when ready, otherwise wait for invalidation to trigger again
       ;; FIXME: maybe after a delay show loading spinner?
-      (when (not= :db/loading result)
+      (when ready
 
         (let [item-count (:item-count result)
               item-height (:item-height opts)]

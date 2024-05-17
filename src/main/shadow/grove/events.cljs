@@ -2,11 +2,6 @@
   "re-frame style event handling"
   (:require-macros [shadow.grove.events])
   (:require
-    [clojure.set :as set]
-    [shadow.grove.components :as comp]
-    [shadow.grove.runtime :as rt]
-    [shadow.grove.protocols :as gp]
-    [shadow.grove.db :as db]
     [shadow.grove :as sg]))
 
 ;; moved into the shadow.grove main ns

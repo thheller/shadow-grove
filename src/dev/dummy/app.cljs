@@ -149,12 +149,8 @@
 (defonce root-el
   (js/document.getElementById "root"))
 
-(defonce data-ref
-  (-> {}
-      (atom)))
-
 (defonce rt-ref
-  (sg/prepare {} data-ref ::rt))
+  (sg/get-runtime ::rt))
 
 (defn ^:dev/after-load start []
   (sg/render rt-ref root-el (ui-root)))

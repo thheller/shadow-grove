@@ -2,11 +2,9 @@
   {:dev/always true}
   (:require
     [shadow.cljs.modern :refer (js-await)]
-    [shadow.grove.db :as db]
     [shadow.grove.history :as history]
     [shadow.grove.http-fx :as http-fx]
     [shadow.grove.impl :as impl]
-    [shadow.grove.runtime :as rt]
     [shadow.grove.events :as ev]
     [shadow.grove.devtools :as-alias m]
     [shadow.grove.devtools.ui :as ui]
@@ -31,15 +29,15 @@
   (render))
 
 (defn init []
-
-  (sg/add-db-type rt-ref ::m/target
-    {:primary-key :client-id})
-
-  (sg/add-db-type rt-ref ::m/event
-    {:primary-key :event-id})
-
-  (sg/db-init rt-ref
+  (sg/add-kv-table rt-ref :db
+    {:validate-key keyword?}
     {::m/selected #{}})
+
+  (sg/add-kv-table rt-ref ::m/target
+    {:primary-key :target-id})
+
+  (sg/add-kv-table rt-ref ::m/event
+    {:primary-key :event-id})
 
   (register-events!)
 
@@ -70,28 +68,34 @@
     ;; can't use devtools for this since it creates a recursive infinite loop
     ;; inspecting its own data causes more data, which then causes more data, ...
     ;; being limited to console.log sucks
+    (js/console.log rt-ref)
     (set! impl/tx-reporter
-      (fn [report]
-        (let [e (-> report :event :e)]
+      (fn [tx-env]
+        (let [e (-> tx-env ::sg/event :e)]
           (case e
             ::relay-ws
-            (js/console.log "[WS]" (-> report :event :msg :op) (-> report :event :msg) report)
-            (js/console.log e report))))))
+            (js/console.log "[WS]" (-> tx-env ::sg/event :msg :op) (-> tx-env ::sg/event :msg) tx-env)
+            (js/console.log e tx-env))))))
 
   (when-some [search js/document.location.search]
     (let [params (js/URLSearchParams. search)]
       (when-some [rt-id (.get params "runtime")]
-        (let [ident (db/make-ident ::m/target (js/parseInt rt-id 10))]
+        (let [target-id (js/parseInt rt-id 10)]
           (sg/run-tx! rt-ref
             {:e ::m/select-target!
-             :target ident})
+             :target-id target-id})
 
           (when-some [node-id (.get params "component")]
             (sg/run-tx! rt-ref
               {:e ::m/set-selection!
-               :target ident
+               :target-id target-id
                :v #{node-id}})
-            )))))
+            ))))
+
+    ;; remove params until proper routing is implemented
+    ;; otherwise may end up stuck with a runtime id in url that no longer exists
+    ;; and then reloading the devtools causes an error
+    (js/history.replaceState nil "" js/document.location.pathname))
 
   (js-await [req (js/fetch "/api/token")]
     (js-await [server-token (.text req)]

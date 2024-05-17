@@ -98,7 +98,7 @@
       (fn [rt]
         (-> rt
             (assoc ::config config)
-            (update ::rt/env-init conj
+            (update ::sg/env-init conj
               (fn [env]
                 ;; fragment uses hashchange event so we can skip checking clicks
                 (when-not use-fragment

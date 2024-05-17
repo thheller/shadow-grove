@@ -4,6 +4,7 @@
     [shadow.lazy :as lazy]
     [shadow.arborist.protocols :as ap]
     [shadow.arborist.common :as common]
+    [shadow.grove :as-alias sg]
     [shadow.grove.runtime :as rt]
     [shadow.grove.protocols :as gp]
     [shadow.grove.components :as comp]
@@ -99,7 +100,7 @@
   ap/IConstruct
   (as-managed [this env]
     ;; (js/console.log ::as-managed this env)
-    (doto (->LoadableRoot env (::rt/scheduler env) loadable (common/dom-marker env) nil opts false)
+    (doto (->LoadableRoot env (::sg/scheduler env) loadable (common/dom-marker env) nil opts false)
       (.init!))))
 
 (defn wrap-loadable [loadable]

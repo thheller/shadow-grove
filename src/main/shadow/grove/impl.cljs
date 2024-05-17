@@ -1,18 +1,23 @@
 (ns shadow.grove.impl
   (:require
-    [clojure.set :as set]
     [shadow.grove :as-alias sg]
+    [shadow.grove.kv :as kv]
     [shadow.grove.protocols :as gp]
     [shadow.grove.runtime :as rt]
-    [shadow.grove.db :as db]
-    [shadow.grove.eql-query :as eql]
     [shadow.grove.components :as comp]
     ))
 
 (defn js-set-union [a b]
   (.forEach b (fn [x] (.add a x))))
 
+(defn set-conj [x y]
+  (if (nil? x)
+    #{y}
+    (conj x y)))
+
 (set! *warn-on-infer* false)
+
+(defrecord IndexKey [kv-table key])
 
 (def ^function
   work-queue-task!
@@ -80,110 +85,148 @@
     (set! work-timeout (work-queue-task! index-work-some!))
     (set! work-queued? true)))
 
-(defn index-query*
-  [{::rt/keys [active-queries-map key-index-seq key-index-ref query-index-map]} query-id prev-keys next-keys]
-  (when (.has active-queries-map query-id)
-    (let [key-index @key-index-ref]
+(defn mset [key-index-ref key]
+  (or (get @key-index-ref key)
+      (let [s (js/Set.)]
+        (vswap! key-index-ref assoc key s)
+        s)))
 
+(defn index-query-key*
+  [rt-ref query-id prev-key next-key]
+  (let [{::sg/keys [active-queries-map key-index-ref]} @rt-ref]
+    ;; this is done async, query might be gone since index was queued
+    (when (.has active-queries-map query-id)
+      ;; index keys that weren't used previously
+
+      (cond
+        (nil? prev-key)
+        (let [set (mset key-index-ref next-key)]
+          (.add set query-id))
+
+        (not= prev-key next-key)
+        (let [prev-set (mset key-index-ref prev-key)
+              next-set (mset key-index-ref next-key)]
+          (.delete prev-set query-id)
+          (.add next-set query-id))
+
+        )))
+
+  js/undefined)
+
+(defn index-query-key [env query-id prev-key next-key]
+  (.push index-queue #(index-query-key* env query-id prev-key next-key))
+  (index-queue-some!))
+
+(defn unindex-query-key*
+  [{::sg/keys [key-index-ref]} query-id key]
+  (when-some [s (get @key-index-ref key)]
+    (.delete s query-id)))
+
+(defn unindex-query-key [env query-id key]
+  (.push index-queue #(unindex-query-key* env query-id key))
+  (index-queue-some!))
+
+(defn index-query-keys*
+  [rt-ref query-id prev-keys next-keys]
+  (let [{::sg/keys [active-queries-map key-index-ref]} @rt-ref]
+    ;; this is done async, query might be gone since index was queued
+    (when (.has active-queries-map query-id)
       ;; index keys that weren't used previously
       (reduce
         (fn [_ key]
           (when-not (contains? prev-keys key)
-            (let [key-idx
-                  (or (get key-index key)
-                      (let [idx (swap! key-index-seq inc)]
-                        (swap! key-index-ref assoc key idx)
-                        idx))
-
-                  query-set
-                  (or (.get query-index-map key-idx)
-                      (let [query-set (js/Set.)]
-                        (.set query-index-map key-idx query-set)
-                        query-set))]
-
-              (.add query-set query-id)))
+            (let [set (mset key-index-ref key)]
+              (.add set query-id)))
           nil)
         nil
         next-keys)
 
       ;; remove old keys that are no longer used
-      (when prev-keys
+      (when-not (nil? prev-keys)
         (reduce
           (fn [_ key]
             (when-not (contains? next-keys key)
-              (let [key-idx (get key-index key)
-                    query-set (.get query-index-map key-idx)]
-                (when ^boolean query-set
-                  (.delete query-set query-id)))))
+              (let [set (mset key-index-ref key)]
+                (.delete set query-id))))
           nil
-          prev-keys)))))
+          prev-keys))))
 
-(defn index-query [env query-id prev-keys next-keys]
-  (.push index-queue #(index-query* env query-id prev-keys next-keys))
+  js/undefined)
+
+(defn index-query-keys [env query-id prev-keys next-keys]
+  (.push index-queue #(index-query-keys* env query-id prev-keys next-keys))
   (index-queue-some!))
 
-;; FIXME: this needs some kind of GC
-;; currently does not remove empty sets from query-index-map
+(defn unindex-query-keys*
+  [{::sg/keys [key-index-ref]} query-id keys]
+  (reduce
+    (fn [_ key]
+      (when-some [s (get @key-index-ref key)]
+        ;; FIXME: this needs some kind of GC
+        ;; currently does not remove empty sets from key-index-ref
+        ;; so possibly accumulates unused keys over time
+        ;; checking every time if its empty seems more expensive overall
+        (.delete s query-id)))
+    nil
+    keys))
 
-(defn unindex-query*
-  [{::rt/keys [key-index-seq key-index-ref query-index-map]} query-id keys]
-
-  ;; FIXME: does this need to check if query is still active?
-  ;; I don't think so because unindex is called on destroy and things are never destroyed twice
-
-  (let [key-index @key-index-ref]
-    (reduce
-      (fn [_ key]
-        (let [key-idx
-              (or (get key-index key)
-                  (let [idx (swap! key-index-seq inc)]
-                    (swap! key-index-ref assoc key idx)
-                    idx))]
-
-          (when-some [query-set (.get query-index-map key-idx)]
-            (.delete query-set query-id))))
-      nil
-      keys)))
-
-(defn unindex-query [env query-id keys]
-  (.push index-queue #(unindex-query* env query-id keys))
+(defn unindex-query-keys [env query-id keys]
+  (.push index-queue #(unindex-query-keys* env query-id keys))
   (index-queue-some!))
 
-(defn invalidate-keys!
-  [{::rt/keys
-    [active-queries-map
-     query-index-map
-     key-index-ref] :as env}
-   keys-new
-   keys-removed
-   keys-updated]
-
+(defn invalidate-kv! [rt-ref tx-info]
   ;; before we can invalidate anything we need to make sure the index is updated
   ;; we delay updating index stuff to be async since we only need it here later
   (index-work-all!)
 
-  (let [keys-to-invalidate (set/union keys-new keys-updated keys-removed)
-        key-index @key-index-ref
-        query-ids (js/Set.)]
+  (let [key-index
+        @(::sg/key-index-ref @rt-ref)
 
-    (reduce
-      (fn [_ key]
-        ;; key might not be used by any query so might not have an id
-        (when-some [key-id (get key-index key)]
-          ;; same here
-          (when-some [query-set (.get query-index-map key-id)]
-            (js-set-union query-ids query-set))))
+        active-queries-map
+        (::sg/active-queries-map @rt-ref)
 
+        ;; using mutable things since they are a bit faster and time matters here
+        keys-to-invalidate
+        (js/Array.)
+
+        query-ids
+        (js/Set.)]
+
+    (reduce-kv
+      (fn [_ kv-table tx-info]
+        (let [keys-new (:keys-new tx-info)
+              keys-updated (:keys-updated tx-info)
+              keys-removed (:keys-removed tx-info)
+              add (fn [key] (.push keys-to-invalidate (IndexKey. kv-table key)))]
+
+          ;; using kv-table as marker when kv seq was used (e.g. keys/vals)
+          ;; tracking every single entry is expensive, so just assuming
+          ;; there was interest in all when seq was used
+          (when (or (seq keys-updated)
+                    (seq keys-new)
+                    (seq keys-removed))
+            (.push keys-to-invalidate kv-table))
+
+          (run! add keys-new)
+          (run! add keys-updated)
+          (run! add keys-removed))
+        nil)
       nil
-      keys-to-invalidate)
+      tx-info)
 
-    ;; just refreshes all affected queries in no deterministic order
-    ;; each query will figure out on its own if if actually triggers an update
-    ;; FIXME: figure out if this can be smarter
+    (.forEach keys-to-invalidate
+      (fn [key]
+        (when-some [query-set (get key-index key)]
+          (js-set-union query-ids query-set))))
+
+    ;; (js/console.log "invalidating" keys-to-invalidate query-ids tx-info)
+
     (.forEach query-ids
       (fn [query-id]
         (when-some [callback (.get active-queries-map query-id)]
-          (callback))))))
+          (callback)))))
+
+  js/undefined)
 
 (defn merge-result [tx-env ev result]
   (cond
@@ -227,27 +270,96 @@
              (str "Unhandled Event " ev-id)
              {:ev-id ev-id :tx tx}))))
 
-(defn call-interceptors [{::rt/keys [event-interceptors] :as tx-env} stage-key]
-  (reduce-kv
-    (fn [env idx interceptor]
-      ;; allow nils, easier to do (when DEBUG {:after ...}) kind of handlers
-      (if-not interceptor
-        env
+(defn call-interceptors [interceptors tx-env]
+  (reduce
+    (fn [tx-env ^function handler]
+      ;; allow nils, easier to do (when DEBUG extra-interceptor) kind of handlers
+      (if (nil? handler)
+        tx-env
         (try
-          (if-some [handler (get interceptor stage-key)]
-            (let [result (try
-                           (handler env)
-                           (catch :default e
-                             (throw (ex-info "interceptor failed" {:idx idx :stage stage-key :interceptor interceptor} e))))]
-              (when-not (identical? (::tx-guard result) (::tx-guard env))
-                (throw (ex-info "interceptor didn't return tx-env" {:idx idx :stage stage-key :interceptor interceptor :result result})))
-              result)
-            env)
-          )))
-    tx-env
-    event-interceptors))
+          (let [result
+                (try
+                  (handler tx-env)
+                  (catch :default e
+                    (throw (ex-info "interceptor failed" {:interceptor handler} e))))]
 
-(def tx-reporter nil)
+            (when-not (identical? (::tx-guard result) (::tx-guard tx-env))
+              (throw (ex-info "interceptor didn't return tx-env" {:interceptor handler :result result})))
+
+            result))))
+    tx-env
+    interceptors))
+
+(def ^function tx-reporter nil)
+
+(defn do-tx-report [tx-env]
+  (when-not (nil? tx-reporter)
+    (rt/next-tick
+      (fn []
+        (tx-reporter tx-env)))))
+
+
+;; FIXME: I'm unsure it was worth extracting this into an interceptor
+;; might be better if still handled in process-event directly
+;; but this technically allows users to run stuff after/before this is done
+(defn kv-interceptor [tx-env]
+  (let [rt-ref (::sg/runtime-ref tx-env)
+        kv-ref (::sg/kv-ref @rt-ref)
+        before @kv-ref
+
+        tx-env
+        (reduce-kv
+          (fn [tx-env kv-table kv]
+            (assoc tx-env kv-table (kv/transacted kv)))
+          tx-env
+          before)]
+
+    (update tx-env ::sg/tx-after conj
+      (fn kv-interceptor-after [tx-env]
+        (when-not (identical? @kv-ref before)
+          (throw (ex-info "someone messed with kv state while in tx" {})))
+
+        (let [tx-info
+              (reduce-kv
+                (fn [tx-info kv-table _]
+                  (let [kv (get tx-env kv-table)]
+
+                    ;; completely disallow (assoc tx-env :a-defined-table {:a "new-map"})
+                    ;; FIXME: could actually allow that and so some sort of diff when getting a map?
+                    ;; but user should have merged instead
+                    (when-not (instance? kv/TransactedData kv)
+                      (throw (ex-info
+                               (str "during transaction the " kv-table " table was replaced. only a modified table can be returned.")
+                               {:kv-table kv-table
+                                :return kv})))
+
+                    (let [commit (kv/commit! kv)]
+                      (if (identical? (:data commit) (:data-before commit))
+                        ;; if no changes were done there should be no trace in tx-info
+                        ;; saves some time later in invalidate-kv!
+                        tx-info
+                        (assoc tx-info kv-table commit)))))
+                {}
+                before)
+
+              kv-after
+              (reduce-kv
+                (fn [m kv-table tx-info]
+                  (assoc m kv-table (:data tx-info)))
+                before
+                tx-info)]
+
+          (reset! kv-ref kv-after)
+
+          (invalidate-kv! rt-ref tx-info)
+
+          (reduce-kv
+            (fn [tx-env kv-table _]
+              ;; just to avoid anyone touching this again
+              (dissoc tx-env kv-table))
+            (assoc tx-env ::sg/tx-info tx-info)
+            before)
+          )))))
 
 (defn process-event
   [rt-ref
@@ -257,7 +369,7 @@
 
   ;; (js/console.log ev-id ev origin @rt-ref)
 
-  (let [{::rt/keys [data-ref event-config fx-config] :as env}
+  (let [{::sg/keys [event-config event-interceptors fx-config] :as env}
         @rt-ref
 
         ev-id
@@ -271,130 +383,92 @@
     (if-not handler
       (unhandled-event-ex! ev-id ev origin)
 
-      (let [before @data-ref
-
-            tx-db
-            (db/transacted before)
-
-            tx-guard
+      (let [tx-guard
             (js/Object.)
 
             tx-done-ref
             (atom false)
 
             tx-env
-            (-> env
-                (assoc
-                  ::tx-guard tx-guard
-                  ::fx []
-                  :origin origin
-                  :db tx-db
-                  ;; FIXME: should this be strict and only allow chaining tx from fx handlers?
-                  ;; should be forbidden to execute side effects directly in tx handlers?
-                  ;; but how do we enforce this cleanly? this feels kinda dirty maybe needless indirection?
-                  :transact!
-                  (fn [next-tx]
-                    (throw (ex-info "transact! only allowed from fx env" {:tx next-tx}))))
+            ;; only set use namespaced keys
+            ;; must avoid clashing with kv-tables overriding them
+            (-> {::tx-guard tx-guard
+                 ::sg/runtime-ref rt-ref
+                 ::sg/tx-after (list) ;; FILO
+                 ::sg/fx []
+                 ::sg/origin origin}
                 (cond->
                   (map? ev)
-                  (assoc :event ev)))
+                  (assoc ::sg/event ev)))
 
             tx-env
-            (call-interceptors tx-env :before)
+            (call-interceptors event-interceptors tx-env)
+
+            handler-result
+            (handler tx-env ev)
 
             result
-            (merge-result tx-env ev (handler tx-env ev))
+            (merge-result tx-env ev handler-result)
 
             result
-            (call-interceptors result :after)]
+            (call-interceptors (::sg/tx-after result) result)]
 
-        (let [{:keys [db data keys-new keys-removed keys-updated] :as tx-result}
-              (db/tx-commit! (:db result))]
+        ;; FIXME: re-frame allows fx to edit db but we already committed it
+        ;; currently not checking fx-fn return value at all since they supposed to run side effects only
+        ;; and may still edit stuff in env, just not db?
 
-          (when-not (identical? @data-ref before)
-            (throw (ex-info "someone messed with app-state while in tx" {})))
+        ;; dispatching async so render can get to it sooner
+        ;; dispatching these async since they can never do anything that affects the current render right?
+        (rt/next-tick
+          (fn []
+            (doseq [[fx-key value] (::sg/fx result)]
+              (let [fx-fn (get fx-config fx-key)
 
-          (reset! data-ref db)
+                    fx-env
+                    (assoc result
+                      ;; creating this here so we can easily track which fx caused further work
+                      ;; technically all fx could run-now! directly given they have the scheduler from the env
+                      ;; but here we can easily track tx-done-ref to ensure fx doesn't actually immediately trigger
+                      ;; other events when they shouldn't because this is still in run-now! itself
+                      ;; FIXME: remove this once this is handled directly in the scheduler
+                      ;; run-now! inside run-now! should be a hard error
+                      :transact!
+                      (fn [fx-tx]
+                        (when-not @tx-done-ref
+                          (throw (ex-info "cannot start another tx yet, current one is still running. transact! is meant for async events" {})))
 
-          ;; FIXME: figure out if invalidation/refresh should be immediate or microtask'd/delayed?
-          (when-not (identical? before data)
-            (invalidate-keys! env keys-new keys-removed keys-updated))
+                        (gp/run-now! ^not-native (::sg/scheduler env) #(process-event rt-ref fx-tx origin) [::fx-transact! fx-key])))]
 
-          ;; FIXME: re-frame allows fx to edit db but we already committed it
-          ;; currently not checking fx-fn return value at all since they supposed to run side effects only
-          ;; and may still edit stuff in env, just not db?
+                (if-not fx-fn
+                  (throw (ex-info (str "unknown fx " fx-key) {:fx-key fx-key :fx-value value}))
 
-          ;; dispatching async so render can get to it sooner
-          ;; dispatching these async since they can never do anything that affects the current render right?
-          (rt/next-tick
-            (fn []
-              (doseq [[fx-key value] (::rt/fx result)]
-                (let [fx-fn (get fx-config fx-key)
+                  (fx-fn fx-env value))))))
 
-                      fx-env
-                      (assoc result
-                        ;; creating this here so we can easily track which fx caused further work
-                        ;; technically all fx could run-now! directly given they have the scheduler from the env
-                        ;; but here we can easily track tx-done-ref to ensure fx doesn't actually immediately trigger
-                        ;; other events when they shouldn't because this is still in run-now! itself
-                        ;; FIXME: remove this once this is handled directly in the scheduler
-                        ;; run-now! inside run-now! should be a hard error
-                        :transact!
-                        (fn [fx-tx]
-                          (when-not @tx-done-ref
-                            (throw (ex-info "cannot start another tx yet, current one is still running. transact! is meant for async events" {})))
+        (do-tx-report result)
 
-                          (gp/run-now! ^not-native (::rt/scheduler env) #(process-event rt-ref fx-tx origin) [::fx-transact! fx-key])))]
+        (reset! tx-done-ref true)
 
-                  (if-not fx-fn
-                    (throw (ex-info (str "unknown fx " fx-key) {:fx-key fx-key :fx-value value}))
+        (:return result)))))
 
-                    (fx-fn fx-env value))))))
+(defn lazy-seq? [thing]
+  (and (instance? cljs.core/LazySeq thing)
+       (not (realized? thing))))
 
-          (when-not (nil? tx-reporter)
-            (rt/next-tick
-              (fn []
-                (let [report
-                      {:app-id (::rt/app-id env)
-                       :event ev
-                       :origin origin
-                       :keys-new keys-new
-                       :keys-removed keys-removed
-                       :keys-updated keys-updated
-                       :fx (::rt/fx result)
-                       :db-before @before
-                       :db-after data
-                       :env env
-                       :env-changes
-                       (reduce-kv
-                         (fn [report rkey rval]
-                           (if (identical? rval (get env rkey))
-                             report
-                             (assoc report rkey rval)))
-                         {}
-                         (dissoc result :db ::rt/fx ::tx-guard :transact!))}]
-
-                  (tx-reporter report)))))
-
-          (reset! tx-done-ref true)
-
-          (:return result))))))
-
-(defn slot-db-read [args read-fn]
+(defn slot-query [args read-fn]
   (let [ref
-        (rt/claim-slot! ::slot-db-read)
+        (rt/claim-slot! ::slot-query)
 
         rt-ref
-        (::rt/runtime-ref rt/*env*)
+        (::sg/runtime-ref rt/*env*)
 
-        {::rt/keys [active-queries-map] :as query-env}
+        {::sg/keys [active-queries-map] :as query-env}
         @rt-ref]
 
     ;; setup only once
     (when (nil? @ref)
       (comp/set-cleanup! ref
         (fn [{:keys [query-id read-keys] :as last-state}]
-          (unindex-query @rt-ref query-id read-keys)
+          (unindex-query-keys @rt-ref query-id read-keys)
           (.delete active-queries-map query-id)
           ))
 
@@ -404,58 +478,134 @@
         (.set active-queries-map query-id #(gp/invalidate! ref))))
 
     ;; perform query
-    (let [db
-          @(::rt/data-ref query-env)
+    (let [kv
+          @(::sg/kv-ref query-env)
 
           {:keys [query-id read-keys]}
           @ref
 
-          observed-data
-          (db/observed db)
+          query-env
+          (reduce-kv
+            (fn [query-env kv-table ^not-native kv]
+              (assoc query-env kv-table (kv/observed kv)))
+            {::sg/runtime-ref rt-ref
+             ::sg/previous-result rt/*slot-value*}
+            kv)
 
-          ;; FIXME: should the env used here be the component env or a fresh dedicated env?
-          ;; FIXME: should this expose an update function to update db?
-          ;; FIXME: should this expose a transact! function similar to fx?
           result
-          (apply read-fn query-env observed-data args)
+          (apply read-fn query-env args)
+
+          ;; FIXME: could just force it?
+          ;; seems cleaner to let user handle it
+          ;; it needs to be forced since otherwise the key recording might miss something
+          _ (when (lazy-seq? result)
+              (throw
+                (ex-info
+                  "query functions are not allowed to return lazy sequences!"
+                  {:result result})))
 
           new-keys
-          (db/observed-keys observed-data)]
+          (reduce-kv
+            (fn [key-set kv-table _]
+              (let [^not-native observed (get query-env kv-table)
+                    [seq-used kv-keys] (kv/observed-keys observed)]
+                (-> key-set
+                    (cond->
+                      seq-used
+                      (conj kv-table))
+                    (into (map #(IndexKey. kv-table %)) kv-keys))))
+            #{}
+            kv)]
 
-      (index-query query-env query-id read-keys new-keys)
+      (index-query-keys rt-ref query-id read-keys new-keys)
 
       (swap! ref assoc :read-keys new-keys)
 
       result
       )))
 
-(defn slot-query [ident query config]
-  (slot-db-read
-    []
-    (fn [env db]
-      (let [result
-            (if (and ident (nil? query))
-              ;; shortcut for just getting data for an ident
-              ;; don't need all the query stuff for those
-              (get db ident)
+(defn slot-kv-get [kv-table]
+  (let [ref
+        (rt/claim-slot! ::slot-kv-get)
 
-              (let [db-query (if ident [{ident query}] query)]
-                (eql/query env db db-query)))]
+        rt-ref
+        (::sg/runtime-ref rt/*env*)
 
-        ;; avoid modifying result since that messes with identical? checks
-        (cond
-          (keyword-identical? result :db/loading)
-          (if (false? (:suspend config))
-            :db/loading
-            (do (set! rt/*ready* false)
-                (:default config {})))
+        {::sg/keys [active-queries-map] :as query-env}
+        @rt-ref]
 
-          (and ident query)
-          (get result ident)
+    ;; setup only once
+    (when (nil? @ref)
+      (comp/set-cleanup! ref
+        (fn [{:keys [query-id read-keys] :as last-state}]
+          (unindex-query-keys @rt-ref query-id read-keys)
+          (.delete active-queries-map query-id)
+          ))
 
-          :else
-          result
-          )))))
+      (let [query-id (rt/next-id)]
+        (swap! ref assoc :query-id query-id)
+        (.set active-queries-map query-id #(gp/invalidate! ref))))
+
+    (let [all
+          @(::sg/kv-ref query-env)
+
+          {:keys [query-id read-keys]}
+          @ref
+
+          kv
+          (kv/get-kv! all kv-table)
+
+          new-keys
+          #{kv-table}]
+
+      ;; FIXME: only need to call this again if kv-table changed
+      (index-query-keys rt-ref query-id read-keys new-keys)
+
+      (swap! ref assoc :read-keys new-keys)
+
+      ;; no observation is performed, assuming the user wanted everything
+      kv)))
+
+(defn slot-kv-lookup [kv-table key]
+  (let [ref
+        (rt/claim-slot! ::slot-kv-lookup)
+
+        rt-ref
+        (::sg/runtime-ref rt/*env*)
+
+        {::sg/keys [active-queries-map] :as query-rt}
+        @rt-ref]
+
+    ;; setup only once
+    (when (nil? @ref)
+      (comp/set-cleanup! ref
+        (fn [{:keys [query-id read-key] :as last-state}]
+          (unindex-query-key @rt-ref query-id read-key)
+          (.delete active-queries-map query-id)
+          ))
+
+      (let [query-id (rt/next-id)]
+        (swap! ref assoc :query-id query-id)
+        (.set active-queries-map query-id #(gp/invalidate! ref))))
+
+    ;; perform query
+    (let [all
+          @(::sg/kv-ref query-rt)
+
+          {:keys [query-id read-key]}
+          @ref
+
+          kv
+          (kv/get-kv! all kv-table)
+
+          new-key
+          (IndexKey. kv-table key)]
+
+      (index-query-key rt-ref query-id read-key new-key)
+
+      (swap! ref assoc :read-key new-key)
+
+      (get kv key))))
 
 (defn slot-state [init-state merge-fn]
   (let [ref (rt/claim-slot! ::slot-state)
@@ -474,47 +624,3 @@
 
     @ref
     ))
-
-(defonce direct-queries-ref
-  (atom {}))
-
-(defn query-init [rt-ref query-id query config callback]
-  (let [{::rt/keys [active-queries-map]} @rt-ref
-
-        do-read!
-        (fn do-read! []
-          (let [{:keys [read-keys read-result] :as state} (get @direct-queries-ref query-id)
-
-                query-env @rt-ref
-                observed-data (db/observed @(::rt/data-ref query-env))
-                result (eql/query query-env observed-data query)
-                new-keys (db/observed-keys observed-data)]
-
-            ;; remember this even if query is still loading
-            (index-query query-env query-id read-keys new-keys)
-
-            (swap! direct-queries-ref assoc-in [query-id :read-keys] new-keys)
-
-            (when (and (not (keyword-identical? result :db/loading))
-                       ;; empty result likely means the query is no longer valid
-                       ;; eg. deleted ident. don't send update, will likely be destroyed
-                       ;; when other query updates
-                       (some? result)
-                       (not (empty? result))
-                       ;; compare here so main doesn't need to compare again
-                       (not= result read-result))
-
-              (swap! direct-queries-ref assoc-in [query-id :read-result] result)
-              (callback result))))]
-
-    (.set active-queries-map query-id do-read!)
-    (do-read!)
-    ))
-
-(defn query-destroy [rt-ref query-id]
-  (let [{::rt/keys [active-queries-map]} @rt-ref]
-    (when-some [q (.get active-queries-map query-id)]
-      (.delete active-queries-map query-id)
-      (unindex-query @rt-ref query-id (get-in @direct-queries-ref [query-id :read-keys]))
-      (swap! direct-queries-ref dissoc query-id)
-      )))

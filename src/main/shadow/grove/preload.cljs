@@ -18,8 +18,6 @@
     [shadow.arborist.common]
     [shadow.arborist.collections]
     [shadow.grove :as sg]
-    [shadow.grove.db :as db]
-    [shadow.grove.db.ident :as db-ident]
     [shadow.grove.runtime :as rt]
     [shadow.grove.ui.portal]
     [shadow.grove.ui.suspense]
@@ -65,32 +63,6 @@
           (conj! s v))
         (transient #{})
         (.values this)))))
-
-(extend-type db-ident/Ident
-  cp/Datafiable
-  (datafy [this]
-    [(db/ident-key this)
-     (db/ident-val this)]))
-
-(deftype IdentFormatter []
-  Object
-  (header [this obj]
-    (when (db/ident? obj)
-      #js ["span" "#gbd/ident ["
-           #js ["object" #js {:object (db/ident-key obj)}]
-           " "
-           #js ["object" #js {:object (db/ident-val obj)}]
-           "]"]))
-
-  (hasBody [this obj]
-    false)
-  (body [this m]
-    nil))
-
-(when-let [^js f js/goog.global.devtoolsFormatters]
-  (doto f
-    (.push (IdentFormatter.))
-    ))
 
 (set! *warn-on-infer* false)
 
@@ -228,7 +200,7 @@
 (defn take-snapshot* [env]
   (->> (vals @rt/known-runtimes-ref)
        (mapcat (fn [rt-ref]
-                 (::rt/roots @rt-ref)))
+                 (::sg/roots @rt-ref)))
        (map #(dp/snapshot % env))
        (vec)))
 
@@ -309,27 +281,24 @@
       (js/console.log val)
       (js/console.groupEnd))))
 
-(defn notify-work-finished [{:keys [runtime] :as svc}]
+
+(def traces (js/Array.))
+
+(defn notify-work-finished [{:keys [runtime] :as svc} trace-array]
   ;; FIXME: should the UI opt-in for these first?
 
-  (let [{:keys [devtools last-snapshot]} @devtools-ref]
+  (let [{:keys [devtools]} @devtools-ref]
 
-    ;; FIXME: this sends too much data too frequently
-    ;; shadow-cljs snapshot easily reaches 100k sometimes
-    ;; sending that for every UI update makes both the devtools and the app slow
-    ;; should just send a update signal and the devtools UI can request the full snapshot?
+    ;; devtools can request these when wanted
+    ;; sending them always leads to far too much data on the websocket
+    ;; and causes intermittent disconnects since it can't keep up
+    (.push traces trace-array)
 
     (when (seq devtools)
-      (let [snapshot (take-snapshot* svc)]
-        ;; FIXME: how often are these actually equal?
-        ;; snapshot can be a large structure, so trying to find a balance between sending
-        ;; it too often (which is expensive) and not missing updates too much
-        (when (not= snapshot last-snapshot)
-          (swap! devtools-ref assoc :last-snapshot snapshot)
-          (shared/relay-msg runtime
-            {:op ::m/work-finished
-             :to devtools
-             :snapshot snapshot}))))))
+      (shared/relay-msg runtime
+        {:op ::m/work-finished
+         :to devtools
+         :work-tasks (alength trace-array)}))))
 
 
 ;; FIXME: this needs some kind of garbage collection
@@ -338,16 +307,22 @@
 (defonce tx-seq-ref (atom 0))
 (defonce tx-ref (atom {}))
 
-(defn relevant-key? [x]
-  (or (db/ident? x) (keyword? x)))
+(defn count-tx-keys [tx-info key]
+  (reduce-kv
+    (fn [c kv-table kv-summary]
+      (let [key-set (get kv-summary key)]
+        (+ c (count key-set))))
+    0
+    tx-info))
 
-(defn as-stream-event [entry]
+(defn as-stream-event [{::sg/keys [tx-info] :as entry}]
   (-> entry
       (select-keys
-        [:ts :tx-id :app-id :event :fx])
-      (assoc :count-new (count (filter relevant-key? (:keys-new entry))))
-      (assoc :count-updated (count (filter relevant-key? (:keys-updated entry))))
-      (assoc :count-removed (count (filter relevant-key? (:keys-removed entry))))
+        ;; FIXME: event is possible very large, should maybe only send it in full when requested
+        [::m/ts ::m/tx-id ::sg/app-id ::sg/event ::sg/fx])
+      (assoc :count-new (count-tx-keys tx-info :keys-new))
+      (assoc :count-updated (count-tx-keys tx-info :keys-updated))
+      (assoc :count-removed (count-tx-keys tx-info :keys-removed))
       (assoc :type :tx-report)))
 
 (defn stream-sub [{:keys [streams-ref runtime] :as svc} {:keys [from] :as msg}]
@@ -374,40 +349,37 @@
     {:op ::m/db-copy
      :db (-> @rt/known-runtimes-ref (get app-id) (deref) (get ::rt/data-ref) (deref) (deref))}))
 
-(defn make-tx-diff [{:keys [db-before db-after keys-new keys-updated keys-removed] :as tx}]
-  (let [only-relevant-keys (filter relevant-key?)]
-    {:added
-     (into []
-       (comp only-relevant-keys
-         (map (fn [key]
-                {:key key
-                 :op :db-add
-                 :val (get db-after key)})))
-       keys-new)
-
-     :updated
-     (into []
-       (comp
-         only-relevant-keys
-         (map (fn [key]
-                {:key key
-                 :op :db-update
-                 :before (get db-before key)
-                 :after (get db-after key)})))
-       keys-updated)
-
-     :removed
-     (into []
-       (comp only-relevant-keys
-         (map (fn [key]
-                {:key key
-                 :op :db-remove
-                 :val (get db-before key)})))
-       keys-removed)}))
+(defn make-tx-diff [{::sg/keys [tx-info] :as tx}]
+  (reduce-kv
+    (fn [m kv-table {:keys [data data-before] :as kv-summary}]
+      (-> m
+          (update :added into
+            (->> (:keys-new kv-summary)
+                 (mapv (fn [key]
+                         {:key key
+                          :kv-table kv-table
+                          :val (get data key)}))))
+          (update :updated into
+            (->> (:keys-updated kv-summary)
+                 (mapv (fn [key]
+                         {:key key
+                          :kv-table kv-table
+                          :before (get data-before key)
+                          :after (get data key)}))))
+          (update :removed into
+            (->> (:keys-removed kv-summary)
+                 (mapv (fn [key]
+                         {:key key
+                          :kv-table kv-table
+                          :val (get data-before key)}))))))
+    {:added []
+     :updated []
+     :removed []}
+    tx-info))
 
 (comment
   (keys @tx-ref)
-  (make-tx-diff {} (get @tx-ref 9)))
+  (make-tx-diff (get @tx-ref 9)))
 
 (defn get-tx-diff
   [{:keys [runtime] :as svc} {:keys [event-id tx-id] :as msg}]
@@ -432,8 +404,8 @@
 
         report
         (assoc report
-          :tx-id tx-id
-          :ts (js/Date.now))]
+          ::m/tx-id tx-id
+          ::m/ts (js/Date.now))]
 
     ;; store so that devtools can query db diff on demand
     ;; FIXME: should really garbage collect these at some point, they are going to pile up quick
@@ -497,14 +469,7 @@
          (fn [x]
            ;; fallback to EDN, so that unknown things do not error out
            ;; edn prints everything, so more forgiving for types we don't care to restore anyway
-           (pr-str x)))
-
-       ident/Ident
-       (transit/write-handler
-         (fn tag-fn [x]
-           "gdb/ident")
-         (fn rep-fn [x]
-           [(db/ident-key x) (db/ident-val x)]))})
+           (pr-str x)))})
 
     (let [streams-ref
           (atom #{})
@@ -543,15 +508,7 @@
              (str (client-env/get-url-base)
                   "/classpath/shadow/grove/devtools.html?runtime="
                   (:client-id @(:state-ref runtime))))
-           (set! sg/work-finish-trigger
-             ;; don't want to spam the devtools too much, this might be called a lot
-             (gfn/debounce
-               (fn []
-                 (notify-work-finished svc))
-
-               ;; FIXME: feels bad in the UI if this waits too long
-               ;; but sending too much slows everything down
-               1000))
+           (set! sg/work-finish-trigger #(notify-work-finished svc %))
 
            (shared/relay-msg runtime
              {:op :request-clients

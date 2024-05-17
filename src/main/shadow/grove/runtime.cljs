@@ -1,5 +1,6 @@
 (ns shadow.grove.runtime
   (:require
+    [shadow.grove :as-alias sg]
     [goog.async.nextTick]
     [shadow.grove.protocols :as gp]))
 
@@ -7,8 +8,8 @@
   (atom {}))
 
 (defn ref? [x]
-  (and (atom x)
-       (::rt @x)))
+  (and (instance? cljs.core/Atom x)
+       (::sg/runtime @x)))
 
 (defonce id-seq (volatile! 0))
 
@@ -29,6 +30,9 @@
 (def ^:dynamic *slot-value* ::pending)
 (def ^:dynamic *claimed* nil)
 (def ^:dynamic *ready* true)
+
+;; for devtools debugging
+(def ^:dynamic *work-trace* nil)
 
 (deftype SlotRef
   [provider
