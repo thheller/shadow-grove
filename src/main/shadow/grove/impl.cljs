@@ -495,7 +495,6 @@
         (gp/invalidate! ref))))
 
   (run! [this]
-    (js/console.log "running query" this)
     (let [rt
           @rt-ref
 
