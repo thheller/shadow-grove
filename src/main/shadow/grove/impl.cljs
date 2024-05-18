@@ -7,6 +7,15 @@
     [shadow.grove.components :as comp]
     ))
 
+(defrecord IndexKey [kv-table key])
+
+;; {query-id callback} using js/Map for speed, since query-id is always just a number
+(defonce active-queries-map (js/Map.))
+;; {[query-fn args] <Query>}
+(defonce active-queries-ref (atom {}))
+;; {IndexKey js/Set-of-query-id} keeping track of which key is used by which query
+(defonce key-index-ref (volatile! {}))
+
 (defn js-set-union [a b]
   (.forEach b (fn [x] (.add a x))))
 
@@ -16,8 +25,6 @@
     (conj x y)))
 
 (set! *warn-on-infer* false)
-
-(defrecord IndexKey [kv-table key])
 
 (def ^function
   work-queue-task!
@@ -85,84 +92,82 @@
     (set! work-timeout (work-queue-task! index-work-some!))
     (set! work-queued? true)))
 
-(defn mset [key-index-ref key]
-  (or (get @key-index-ref key)
+(defn get-key-index-set [key]
+  (or (-lookup @key-index-ref key)
       (let [s (js/Set.)]
         (vswap! key-index-ref assoc key s)
         s)))
 
 (defn index-query-key*
-  [rt-ref query-id prev-key next-key]
-  (let [{::sg/keys [active-queries-map key-index-ref]} @rt-ref]
-    ;; this is done async, query might be gone since index was queued
-    (when (.has active-queries-map query-id)
-      ;; index keys that weren't used previously
+  [query-id prev-key next-key]
+  ;; this is done async, query might be gone since index was queued
+  (when (.has active-queries-map query-id)
+    ;; index keys that weren't used previously
 
-      (cond
-        (nil? prev-key)
-        (let [set (mset key-index-ref next-key)]
-          (.add set query-id))
+    (cond
+      (nil? prev-key)
+      (let [set (get-key-index-set next-key)]
+        (.add set query-id))
 
-        (not= prev-key next-key)
-        (let [prev-set (mset key-index-ref prev-key)
-              next-set (mset key-index-ref next-key)]
-          (.delete prev-set query-id)
-          (.add next-set query-id))
+      (not= prev-key next-key)
+      (let [prev-set (get-key-index-set prev-key)
+            next-set (get-key-index-set next-key)]
+        (.delete prev-set query-id)
+        (.add next-set query-id))
 
-        )))
+      ))
 
   js/undefined)
 
 ;; FIXME: this is likely overkill for a single key? might as well just do it immediately?
-(defn index-query-key [env query-id prev-key next-key]
-  (.push index-queue #(index-query-key* env query-id prev-key next-key))
+(defn index-query-key [query-id prev-key next-key]
+  (.push index-queue #(index-query-key* query-id prev-key next-key))
   (index-queue-some!))
 
 (defn unindex-query-key*
-  [{::sg/keys [key-index-ref]} query-id key]
-  (when-some [s (get @key-index-ref key)]
+  [query-id key]
+  (when-some [s (-lookup @key-index-ref key)]
     (.delete s query-id)))
 
-(defn unindex-query-key [env query-id key]
-  (.push index-queue #(unindex-query-key* env query-id key))
+(defn unindex-query-key [query-id key]
+  (.push index-queue #(unindex-query-key* query-id key))
   (index-queue-some!))
 
 (defn index-query-keys*
-  [rt-ref query-id prev-keys next-keys]
-  (let [{::sg/keys [active-queries-map key-index-ref]} @rt-ref]
-    ;; this is done async, query might be gone since index was queued
-    (when (.has active-queries-map query-id)
-      ;; index keys that weren't used previously
+  [query-id prev-keys next-keys]
+  ;; this is done async, query might be gone since index was queued
+  (when (.has active-queries-map query-id)
+    ;; index keys that weren't used previously
+    (reduce
+      (fn [_ key]
+        (when-not (contains? prev-keys key)
+          (let [set (get-key-index-set key)]
+            (.add set query-id)))
+        nil)
+      nil
+      next-keys)
+
+    ;; remove old keys that are no longer used
+    (when-not (nil? prev-keys)
       (reduce
         (fn [_ key]
-          (when-not (contains? prev-keys key)
-            (let [set (mset key-index-ref key)]
-              (.add set query-id)))
-          nil)
+          (when-not (contains? next-keys key)
+            (let [set (get-key-index-set key)]
+              (.delete set query-id))))
         nil
-        next-keys)
-
-      ;; remove old keys that are no longer used
-      (when-not (nil? prev-keys)
-        (reduce
-          (fn [_ key]
-            (when-not (contains? next-keys key)
-              (let [set (mset key-index-ref key)]
-                (.delete set query-id))))
-          nil
-          prev-keys))))
+        prev-keys)))
 
   js/undefined)
 
-(defn index-query-keys [env query-id prev-keys next-keys]
-  (.push index-queue #(index-query-keys* env query-id prev-keys next-keys))
+(defn index-query-keys [query-id prev-keys next-keys]
+  (.push index-queue #(index-query-keys* query-id prev-keys next-keys))
   (index-queue-some!))
 
 (defn unindex-query-keys*
-  [{::sg/keys [key-index-ref]} query-id keys]
+  [query-id keys]
   (reduce
     (fn [_ key]
-      (when-some [s (get @key-index-ref key)]
+      (when-some [s (-lookup @key-index-ref key)]
         ;; FIXME: this needs some kind of GC
         ;; currently does not remove empty sets from key-index-ref
         ;; so possibly accumulates unused keys over time
@@ -171,20 +176,17 @@
     nil
     keys))
 
-(defn unindex-query-keys [env query-id keys]
-  (.push index-queue #(unindex-query-keys* env query-id keys))
+(defn unindex-query-keys [query-id keys]
+  (.push index-queue #(unindex-query-keys* query-id keys))
   (index-queue-some!))
 
-(defn invalidate-kv! [rt-ref tx-info]
+(defn invalidate-kv! [tx-info]
   ;; before we can invalidate anything we need to make sure the index is updated
   ;; we delay updating index stuff to be async since we only need it here later
   (index-work-all!)
 
   (let [key-index
-        @(::sg/key-index-ref @rt-ref)
-
-        active-queries-map
-        (::sg/active-queries-map @rt-ref)
+        @key-index-ref
 
         ;; using mutable things since they are a bit faster and time matters here
         keys-to-invalidate
@@ -299,7 +301,6 @@
       (fn []
         (tx-reporter tx-env)))))
 
-
 ;; FIXME: I'm unsure it was worth extracting this into an interceptor
 ;; might be better if still handled in process-event directly
 ;; but this technically allows users to run stuff after/before this is done
@@ -352,7 +353,7 @@
 
           (reset! kv-ref kv-after)
 
-          (invalidate-kv! rt-ref tx-info)
+          (invalidate-kv! tx-info)
 
           (reduce-kv
             (fn [tx-env kv-table _]
@@ -455,9 +456,6 @@
   (and (instance? cljs.core/LazySeq thing)
        (not (realized? thing))))
 
-(defonce active-queries-ref
-  (atom {}))
-
 (deftype Query
   [query-id
    ^not-native query-key
@@ -477,14 +475,12 @@
     ;; FIXME: using the removal of the last sub as signal to cleanup might not be ideal
     ;; this doesn't need to happen immediately
     (when (zero? (.-size subs))
-      (let [active-queries-map (::sg/active-queries-map @rt-ref)]
-        (swap! active-queries-ref dissoc query-key)
-        (unindex-query-keys @rt-ref query-id read-keys)
-        (.delete active-queries-map query-id))))
+      (swap! active-queries-ref dissoc query-key)
+      (unindex-query-keys query-id read-keys)
+      (.delete active-queries-map query-id)))
 
   (setup! [this]
-    (let [active-queries-map (::sg/active-queries-map @rt-ref)]
-      (.set active-queries-map query-id #(.invalidate! this))))
+    (.set active-queries-map query-id #(.invalidate! this)))
 
   (invalidate! [this]
     (set! invalidated true)
@@ -534,7 +530,7 @@
                     (into (map #(IndexKey. kv-table %)) kv-keys))))
             #{})]
 
-      (index-query-keys rt-ref query-id read-keys new-keys)
+      (index-query-keys query-id read-keys new-keys)
 
       (set! read-keys new-keys)
       (set! invalidated false)
@@ -593,14 +589,14 @@
         rt-ref
         (::sg/runtime-ref rt/*env*)
 
-        {::sg/keys [active-queries-map] :as query-env}
+        query-env
         @rt-ref]
 
     ;; setup only once
     (when (nil? @ref)
       (comp/set-cleanup! ref
         (fn [{:keys [query-id read-key] :as last-state}]
-          (unindex-query-key @rt-ref query-id read-key)
+          (unindex-query-key query-id read-key)
           (.delete active-queries-map query-id)
           ))
 
@@ -617,7 +613,7 @@
           kv
           (kv/get-kv! all kv-table)]
 
-      (index-query-key rt-ref query-id read-key kv-table)
+      (index-query-key query-id read-key kv-table)
 
       (-swap! ref assoc :read-key kv-table)
 
@@ -631,14 +627,14 @@
         rt-ref
         (::sg/runtime-ref rt/*env*)
 
-        {::sg/keys [active-queries-map] :as query-rt}
+        query-rt
         @rt-ref]
 
     ;; setup only once
     (when (nil? @ref)
       (comp/set-cleanup! ref
         (fn [{:keys [query-id read-key] :as last-state}]
-          (unindex-query-key @rt-ref query-id read-key)
+          (unindex-query-key query-id read-key)
           (.delete active-queries-map query-id)
           ))
 
@@ -659,7 +655,7 @@
           new-key
           (IndexKey. kv-table key)]
 
-      (index-query-key rt-ref query-id read-key new-key)
+      (index-query-key query-id read-key new-key)
 
       (-swap! ref assoc :read-key new-key)
 

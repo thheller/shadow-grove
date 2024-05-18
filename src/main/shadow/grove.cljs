@@ -329,9 +329,6 @@
            ::event-config {}
            ::event-interceptors [impl/kv-interceptor]
            ::fx-config {}
-           ::tx-seq-ref (atom 0)
-           ::active-queries-map (js/Map.)
-           ::key-index-ref (volatile! {})
            ::env-init []})]
 
     (swap! rt/known-runtimes-ref assoc app-id rt-ref)
