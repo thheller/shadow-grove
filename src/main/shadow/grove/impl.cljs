@@ -455,55 +455,72 @@
   (and (instance? cljs.core/LazySeq thing)
        (not (realized? thing))))
 
-(defn slot-query [args read-fn]
-  (let [ref
-        (rt/claim-slot! ::slot-query)
+(defonce active-queries-ref
+  (atom {}))
 
-        rt-ref
-        (::sg/runtime-ref rt/*env*)
+(deftype Query
+  [query-id
+   ^not-native query-key
+   rt-ref
+   subs
+   ^:mutable invalidated
+   ^:mutable read-keys
+   ^:mutable result]
 
-        {::sg/keys [active-queries-map] :as query-env}
-        @rt-ref]
+  Object
+  (add-sub [this ref]
+    (.add subs ref))
 
-    ;; setup only once
-    (when (nil? @ref)
-      (comp/set-cleanup! ref
-        (fn [{:keys [query-id read-keys] :as last-state}]
-          (unindex-query-keys @rt-ref query-id read-keys)
-          (.delete active-queries-map query-id)
-          ))
+  (del-sub [this ref]
+    (.delete subs ref)
 
-      (let [query-id (rt/next-id)]
-        (swap! ref assoc :query-id query-id)
+    ;; FIXME: using the removal of the last sub as signal to cleanup might not be ideal
+    ;; this doesn't need to happen immediately
+    (when (zero? (.-size subs))
+      (let [active-queries-map (::sg/active-queries-map @rt-ref)]
+        (swap! active-queries-ref dissoc query-key)
+        (unindex-query-keys @rt-ref query-id read-keys)
+        (.delete active-queries-map query-id))))
 
-        (.set active-queries-map query-id #(gp/invalidate! ref))))
+  (setup! [this]
+    (let [active-queries-map (::sg/active-queries-map @rt-ref)]
+      (.set active-queries-map query-id #(.invalidate! this))))
 
-    ;; perform query
-    (let [kv
-          @(::sg/kv-ref query-env)
+  (invalidate! [this]
+    (set! invalidated true)
+    ;; only invalidate sub refs, do not run yet
+    ;; possible that component gets unmounted and query is no longer needed
+    (.forEach subs
+      (fn [^not-native ref]
+        (gp/invalidate! ref))))
 
-          {:keys [query-id read-keys]}
-          @ref
+  (run! [this]
+    (js/console.log "running query" this)
+    (let [rt
+          @rt-ref
+
+          kv
+          @(::sg/kv-ref rt)
 
           query-env
           (reduce-kv
             (fn [query-env kv-table ^not-native kv]
               (assoc query-env kv-table (kv/observed kv)))
             {::sg/runtime-ref rt-ref
-             ::sg/previous-result rt/*slot-value*}
+             ::sg/previous-result result}
             kv)
 
-          result
-          (apply read-fn query-env args)
+          next-result
+          (apply (-nth query-key 0) query-env (-nth query-key 1))
 
           ;; FIXME: could just force it?
           ;; seems cleaner to let user handle it
           ;; it needs to be forced since otherwise the key recording might miss something
-          _ (when (lazy-seq? result)
+          _ (when (lazy-seq? next-result)
               (throw
                 (ex-info
                   "query functions are not allowed to return lazy sequences!"
-                  {:result result})))
+                  {:result next-result})))
 
           new-keys
           (reduce-kv
@@ -520,10 +537,55 @@
 
       (index-query-keys rt-ref query-id read-keys new-keys)
 
-      (swap! ref assoc :read-keys new-keys)
+      (set! read-keys new-keys)
+      (set! invalidated false)
+      (set! result next-result))
 
-      result
-      )))
+    js/undefined)
+
+  (get-result [this]
+    (when invalidated
+      (.run! this))
+
+    result
+    ))
+
+(defn- setup-query [rt-ref query-key]
+  (let [q (Query.
+            (rt/next-id)
+            query-key
+            rt-ref
+            (js/Set.)
+            true
+            nil
+            nil)]
+    (.setup! q)
+    (swap! active-queries-ref assoc query-key q)
+    q))
+
+(defn- get-query [rt-ref read-fn args]
+  (let [query-key [read-fn args]]
+    (or (get @active-queries-ref query-key)
+        (setup-query rt-ref query-key))))
+
+(defn slot-query [args read-fn]
+  (let [ref (rt/claim-slot! ::slot-query)
+        rt-ref (::sg/runtime-ref rt/*env*)
+        query (get-query rt-ref read-fn args)]
+
+    (when (nil? @ref)
+      (comp/set-cleanup! ref
+        (fn [query]
+          (.del-sub query ref))))
+
+    (when-not (identical? query @ref)
+      (when-some [prev-query @ref]
+        (.del-sub prev-query ref))
+
+      (.add-sub query ref)
+      (reset! ref query))
+
+    (.get-result query)))
 
 (defn slot-kv-get [kv-table]
   (let [ref

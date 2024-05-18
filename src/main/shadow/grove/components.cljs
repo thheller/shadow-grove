@@ -172,7 +172,7 @@
         (set! this -instance-id id)
 
         (when rt/*work-trace*
-          (.push rt/*work-trace* #js [::create! (rt/now) (.-component-name config) id a]))
+          (.push rt/*work-trace* #js [::create! (rt/now) (.-component-name config) id]))
 
         (swap! instances-ref assoc id this))
       (set! (.-marker-before this)
@@ -259,8 +259,8 @@
 
     (set! destroyed? true)
 
-    (reduce
-      (fn [slot-idx ref]
+    (reduce-kv
+      (fn [_ slot-idx ref]
         (when-some [cleanup (.-cleanup ref)]
 
           (when DEBUG
@@ -440,7 +440,7 @@
 
             (when DEBUG
               (when rt/*work-trace*
-                (.push rt/*work-trace* #js [::run-slot! (rt/now) (.-component-name config) (.-instance-id this) idx prev-val val])))
+                (.push rt/*work-trace* #js [::run-slot! (rt/now) (.-component-name config) (.-instance-id this) idx (= prev-val val)])))
 
             (aset slot-values idx val)
 
