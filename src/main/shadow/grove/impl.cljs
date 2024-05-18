@@ -306,8 +306,7 @@
 ;; but this technically allows users to run stuff after/before this is done
 (defn kv-interceptor [tx-env]
   (let [rt-ref (::sg/runtime-ref tx-env)
-        kv-ref (::sg/kv-ref @rt-ref)
-        before @kv-ref
+        before (::sg/kv @rt-ref)
 
         tx-env
         (reduce-kv
@@ -318,7 +317,7 @@
 
     (update tx-env ::sg/tx-after conj
       (fn kv-interceptor-after [tx-env]
-        (when-not (identical? @kv-ref before)
+        (when-not (identical? (::sg/kv @rt-ref) before)
           (throw (ex-info "someone messed with kv state while in tx" {})))
 
         (let [tx-info
@@ -351,7 +350,7 @@
                 before
                 tx-info)]
 
-          (reset! kv-ref kv-after)
+          (swap! rt-ref assoc ::sg/kv kv-after)
 
           (invalidate-kv! tx-info)
 
@@ -491,11 +490,8 @@
         (gp/invalidate! ref))))
 
   (run! [this]
-    (let [rt
-          @rt-ref
-
-          kv
-          @(::sg/kv-ref rt)
+    (let [kv
+          (::sg/kv @rt-ref)
 
           ^not-native query-env
           (-kv-reduce
@@ -587,10 +583,7 @@
         (rt/claim-slot! ::slot-kv-get)
 
         rt-ref
-        (::sg/runtime-ref rt/*env*)
-
-        query-env
-        @rt-ref]
+        (::sg/runtime-ref rt/*env*)]
 
     ;; setup only once
     (when (nil? @ref)
@@ -605,7 +598,7 @@
         (.set active-queries-map query-id #(gp/invalidate! ref))))
 
     (let [all
-          @(::sg/kv-ref query-env)
+          (::sg/kv @rt-ref)
 
           {:keys [query-id read-key]}
           @ref
@@ -625,10 +618,7 @@
         (rt/claim-slot! ::slot-kv-lookup)
 
         rt-ref
-        (::sg/runtime-ref rt/*env*)
-
-        query-rt
-        @rt-ref]
+        (::sg/runtime-ref rt/*env*)]
 
     ;; setup only once
     (when (nil? @ref)
@@ -644,7 +634,7 @@
 
     ;; perform query
     (let [all
-          @(::sg/kv-ref query-rt)
+          (::sg/kv @rt-ref)
 
           {:keys [query-id read-key]}
           @ref

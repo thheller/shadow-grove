@@ -325,7 +325,7 @@
            ::roots #{}
            ::scheduler root-scheduler
            ::app-id app-id
-           ::kv-ref (atom {})
+           ::kv {}
            ::event-config {}
            ::event-interceptors [impl/kv-interceptor]
            ::fx-config {}
@@ -420,19 +420,15 @@
   ([rt-ref kv-table config]
    (add-kv-table rt-ref kv-table config {}))
   ([rt-ref kv-table config init-data]
-   (let [kv-ref (::kv-ref @rt-ref)]
-     (swap! kv-ref assoc kv-table (kv/init kv-table config init-data)))
-
+   (swap! rt-ref assoc-in [::kv kv-table] (kv/init kv-table config init-data))
    rt-ref))
 
 ;; just more convenient to do this directly
 (defn kv-init
   [rt-ref init-fn]
   (check-unmounted! rt-ref)
-  (let [kv-ref (::kv-ref @rt-ref)]
-    (swap! kv-ref init-fn)
-    rt-ref
-    ))
+  (swap! rt-ref update ::kv init-fn)
+  rt-ref)
 
 (defn valid-interceptor? [x]
   (fn? x))
