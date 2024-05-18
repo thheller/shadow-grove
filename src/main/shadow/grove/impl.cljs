@@ -180,7 +180,7 @@
   (.push index-queue #(unindex-query-keys* query-id keys))
   (index-queue-some!))
 
-(defn invalidate-kv! [tx-info]
+(defn invalidate-kv! [^not-native tx-info]
   ;; before we can invalidate anything we need to make sure the index is updated
   ;; we delay updating index stuff to be async since we only need it here later
   (index-work-all!)
@@ -195,8 +195,9 @@
         query-ids
         (js/Set.)]
 
-    (reduce-kv
-      (fn [_ kv-table tx-info]
+    (-kv-reduce
+      tx-info
+      (fn [_ kv-table ^not-native tx-info]
         (let [keys-new (:keys-new tx-info)
               keys-updated (:keys-updated tx-info)
               keys-removed (:keys-removed tx-info)
@@ -214,8 +215,7 @@
           (run! add keys-updated)
           (run! add keys-removed))
         nil)
-      nil
-      tx-info)
+      nil)
 
     (.forEach keys-to-invalidate
       (fn [key]
@@ -306,24 +306,25 @@
 ;; but this technically allows users to run stuff after/before this is done
 (defn kv-interceptor [tx-env]
   (let [rt-ref (::sg/runtime-ref tx-env)
-        before (::sg/kv @rt-ref)
+        ^not-native before (::sg/kv @rt-ref)
 
         tx-env
-        (reduce-kv
-          (fn [tx-env kv-table kv]
-            (assoc tx-env kv-table (kv/transacted kv)))
-          tx-env
-          before)]
+        (-kv-reduce
+          before
+          (fn [^not-native tx-env kv-table kv]
+            (-assoc tx-env kv-table (kv/transacted kv)))
+          tx-env)]
 
     (update tx-env ::sg/tx-after conj
-      (fn kv-interceptor-after [tx-env]
+      (fn kv-interceptor-after [^not-native tx-env]
         (when-not (identical? (::sg/kv @rt-ref) before)
           (throw (ex-info "someone messed with kv state while in tx" {})))
 
         (let [tx-info
-              (reduce-kv
-                (fn [tx-info kv-table _]
-                  (let [kv (get tx-env kv-table)]
+              (-kv-reduce
+                before
+                (fn [^not-native tx-info kv-table _]
+                  (let [^not-native kv (-lookup tx-env kv-table)]
 
                     ;; completely disallow (assoc tx-env :a-defined-table {:a "new-map"})
                     ;; FIXME: could actually allow that and so some sort of diff when getting a map?
@@ -339,28 +340,27 @@
                         ;; if no changes were done there should be no trace in tx-info
                         ;; saves some time later in invalidate-kv!
                         tx-info
-                        (assoc tx-info kv-table commit)))))
-                {}
-                before)
+                        (-assoc tx-info kv-table commit)))))
+                {})
 
               kv-after
-              (reduce-kv
-                (fn [m kv-table tx-info]
-                  (assoc m kv-table (:data tx-info)))
-                before
-                tx-info)]
+              (-kv-reduce
+                tx-info
+                (fn [^not-native m kv-table tx-info]
+                  (-assoc m kv-table (:data tx-info)))
+                before)]
 
           (swap! rt-ref assoc ::sg/kv kv-after)
 
           (invalidate-kv! tx-info)
 
-          (reduce-kv
-            (fn [tx-env kv-table _]
+          (-kv-reduce
+            before
+            (fn [^not-native tx-env kv-table _]
               ;; just to avoid anyone touching this again
-              (dissoc tx-env kv-table))
-            (assoc tx-env ::sg/tx-info tx-info)
-            before)
-          )))))
+              (-dissoc tx-env kv-table))
+            (-assoc tx-env ::sg/tx-info tx-info)
+            ))))))
 
 (defn process-event
   [rt-ref
