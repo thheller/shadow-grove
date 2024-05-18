@@ -501,13 +501,13 @@
           kv
           @(::sg/kv-ref rt)
 
-          query-env
-          (reduce-kv
+          ^not-native query-env
+          (-kv-reduce
+            kv
             (fn [query-env kv-table ^not-native kv]
-              (assoc query-env kv-table (kv/observed kv)))
+              (-assoc query-env kv-table (kv/observed kv)))
             {::sg/runtime-ref rt-ref
-             ::sg/previous-result result}
-            kv)
+             ::sg/previous-result result})
 
           next-result
           (apply (-nth query-key 0) query-env (-nth query-key 1))
@@ -522,17 +522,17 @@
                   {:result next-result})))
 
           new-keys
-          (reduce-kv
-            (fn [key-set kv-table _]
-              (let [^not-native observed (get query-env kv-table)
+          (-kv-reduce
+            kv
+            (fn [^not-native key-set kv-table _]
+              (let [^not-native observed (-lookup query-env kv-table)
                     [seq-used kv-keys] (kv/observed-keys observed)]
                 (-> key-set
                     (cond->
                       seq-used
-                      (conj kv-table))
+                      (-conj kv-table))
                     (into (map #(IndexKey. kv-table %)) kv-keys))))
-            #{}
-            kv)]
+            #{})]
 
       (index-query-keys rt-ref query-id read-keys new-keys)
 
@@ -564,7 +564,7 @@
 
 (defn- get-query [rt-ref read-fn args]
   (let [query-key [read-fn args]]
-    (or (get @active-queries-ref query-key)
+    (or (-lookup @active-queries-ref query-key)
         (setup-query rt-ref query-key))))
 
 (defn slot-query [args read-fn]
@@ -587,7 +587,7 @@
     (.get-result query)))
 
 (defn slot-kv-get [kv-table]
-  (let [ref
+  (let [^not-native ref
         (rt/claim-slot! ::slot-kv-get)
 
         rt-ref
@@ -605,7 +605,7 @@
           ))
 
       (let [query-id (rt/next-id)]
-        (swap! ref assoc :query-id query-id)
+        (-swap! ref assoc :query-id query-id)
         (.set active-queries-map query-id #(gp/invalidate! ref))))
 
     (let [all
@@ -619,7 +619,7 @@
 
       (index-query-key rt-ref query-id read-key kv-table)
 
-      (swap! ref assoc :read-key kv-table)
+      (-swap! ref assoc :read-key kv-table)
 
       ;; no observation is performed, assuming the user wanted everything
       kv)))
@@ -661,24 +661,24 @@
 
       (index-query-key rt-ref query-id read-key new-key)
 
-      (swap! ref assoc :read-key new-key)
+      (-swap! ref assoc :read-key new-key)
 
-      (get kv key))))
+      (-lookup kv key))))
 
 (defn slot-state [init-state merge-fn]
-  (let [ref (rt/claim-slot! ::slot-state)
+  (let [^not-native ref (rt/claim-slot! ::slot-state)
         state @ref]
 
     (cond
       (nil? state)
-      (reset! ref (vary-meta init-state assoc ::ref ref ::init-state init-state))
+      (-reset! ref (vary-meta init-state assoc ::ref ref ::init-state init-state))
 
       (and merge-fn (not= init-state (::init-state (meta state))))
-      (swap! ref (fn [state]
-                   (-> state
-                       (merge-fn init-state)
-                       ;; just in case the merge-fn dropped these
-                       (vary-meta assoc ::ref ref ::init-state init-state)))))
+      (-swap! ref (fn [state]
+                    (-> state
+                        (merge-fn init-state)
+                        ;; just in case the merge-fn dropped these
+                        (vary-meta assoc ::ref ref ::init-state init-state)))))
 
     @ref
     ))

@@ -126,7 +126,7 @@
 
   ;; lifecycle actions
   (field ^not-native on-destroy {})
-  (field ^not-native after-render  {})
+  (field ^not-native after-render {})
   (field ^not-native after-render-cleanup {})
   (field ^not-native before-render {})
 
@@ -259,7 +259,8 @@
 
     (set! destroyed? true)
 
-    (reduce-kv
+    (-kv-reduce
+      slot-refs
       (fn [_ slot-idx ref]
         (when-some [cleanup (.-cleanup ref)]
 
@@ -268,15 +269,14 @@
               (.push rt/*work-trace* #js [::slot-cleanup! (rt/now) (.-component-name config) (.-instance-id this) slot-idx])))
 
           (cleanup @ref)))
-      nil
-      slot-refs)
+      nil)
 
     ;; cleanup fns returned by sg/effect fns
-    (reduce-kv
+    (-kv-reduce
+      after-render-cleanup
       (fn [_ ref callback]
         (callback))
-      nil
-      after-render-cleanup)
+      nil)
 
     (ap/destroy! root dom-remove?))
 
@@ -356,9 +356,9 @@
 
   gp/IProvideSlot
   (-init-slot-ref [this idx]
-    (or (get slot-refs idx)
+    (or (-lookup slot-refs idx)
         (let [ref (rt/SlotRef. this idx nil nil)]
-          (set! slot-refs (assoc slot-refs idx ref))
+          (set! slot-refs (-assoc slot-refs idx ref))
           ref
           )))
 
@@ -406,15 +406,15 @@
     js/undefined)
 
   (add-after-render-effect [this key callback]
-    (set! after-render (assoc after-render key callback))
+    (set! after-render (-assoc after-render key callback))
     this)
 
   (add-after-render-effect-once [this key callback]
     (set! after-render
-      (assoc after-render
+      (-assoc after-render
         key
         (fn [env]
-          (set! after-render (dissoc after-render key))
+          (set! after-render (-dissoc after-render key))
           (callback env))))
     this)
 
@@ -527,7 +527,8 @@
     (.unschedule! this))
 
   (did-update! [this did-render?]
-    (reduce-kv
+    (-kv-reduce
+      after-render
       (fn [_ key callback]
         (when-some [^function x (get after-render-cleanup key)]
           (x)
@@ -535,11 +536,10 @@
 
         (let [result (callback component-env)]
           (when (fn? result)
-            (set! after-render-cleanup (assoc after-render-cleanup key result))))
+            (set! after-render-cleanup (-assoc after-render-cleanup key result))))
 
         nil)
-      nil
-      after-render)
+      nil)
 
     js/undefined))
 
@@ -693,7 +693,7 @@
       :mount
       (when-not @ref
         (.add-after-render-effect-once component ref callback)
-        (reset! ref :mount))
+        (-reset! ref :mount))
 
       ;; slot only called again if callback used bindings that changed
       :auto
