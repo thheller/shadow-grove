@@ -127,9 +127,6 @@
   (-assoc [this key value]
     (.check-completed! this)
 
-    (when (nil? key)
-      (throw (ex-info "nil key not allowed" {:value value})))
-
     ;; validation should be done here and not in tx interceptor after
     ;; should fail as soon as possible, so dev knows where invalid data was written
     ;; expecting user supplied function to throw for invalid keys or values
