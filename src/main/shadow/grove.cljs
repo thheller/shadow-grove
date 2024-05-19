@@ -318,34 +318,34 @@
 ;; it is however never used, so might as well remove it
 
 (defn make-kv-navigable [init-data]
+  ;; a bit of nested madness. trying to keep all nav related things only active
+  ;; when navigating from :shadow.grove.kv itself. nav from a table can't follow references
+  ;; if it does not have a kv container map itself. nav should only
+  ;; use the data from that kv map instance and not get a new snapshot from data-ref
+  ;; since that can lead to inconsistencies, e.g. something already being removed.
   (with-meta init-data
     {`cp/nav
      (fn [kv table-id table]
-       ;; keep a reference to the kv map, so that table nav can jump between tables
-       (vary-meta table assoc ::kv kv))}))
-
-(defn make-table-navigable [config init-data]
-  (vary-meta init-data assoc
-    `cp/nav
-    (fn [table k v]
-      ;; only navigate further on maps for now
-      (if-not (map? v)
-        v
-        (vary-meta v assoc
-          `cp/nav
-          (fn [entry k v]
-            ;; e.g. :runtime-id nil, can't navigate further if value was nil
-            (if (nil? v)
-              v
-              (let [fk-reference (get-in config [:attrs k :references])]
-                (if-not fk-reference
-                  v
-                  ;; continue navigating in the kv state this originally came from only (provided by make-kv-navigable)
-                  ;; need to nav so this nav metadata is applied, otherwise it can just navigate once
-                  (let [kv (::kv (meta table))
-                        table (cp/nav kv fk-reference (get kv fk-reference))]
-                    (cp/nav table v (get table v)))
-                  )))))))))
+       ;; nav in table, kv only contains other tables
+       (vary-meta table assoc
+         `cp/nav
+         (fn [table entry-key v]
+           ;; only navigate further on maps for now
+           (if-not (map? v)
+             v
+             ;; nav in entity map
+             (vary-meta v assoc
+               `cp/nav
+               (fn [entry k v]
+                 ;; e.g. :runtime-id nil, can't navigate further if value was nil
+                 (if (nil? v)
+                   v
+                   (let [fk-reference (some-> (meta table) ::kv/config :attrs (get k) :references)]
+                     (if-not fk-reference
+                       v
+                       (let [table (cp/nav kv fk-reference (get kv fk-reference))]
+                         (cp/nav table v (get table v)))
+                       )))))))))}))
 
 (defn- prepare [app-id]
   (when (get @rt/known-runtimes-ref app-id)
@@ -366,6 +366,13 @@
            ::kv (make-kv-navigable {})
            ::event-config {}
            ::event-interceptors [impl/kv-interceptor]
+           ::event-error-handler
+           (fn [env ev origin ex]
+             ;; re-throwing is total shit in JS, so instead just use console
+             ;; if users want to handle this differently they can replace this fn
+             (js/console.error "--- FAILED TO PROCESS EVENT ---" ev)
+             (js/console.error ex)
+             ::failed!)
            ::fx-config {}
            ::env-init []})]
 
@@ -459,8 +466,7 @@
    (add-kv-table rt-ref kv-table config {}))
   ([rt-ref kv-table config init-data]
    (swap! rt-ref assoc-in [::kv kv-table]
-     (kv/init kv-table config
-       (make-table-navigable config init-data)))
+     (kv/init kv-table config init-data))
    rt-ref))
 
 ;; just more convenient to do this directly

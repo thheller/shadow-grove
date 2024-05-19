@@ -384,72 +384,78 @@
     (if-not handler
       (unhandled-event-ex! ev-id ev origin)
 
-      (let [tx-guard
-            (js/Object.)
+      (try
+        (let [tx-guard
+              (js/Object.)
 
-            tx-done-ref
-            (atom false)
+              tx-done-ref
+              (atom false)
 
-            tx-env
-            ;; only set use namespaced keys
-            ;; must avoid clashing with kv-tables overriding them
-            (-> {::tx-guard tx-guard
-                 ::sg/runtime-ref rt-ref
-                 ::sg/tx-after (list) ;; FILO
-                 ::sg/fx []
-                 ::sg/origin origin}
-                (cond->
-                  (map? ev)
-                  (assoc ::sg/event ev)))
+              tx-env
+              ;; only set use namespaced keys
+              ;; must avoid clashing with kv-tables overriding them
+              (-> {::tx-guard tx-guard
+                   ::sg/runtime-ref rt-ref
+                   ::sg/tx-after (list) ;; FILO
+                   ::sg/fx []
+                   ::sg/origin origin}
+                  (cond->
+                    (map? ev)
+                    (assoc ::sg/event ev)))
 
-            tx-env
-            (call-interceptors event-interceptors tx-env)
+              tx-env
+              (call-interceptors event-interceptors tx-env)
 
-            handler-result
-            (handler tx-env ev)
+              handler-result
+              (handler tx-env ev)
 
-            result
-            (merge-result tx-env ev handler-result)
+              result
+              (merge-result tx-env ev handler-result)
 
-            result
-            (call-interceptors (::sg/tx-after result) result)]
+              result
+              (call-interceptors (::sg/tx-after result) result)]
 
-        ;; FIXME: re-frame allows fx to edit db but we already committed it
-        ;; currently not checking fx-fn return value at all since they supposed to run side effects only
-        ;; and may still edit stuff in env, just not db?
+          ;; FIXME: re-frame allows fx to edit db but we already committed it
+          ;; currently not checking fx-fn return value at all since they supposed to run side effects only
+          ;; and may still edit stuff in env, just not db?
 
-        ;; dispatching async so render can get to it sooner
-        ;; dispatching these async since they can never do anything that affects the current render right?
-        (rt/next-tick
-          (fn []
-            (doseq [[fx-key value] (::sg/fx result)]
-              (let [fx-fn (get fx-config fx-key)
+          ;; dispatching async so render can get to it sooner
+          ;; dispatching these async since they can never do anything that affects the current render right?
+          (rt/next-tick
+            (fn []
+              (doseq [[fx-key value] (::sg/fx result)]
+                (let [fx-fn (get fx-config fx-key)
 
-                    fx-env
-                    (assoc result
-                      ;; creating this here so we can easily track which fx caused further work
-                      ;; technically all fx could run-now! directly given they have the scheduler from the env
-                      ;; but here we can easily track tx-done-ref to ensure fx doesn't actually immediately trigger
-                      ;; other events when they shouldn't because this is still in run-now! itself
-                      ;; FIXME: remove this once this is handled directly in the scheduler
-                      ;; run-now! inside run-now! should be a hard error
-                      :transact!
-                      (fn [fx-tx]
-                        (when-not @tx-done-ref
-                          (throw (ex-info "cannot start another tx yet, current one is still running. transact! is meant for async events" {})))
+                      fx-env
+                      (assoc result
+                        ;; creating this here so we can easily track which fx caused further work
+                        ;; technically all fx could run-now! directly given they have the scheduler from the env
+                        ;; but here we can easily track tx-done-ref to ensure fx doesn't actually immediately trigger
+                        ;; other events when they shouldn't because this is still in run-now! itself
+                        ;; FIXME: remove this once this is handled directly in the scheduler
+                        ;; run-now! inside run-now! should be a hard error
+                        :transact!
+                        (fn [fx-tx]
+                          (when-not @tx-done-ref
+                            (throw (ex-info "cannot start another tx yet, current one is still running. transact! is meant for async events" {})))
 
-                        (gp/run-now! ^not-native (::sg/scheduler env) #(process-event rt-ref fx-tx origin) [::fx-transact! fx-key])))]
+                          (gp/run-now! ^not-native (::sg/scheduler env) #(process-event rt-ref fx-tx origin) [::fx-transact! fx-key])))]
 
-                (if-not fx-fn
-                  (throw (ex-info (str "unknown fx " fx-key) {:fx-key fx-key :fx-value value}))
+                  (if-not fx-fn
+                    (throw (ex-info (str "unknown fx " fx-key) {:fx-key fx-key :fx-value value}))
 
-                  (fx-fn fx-env value))))))
+                    (fx-fn fx-env value))))))
 
-        (do-tx-report result)
+          (do-tx-report result)
 
-        (reset! tx-done-ref true)
+          (reset! tx-done-ref true)
 
-        (:return result)))))
+          (:return result))
+
+        (catch :default e
+          (let [event-error-handler (::sg/event-error-handler env)]
+            (event-error-handler env ev origin e))
+          )))))
 
 (defn lazy-seq? [thing]
   (and (instance? cljs.core/LazySeq thing)
