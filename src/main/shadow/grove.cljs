@@ -314,7 +314,7 @@
 ;; makes it slightly nicer to browse/explore
 
 ;; this is all basically free, so keeping it in release builds for now
-;; build report shows a 0.03kb gzip size difference
+;; build report shows a 0.3kb gzip size difference
 ;; it is however never used, so might as well remove it
 
 (defn make-kv-navigable [init-data]
