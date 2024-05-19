@@ -3,6 +3,7 @@
    a mini re-frame/fulcro hybrid. re-frame event styles + somewhat normalized db"
   (:require-macros [shadow.grove])
   (:require
+    [clojure.core.protocols :as cp]
     [goog.async.nextTick]
     [shadow.arborist.protocols :as ap]
     [shadow.arborist.common :as common]
@@ -309,6 +310,43 @@
 
         (set! update-pending? false)))))
 
+;; using datafy/nav tools (e.g. Inspect) can jump between tables with this
+;; makes it slightly nicer to browse/explore
+
+;; this is all basically free, so keeping it in release builds for now
+;; build report shows a 0.03kb gzip size difference
+;; it is however never used, so might as well remove it
+
+(defn make-kv-navigable [init-data]
+  (with-meta init-data
+    {`cp/nav
+     (fn [kv table-id table]
+       ;; keep a reference to the kv map, so that table nav can jump between tables
+       (vary-meta table assoc ::kv kv))}))
+
+(defn make-table-navigable [config init-data]
+  (vary-meta init-data assoc
+    `cp/nav
+    (fn [table k v]
+      ;; only navigate further on maps for now
+      (if-not (map? v)
+        v
+        (vary-meta v assoc
+          `cp/nav
+          (fn [entry k v]
+            ;; e.g. :runtime-id nil, can't navigate further if value was nil
+            (if (nil? v)
+              v
+              (let [fk-reference (get-in config [:attrs k :references])]
+                (if-not fk-reference
+                  v
+                  ;; continue navigating in the kv state this originally came from only (provided by make-kv-navigable)
+                  ;; need to nav so this nav metadata is applied, otherwise it can just navigate once
+                  (let [kv (::kv (meta table))
+                        table (cp/nav kv fk-reference (get kv fk-reference))]
+                    (cp/nav table v (get table v)))
+                  )))))))))
+
 (defn- prepare [app-id]
   (when (get @rt/known-runtimes-ref app-id)
     (throw
@@ -325,7 +363,7 @@
            ::roots #{}
            ::scheduler root-scheduler
            ::app-id app-id
-           ::kv {}
+           ::kv (make-kv-navigable {})
            ::event-config {}
            ::event-interceptors [impl/kv-interceptor]
            ::fx-config {}
@@ -420,7 +458,9 @@
   ([rt-ref kv-table config]
    (add-kv-table rt-ref kv-table config {}))
   ([rt-ref kv-table config init-data]
-   (swap! rt-ref assoc-in [::kv kv-table] (kv/init kv-table config init-data))
+   (swap! rt-ref assoc-in [::kv kv-table]
+     (kv/init kv-table config
+       (make-table-navigable config init-data)))
    rt-ref))
 
 ;; just more convenient to do this directly
