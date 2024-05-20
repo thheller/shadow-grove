@@ -330,6 +330,9 @@
                         (identical? lv NOT-FOUND)
                         (str idx " +")
 
+                        (identical? rv NOT-FOUND)
+                        (str idx " -")
+
                         (= lv rv)
                         (str idx " =")
 
@@ -341,6 +344,9 @@
                     (cond
                       (identical? lv NOT-FOUND)
                       (render-edn rv)
+
+                      (identical? rv NOT-FOUND)
+                      (click-to-show "value was removed" lv)
 
                       (= lv rv)
                       (render-edn rv)

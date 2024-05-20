@@ -451,7 +451,7 @@
             {:op ::m/stream-update
              :to streams
              :event {:type :dev-log
-                     :ts (js/Date.now)
+                     ::m/ts (js/Date.now)
                      :header header
                      :log log-struct
                      :src-info src-info}
