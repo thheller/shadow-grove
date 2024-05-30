@@ -6,6 +6,9 @@
 (defprotocol IObserved
   (observed-keys [this]))
 
+(defn is-nil-allowed? [data]
+  (:allow-nil-key? (::config (meta data))))
+
 (deftype ObservedData [^:mutable seq-used ^:mutable keys-used ^not-native data]
   IObserved
   (observed-keys [_]
@@ -39,13 +42,15 @@
   ILookup
   (-lookup [_ key]
     (when (nil? key)
-      (throw (ex-info "cannot read nil key" {})))
+      (when-not (is-nil-allowed? data)
+        (throw (ex-info "cannot read nil key" {}))))
     (set! keys-used (conj! keys-used key))
     (-lookup data key))
 
   (-lookup [_ key default]
     (when (nil? key)
-      (throw (ex-info "cannot read nil key" {})))
+      (when-not (is-nil-allowed? data)
+        (throw (ex-info "cannot read nil key" {}))))
     (set! keys-used (conj! keys-used key))
     (-lookup data key default)))
 
@@ -126,6 +131,10 @@
 
   (-assoc [this key value]
     (.check-completed! this)
+
+    (when (nil? key)
+      (when-not (is-nil-allowed? data)
+        (throw (ex-info "nil key not allowed" {:value value}))))
 
     ;; validation should be done here and not in tx interceptor after
     ;; should fail as soon as possible, so dev knows where invalid data was written

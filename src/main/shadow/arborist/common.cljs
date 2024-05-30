@@ -164,3 +164,33 @@
   nil
   (as-managed [this env]
     (managed-text env this)))
+
+
+;; helper for components returning a single DOM element they want to manage
+;; mostly useful for interop reasons where creating a fragment with a single node and ref is overkill
+(deftype NativeElement [node]
+  p/IConstruct
+  (as-managed [this env]
+    this)
+
+  p/IManaged
+  (dom-first [this] node)
+
+  (dom-insert [this parent anchor]
+    (.insertBefore parent node anchor))
+
+  (dom-entered! [this])
+
+  (supports? [this next]
+    (and (instance? NativeElement next)
+         (identical? node (.-node next))))
+
+  (dom-sync! [this next]
+    :synced)
+
+  (destroy! [this ^boolean dom-remove?]
+    (when dom-remove?
+      (.remove node))))
+
+(defn native-el [node]
+  (NativeElement. node))
