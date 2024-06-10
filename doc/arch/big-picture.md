@@ -1,10 +1,10 @@
 # How it all fits together
 
-So far most posts have only covered certain aspects such as the core arborist protocol, components, the normalized db, the scheduler and so on. While each piece individually is interesting they all need to work together to achieve the bigger picture.
+Everything in `shadow-grove` is done so that each piece can work together as efficiently as possible while still providing a reasonable developer experience and a good UX, basically measured in performance. The goal is creating and updating a possibly large tree-like structure. Each Node in the Tree can only have one parent, but as many leaf nodes as needed. Each Node may represent zero or more actual DOM nodes. There is no 1:1 "Virtual DOM" correlation as there would be in a system such as React. The "application root" generally sits at the top, and the tree goes down. It seems like it should be the other way, but this is the more common way to think about things.
 
-Everything is done so that each piece can work together as efficiently as possible while still providing a reasonable developer experience and a good UX (basically measured in performance).
+The core of everything is data and how it is handled.
 
-I'll try to explain everything based on the common TodoMVC example. Using a data layout such as
+I'll try to explain everything based on the common TodoMVC example. A List of Todos that can be toggled completed or not. Expressed as EDN, this might start with layout such as:
 
 ```clojure
 (def data
@@ -18,184 +18,137 @@ I'll try to explain everything based on the common TodoMVC example. Using a data
      :text "do c"}]})
 ```
 
-We follow the "props flow down, events bubble up" rendering model (similar to React). So one naive way to do all this would be just calling `(ui-root data)`. Pass in all data at the root and go from there. This quickly becomes a nightmare to maintain and also very inefficient since any update will need to be re-rendered from the root completely. No precise targeted updates possible.
+We follow the "data flows down, events flow up" rendering model (similar to React). So one naive way to do all this would be just calling `(ui-root data)`. Pass in all data at the root and go from there. This does work and is reasonably fast. However, in my experience, this does not scale to larger apps. Scale as in the performance characteristics, but also from the developer ergonomics having to create a structure that contains all data from the root.
 
-Om tried to optimize this approach using `cursors`, which alleviates some of the pain but also makes other things much harder. You really want the option to gain access to all data everywhere. Your UI may not match your data layout exactly so we need to decouple this.
-
-## Normalizing the DB
-
-Since the core of all of this is the data we need to bring this into a somewhat reasonable shape. It can be argued that the above is already the best shape. In some way it is. From the library perspective this however has certain issues. Say we want to mark `:todo-id 3` as completed. We first need to somehow find its index in the `:todos` vector, and then update the todo item. In turn, we also update the `:todos` vector itself. When it is time to update the UI we need to find what changed again, essentially checking everything.
-
-So we normalize this data first to remove depth and get everything as flat as reasonable but not flatter.
-
-```clojure
-;; data normalized becomes
-
-(def data
-  {:todos
-   [[:todo 1]
-    [:todo 2]
-    [:todo 3]]
-
-   [:todo 1]
-   {:todo-id 1
-    :text "do a"}
-   
-   [:todo 2]
-   {:todo-id 2
-    :text "do b"
-    :completed? true}
-   
-   [:todo 3]
-   {:todo-id 3
-    :text "do c"}})
-```
-
-Now we can update `[:todo 3]` directly without having to touch `:todos` at all. In fact `:todos` remains `identical?` and very efficient to check if it needs to update. We avoid the "What The Heck Just Happened?" problem entirely by tracking which parts of the `db` were updated.
+Instead, a few techniques can be used to make that more reasonable at scale.
 
 ## Components
 
-With "props flow down, events bubble up" we could still just pass the entire db at the root. Just by normalizing, this would actually be more efficient than before. The burden is still on the developer to pass this down manually everywhere though.
+Essentially, they take control over their "branch" of the entire tree. They manage their own lifecycle and events. Instead of having one place that handles all possible events, each component handles its subset of those events with the option to pass them further up.
 
-Components however provide a controlled way to inject data into the tree. They can manage their lifecycle in the DOM and as such can properly handle changes to the data and update accordingly.
+In addition, they may introduce new data into the tree that was not passed in from the root. They can also control which shape this data is in, without other places needing to know that.
 
-## EQL Queries
+Components are created using the `defc` macro, which is covered elsewhere.
 
-Components themselves however don't actually manage any data. They only provide a generic abstraction for hooking into their lifecycle and handling data is left to more specializing implementations.
+## Normalizing The Data
 
-The default abstraction here is based on EQL (popularized by fulcro, pathom, etc.). It provides a good way for components to express their data needs while also making a reasonable remote interface.
+The goal of normalizing data is basically the same as for any other database system (e.g. SQL), which basically comes down to removing duplication and gaining direct access for reads and writes.
 
-It also happens to provide a way to turn the normalized data back into something tree-like.
+For example in the above data example, we might want to toggle the `:completed?` state of `:todo-id 2`. We could do this directly via `(update-in data [:todos 1 :completed?] not)`, but this requires knowing the index you are manipulating. Notice the `1` there. That index may change if a todo is added before that, or if they are re-ordered in any other way. Handling indexes is cumbersome, especially if data is organized in many different shapes.
+
+Instead, we organize the data to be accessible by its unique id, `:todo-id` in this case.
 
 ```clojure
-(defc ui-todo [ident]
-  (bind {:keys [text]})
-    (sg/query-ident ident)
-
-  (render
-    (<< [:li text])))
-
-(defc ui-root []
-  (bind {:keys [todos]}
-    (sg/query-root [:todos]))
-    
-  (render
-    (<< [:h1 "todos"]
-        [:ul
-         (sg/keyed-seq todos identity ui-todo)])))
-
-(sg/render ... (ui-root))
+(def data
+  {:todos
+   {1 {:todo-id 1
+       :text "do a"}
+    2 {:todo-id 2
+       :text "do b"
+       :completed? true}
+    3 {:todo-id 3
+       :text "do c"}}})
 ```
 
-In this we provide no data via the `ui-root` at all. Instead, it queries the "root" of the database for the `:todos` attribute. They are then rendered as a collection using the `ui-todo` component. Each `ui-todo` will receive the ident of the todo it is supposed to render. It will use this to query the data again from the DB. It doesn't specify the EQL attributes it wants here, which is just short for `(get db ident)` but `(sg/query-ident ident [:text])` would be valid and only provide the `{:text ...}` map instead of the complete one.
+Now, there is a clear path to each individual todo. Regardless of the place they might be rendered in. Grove calls this a table, but the actual implementation is just a regular map, with some extra rules we'll cover elsewhere.
 
-What we end up with is 4 mounted queries. The first read the `:todos` key and nothing else. It will only update if `:todos` changes. The other three just read their ident. So updating `[:todo 3]` will not cause `[:todo 2]` to update.
-
-Queries manage their data needs and signal components when they need to update.
+Components can either directly access a path in that data, similar to `(get-in data [:todos 2])`, or still receive the full `data` and get whatever they need in other ways. From the developer's perspective, everything is just regular EDN data.
 
 ## Handling Events
 
-The above all handles data flowing down the component tree. Everything can access the part of the data they need when they need it. Queries maintain who accessed what and can surgically trigger updates.
+We also need to handle updating data in some way. Events are often triggered by some user event, such as clicking a button. They may also happen without user action, such as receiving data from the network.
 
-Those updates can come from many places but most often they will be triggered by something the user does in the UI -- clicking a button.
+Events are expressed as data. Component/User events as a general rule will travel up in the tree from their source. Components get the first chance to handle their own events. If they don't, the parent is tried, continuing all the way to the root of the application.
 
-Events are expressed as data. Keeping with "props flow down, events bubble up," each component in the path is given a chance to handle it.
+### Component Events
 
-Suppose we want to add a button you can click to complete a certain todo.
+Suppose we want to add a button the user can click to complete a certain todo.
 
 ```clojure
-(defc ui-todo [ident]
-  (bind {:keys [text]})
-    (sg/query-ident ident)
+(defc ui-todo [todo-id]
+  (bind {:keys [text]}
+    (sg/kv-lookup :todos todo-id))
 
   (render
-    (<< [:li text [:button {:on-click ::complete!}]])))
+    (<< [:li text
+         [:button {:on-click {:e ::complete! :todo-id todo-id}} "complete me"]])))
 ```
 
 We could handle this event directly in the component by declaring an event handler.
 
 ```clojure
-(defc ui-todo [ident]
-  (bind {:keys [text]})
-    (sg/query-ident ident)
+(defc ui-todo  [todo-id]
+  (bind {:keys [text completed?]}
+    (sg/kv-lookup :todos todo-id))
 
-  (event ::complete! [env ev e]
+  (event :complete! [env ev e]
     ;; handle complete!
     )
   
   (render
     (<< [:li text
-         [:button {:on-click ::complete!} "complete me"]])))
+         [:button {:on-click {:e :complete! :todo-id todo-id}} "complete me"]])))
 ```
 
-However, it is not the job of the component to handle database concerns. It should strictly focus on only updating the DOM. It will already receive updates it may need from the query. So we don't declare this event handler in the component and instead just let it bubble up.
+However, it is not the job of the component to handle database concerns. It should focus on only updating the DOM. So we don't need to declare this event handler in the component and instead just let it bubble up for this case.
 
-`ev` is a event map. `:on-click ::complete!` basically is just short for `:on-click {:e ::complete!}`. They are maps so you can easily provide more data in events. You could provide `:on-click {:e ::complete! :todo ident}` here to the `ev` map will contain the ident of the todo we want to update.
+The arguments received by the event handler are
 
-The purpose of these component declared event handlers is essentially to give it a chance to extract data they may need out of the DOM before passing it along. `e` is the actual DOM `click` event.
+- `env` for the component environment, more on that later
+- `ev` is a event map, e.g. `{:e :complete! :todo-id 2}`. `:e` is the reserved keyword to identify the event.
+- `e` is the actual DOM `click` event.
 
-So in a proper UI we might instead use a checkbox and would want to get the checked state out if the DOM 
+The purpose of these component declared event handlers is to give it a chance to extract data they may need out of the DOM before passing it along. In a proper UI, we might instead use a checkbox and would want to get the checked state out if the DOM 
 
 ```clojure
-(defc ui-todo [ident]
-  (bind {:keys [text]})
-    (sg/query-ident ident)
+(defc ui-todo  [todo-id]
+  (bind {:keys [text completed?]}
+    (sg/kv-lookup :todos todo-id))
 
-  (event ::complete! [env ev e]
+  (event :toggle-complete! [env ev e]
     (sg/dispatch-up! env
       (assoc ev
-        :ident ident
+        :todo-id todo-id
         :checked (.. e -target -checked))))
   
   (render
     (<< [:li
          [:label
-          [:input {:type "checkbox" :on-change ::complete!}]
+          [:input {:type "checkbox" :on-change :toggle-complete!}]
           text]])))
 ```
 
-So here we get the `:checked` boolean from the target DOM element via `e`. Since we handled this event in the component it would stop there. However via `dispatch-up!` we let the event continue up the tree with some extra data we added. Whether you add `ident` there or on the `:on-click` definition doesn't really matter much and is up to personal taste.
+`sg/dispatch-up!` is the helper function which will make the event continue its travel up the tree, giving other components a chance to react as well. This also adds the `:todo-id` to the event map, which saves having to do that during the DOM construction. `:on-click :toggle-complete!` is syntax sugar for `:on-click {:e :toggle-complete!}`, the event triggered is still that map. This is optional. Given that the event is just a map, the component could assoc another `:e` so that an internal component event continues its travel as a domain-specific event further up.
 
-The goal should be that events speak for themselves without any further context needed.
+### Application Events
 
-## Event Subsystem
+Once the event has traversed the Component tree and reaches the top unhandled, or re-dispatched, the actual useful handling begins. Now data can be updated, and after that is done the components will update to render the changed data. Very much like the [re-frame event loop](https://day8.github.io/re-frame/a-loop/#the-data-loop) would.
 
-Once the event is done traversing the Component tree and reaches the top unhandled (or re-dispatched) the actual useful handling begins. At this point the DOM event is dropped. The event is pure data and could just be passed to a server and handled there.
-
-The event subsystem is very similar to `re-frame`. Events are maps of data instead of vectors though.
-
-When the event is handled by the root first a transaction is started. The event handler will receive two arguments, first the `tx-env` and second the `ev` event map.
-
-Event handlers can be registered by `(ev/reg-event rt-ref ::complete! (fn [tx-env ev] ...))` or via the metadata tools if set up properly.
+Event handlers can be registered by the `sg/reg-event` function.
 
 ```clojure
-(defn complete!
-  {::ev/handle ::complete!}
-  [tx-env ev]
-  ...)
+(sg/reg-event rt-ref :toggle-complete!
+  (fn [tx-env ev]
+    ...))
 ```
 
-As far as event handling is concerned these are identical. I just happen to like the metadata approach since it makes these kinds of functions easily callable from the REPL and much more composable as well.
-
-So, the `tx-env` argument will have a `:db` attribute which contains a "transacted" db instance. Basically just the regular clojure map with some added modification tracking. You work with it like any other regular clojure map (eg. `assoc`, `update`, `dissoc`) but at the end of the transaction the system cheaply recorded what was actually done.
-
-As a general rule all event handlers must return a potentially updated `tx-env`. In a `re-frame` system you would return a new map with an updated `:db`. By returning `tx-env` however it becomes easier to compose events, since you always pass around the entire context.
-
-So a simple event handler could just assoc what we need into the database.
+When the event is handled by the root first a transaction is started. The event handler fn will receive two arguments, first the `tx-env` and second the `ev` event map. `tx-env` is the map events are going to change and return. It contains all the data managed by grove. Grove organizes data into tables, and using our previous `data` examples `:todos` would be such a table. A simple event handler would just assoc the data we need.
 
 ```clojure
-(defn complete!
-  {::ev/handle ::complete!}
-  [tx-env {:keys [checked ident] :as ev}]
-  (assoc-in tx-env [:db ident :completed?] checked))
+(sg/reg-event rt-ref :toggle-complete!
+  (fn [tx-env {:keys [todo-id checked] :as ev}]
+    (assoc-in tx-env [:todos todo-id :completed?] checked)))
 ```
 
-Once the event completes, the transaction sees that `ident` was updated. It'll then check which queries used that ident, when rendering, and signal that they need to be updated.
+Just regular CLJS functions working with data. Nothing special from the developer perspective.
 
-The scheduler coordinates that everything updates in the proper order and any potential changes are propagated to the actual live DOM.
+The implementation will actually track what was updated, so it knows that `:todo-id 2` was changed cheaply without having to check all the others. With this information, the runtime can trigger a direct update of the components referencing this todo without having to re-render from the root.
 
-TBD:
-- history/routing
-- fx/remote
-- suspense
-- keyboard
+## Where to go from here?
+
+I hope you got a broad overview of how the system works. Each Thing is covered in more detail elsewhere.
+
+- Grove Application, represented by `rt-ref` in the examples above, short for "runtime ref". Basically the `atom` holding all application state.
+- Components, via `defc` and their `env`
+- Grove KV
+- Data Transactions via `reg-event` + `tx-env`.
