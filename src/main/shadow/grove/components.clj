@@ -145,13 +145,12 @@
     deps))
 
 (defn add-destructure-binding
-  ([state ref-name binding-name kw defaults]
+  ([state ref-name binding-name key defaults]
    (add-destructure-binding
      state ref-name binding-name
-     `(get ~ref-name ~kw ~@(when-some [default (get defaults binding-name)]
-                             [default]))))
+     [:lookup key (get defaults binding-name)]))
 
-  ([{:keys [comp-sym slot-idx] :as state} ref-name binding-name accessor]
+  ([{:keys [bindings slot-idx] :as state} ref-name binding-name access-type]
    (-> state
        (update-affects #{ref-name} slot-idx)
        (assoc-in [:bindings binding-name]
@@ -173,9 +172,24 @@
                        :line (:line (meta binding-name))}
           :provides binding-name
           :run
-          `(fn [~comp-sym]
-             (let ~(let-bindings state #{ref-name})
-               ~accessor))})
+          (case (first access-type)
+            :lookup
+            (let [[_ key default] access-type
+                  {:keys [type idx] :as src} (get bindings ref-name)]
+              (case type
+                :arg `(arg-destructure ~idx ~key ~default)
+                :slot `(slot-destructure ~idx ~key ~default)))
+
+            :rest
+            (let [[_ drop] access-type
+                  {:keys [type idx] :as src} (get bindings ref-name)]
+              (case type
+                :arg `(arg-destructure-tail ~idx ~drop)
+                :slot `(slot-destructure-tail ~idx ~drop))))
+
+          #_(fn [~comp-sym]
+              (let ~(let-bindings state #{ref-name})
+                ~accessor))})
        (update :slot-idx inc))))
 
 (defn slot-destructure-map
@@ -254,8 +268,7 @@
         (case k
           :as state ;; handled earlier, no need to do anything
           & (add-destructure-binding state ref-name v
-              ;; forcing destructured rest into a vector to force any potential lazy seqs
-              `(vec (drop ~(count idx-syms) ~ref-name)))
+              [:tail (count idx-syms)])
           (throw (ex-info "invalid vector destructure" {:k k :v v}))))
       state
       kv)))

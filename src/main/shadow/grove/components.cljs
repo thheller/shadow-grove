@@ -660,6 +660,27 @@
 (defn get-slot-value [^ManagedComponent comp idx]
   (.get-slot-value comp idx))
 
+(defn arg-destructure [arg-idx lookup default]
+  (fn [comp]
+    (let [val (get-arg comp arg-idx)]
+      (get val lookup default))))
+
+(defn arg-destructure-tail [arg-idx n-to-drop]
+  (fn [comp]
+    (let [val (get-arg comp arg-idx)]
+      ;; forcing a vec, just in case something lazy creeps into this
+      (vec (drop n-to-drop val)))))
+
+(defn slot-destructure [slot-idx lookup default]
+  (fn [comp]
+    (let [val (get-slot-value comp slot-idx)]
+      (get val lookup default))))
+
+(defn slot-destructure-tail [slot-idx n-to-drop]
+  (fn [comp]
+    (let [val (get-slot-value comp slot-idx)]
+      (vec (drop n-to-drop val)))))
+
 (defn get-events [^ManagedComponent comp]
   ;; FIXME: ... loses typehints?
   (. ^clj (. comp -config) -events))
