@@ -634,8 +634,7 @@
           render-deps
           render-fn
           events
-          (when ^boolean js/goog.DEBUG
-            debug-info))]
+          debug-info)]
 
     (when ^boolean js/goog.DEBUG
       (swap! components-ref assoc component-name cfg))

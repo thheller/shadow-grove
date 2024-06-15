@@ -555,6 +555,9 @@
             (rkv-> analyze-arg args)
             (r-> analyze-slot slots))
 
+        include-debug-info?
+        (not= :release (:shadow.build/mode &env))
+
         opts
         (let [stable-args
               (reduce-kv
@@ -594,7 +597,8 @@
                             ~(reduce bit-set 0 depends-on)
                             ~(reduce bit-set 0 affects)
                             ~run
-                            ~debug-info)))))
+                            ~(when include-debug-info?
+                               debug-info))))))
          ~(make-dirty-bits 0 (count (:slots state)))
          ~(or opts {})
          ;; fn that checks args and invalidates slots or sets render-required
@@ -618,11 +622,12 @@
          ~(reduce bit-set 0 render-deps)
          ~render-fn
          ~(:events state)
-         ~(let [m (meta comp-name)]
-            {:args (->> (:args state) (map :name) (mapv str))
-             :file (:file m)
-             :line (:line m)
-             :column (:column m)})
+         ~(when include-debug-info?
+            (let [m (meta comp-name)]
+              {:args (->> (:args state) (map :name) (mapv str))
+               :file (:file m)
+               :line (:line m)
+               :column (:column m)}))
          ))))
 
 (comment
