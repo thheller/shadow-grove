@@ -162,6 +162,44 @@ shadow.cljs.ui.components.inspect.ui_tap_stream_item =
 
 `:advanced` will also remove all whitespace characters. I just pretty printed it, so the structure is at least somewhat comparable to the above `:simple`. `:advanced` also used to remove the component name entirely. I need to check why it no longer does, it should only be relevant in development code. Overall, I'm not too worried about this being too much code. For what it does, it is pretty compact.
 
+Actually, after I finished writing this doc, I thought of a way to reduce this code even further. So now it is
+
+```js
+  xG = rA(
+    "shadow.cljs.ui.components.inspect/ui-tap-stream-item",
+    [
+      new pA(0, jM(1, Ts)),
+      new pA(0, jM(1, Ou)),
+      qA(56, function (a) {
+        a = sA(a, 0);
+        return YA(Is, a);
+      }),
+      new pA(0, kM(2, Eu, null)),
+      qA(0, function (a) {
+        a = a.get_slot_value(2);
+        return GF(sq, fv.g(a));
+      }),
+      qA(0, function (a) {
+        var b = a.get_slot_value(2);
+        return Oy($x, function (c) {
+          return jB(c, b);
+        });
+      }),
+    ],
+    63,
+    I,
+    function (a, b, c) {
+      kk(b.D(null, 0), c.D(null, 0)) &&
+        (nG(a), a.mark_dirty_from_args_BANG_(4));
+      kk(b.D(null, 1), c.D(null, 1)) && a.mark_dirty_from_args_BANG_(3);
+    },
+    26,
+    function (a) { ... the-render-code ... },
+    I);
+```
+
+955 -> 783 bytes. Not super impressive, but this component doesn't destructure much to begin with. Less code is always good. Basically, all this does now is use generic helper function to do the destructuring, instead of creating a new one each time. Functionality remains the same.
+
 Basically `shadow.grove.components.make_component_config` is called with an array representing the Slots, some extra bitmasks, an argument checking function and a render function. `make-component_config` returns a `ComponentConfig` deftype instance. This implements the CLJS `IFn` protocol, making them usable like functions. There is only one component type, used by all components. There is no `class` per component.
 
 The few numbers sprinkled in there, which are the bitmasks (e.g. `2r0100`) and will be used by the implementation to check what work needs to be done. Internally each component maintains a `dirty-slots` integer and if a Slot changes it is updated to `(bit-or dirty-slots (.-affects slot-config))`. Each Slot will check `(bit-and dirty-slots (.-depends-on slot-config))`, to check whether it needs to run. Using bits for efficiency. The first iteration used CLJS sets and was substantially slower.
