@@ -117,7 +117,7 @@
       nil
 
       (fn? ev-value)
-      (ev-value dom-event)
+      (ev-value dom-event env)
 
       :else
       (let [^not-native ev-handler (::p/dom-event-handler env)]

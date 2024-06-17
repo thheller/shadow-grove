@@ -365,6 +365,7 @@
 (defn process-event
   [rt-ref
    ev
+   dom-ev
    origin]
   {:pre [(or (fn? ev) (map? ev))]}
 
@@ -407,7 +408,7 @@
               (call-interceptors event-interceptors tx-env)
 
               handler-result
-              (handler tx-env ev)
+              (handler tx-env ev dom-ev)
 
               result
               (merge-result tx-env ev handler-result)
@@ -439,7 +440,7 @@
                           (when-not @tx-done-ref
                             (throw (ex-info "cannot start another tx yet, current one is still running. transact! is meant for async events" {})))
 
-                          (gp/run-now! ^not-native (::sg/scheduler env) #(process-event rt-ref fx-tx origin) [::fx-transact! fx-key])))]
+                          (gp/run-now! ^not-native (::sg/scheduler env) #(process-event rt-ref fx-tx nil origin) [::fx-transact! fx-key])))]
 
                   (if-not fx-fn
                     (throw (ex-info (str "unknown fx " fx-key) {:fx-key fx-key :fx-value value}))

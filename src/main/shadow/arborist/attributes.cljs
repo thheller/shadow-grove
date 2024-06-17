@@ -177,34 +177,36 @@
           ;; FIXME: should maybe allow to just use a function as value
           ;; skipping all the ev-handler logic and just calling it as a regular callback
           (when (some? nval)
-            (let [^not-native ev-handler (::p/dom-event-handler env)]
+            (if (fn? nval)
+              (.addEventListener node event (fn [e] (nval e env)))
+              (let [^not-native ev-handler (::p/dom-event-handler env)]
 
-              (when-not ev-handler
-                (throw (ex-info "missing dom-event-handler!" {:env env :event event :node node :value nval})))
+                (when-not ev-handler
+                  (throw (ex-info "missing dom-event-handler!" {:env env :event event :node node :value nval})))
 
-              (when ^boolean js/goog.DEBUG
-                ;; validate value now in dev so it fails on construction
-                ;; slightly better experience than firing on-event
-                ;; easier to miss in tests and stuff that don't test particular events
-                (p/validate-dom-event-value! ev-handler env event nval))
+                (when ^boolean js/goog.DEBUG
+                  ;; validate value now in dev so it fails on construction
+                  ;; slightly better experience than firing on-event
+                  ;; easier to miss in tests and stuff that don't test particular events
+                  (p/validate-dom-event-value! ev-handler env event nval))
 
-              (let [ev-fn
-                    (fn [dom-event]
-                      (p/handle-dom-event! ev-handler env event nval dom-event))
+                (let [ev-fn
+                      (fn [dom-event]
+                        (p/handle-dom-event! ev-handler env event nval dom-event))
 
-                    ev-opts
-                    #js {}
+                      ev-opts
+                      #js {}
 
-                    ev-fn
-                    (if-not (map? nval)
                       ev-fn
-                      (maybe-wrap-ev-fn ev-fn nval ev-opts))]
+                      (if-not (map? nval)
+                        ev-fn
+                        (maybe-wrap-ev-fn ev-fn nval ev-opts))]
 
-                ;; FIXME: ev-opts are not supported by all browsers
-                ;; closure lib probably has something to handle that
-                (.addEventListener node event ev-fn ev-opts)
+                  ;; FIXME: ev-opts are not supported by all browsers
+                  ;; closure lib probably has something to handle that
+                  (.addEventListener node event ev-fn ev-opts)
 
-                (unchecked-set node ev-key ev-fn))))))
+                  (unchecked-set node ev-key ev-fn)))))))
 
       :else
       (let [prop (gstr/toCamelCase prop-name)]

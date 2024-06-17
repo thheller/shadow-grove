@@ -91,13 +91,15 @@
         (apply update-fn state args)))))
 
 (defn run-tx
-  [{::keys [runtime-ref] :as env} tx]
-  (impl/process-event runtime-ref tx env))
+  ([{::keys [runtime-ref] :as env} tx]
+   (impl/process-event runtime-ref tx nil env))
+  ([{::keys [runtime-ref] :as env} tx dom-event]
+   (impl/process-event runtime-ref tx dom-event env)))
 
 (defn run-tx! [runtime-ref tx]
   (assert (rt/ref? runtime-ref) "expected runtime ref?")
   (let [{::keys [scheduler]} @runtime-ref]
-    (gp/run-now! scheduler #(impl/process-event runtime-ref tx nil) ::run-tx!)))
+    (gp/run-now! scheduler #(impl/process-event runtime-ref tx nil nil) ::run-tx!)))
 
 (defn unmount-root [^js root-el]
   (when-let [^sa/TreeRoot root (.-sg$root root-el)]
@@ -201,9 +203,7 @@
 (deftype RootEventTarget [rt-ref]
   gp/IHandleEvents
   (handle-event! [this ev-map e origin]
-    ;; dropping DOM event since that should have been handled elsewhere already
-    ;; or it wasn't relevant to begin with
-    (impl/process-event rt-ref ev-map origin)))
+    (impl/process-event rt-ref ev-map e origin)))
 
 (defn- make-root-env
   [rt-ref root-el]
