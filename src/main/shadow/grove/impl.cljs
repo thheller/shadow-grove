@@ -280,15 +280,9 @@
       (if (nil? handler)
         tx-env
         (try
-          (let [result
-                (try
-                  (handler tx-env)
-                  (catch :default e
-                    (throw (ex-info "interceptor failed" {:interceptor handler} e))))]
-
+          (let [result (handler tx-env)]
             (when-not (identical? (::tx-guard result) (::tx-guard tx-env))
               (throw (ex-info "interceptor didn't return tx-env" {:interceptor handler :result result})))
-
             result))))
     tx-env
     interceptors))
