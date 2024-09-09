@@ -121,7 +121,7 @@
    {:pre [(satisfies? IWatchable watchable)
           (satisfies? IDeref watchable)]}
    (if (vector? path-or-fn)
-     (comp/atom-watch watchable (fn [old new] (get-in new path-or-fn)))
+     (comp/atom-watch watchable (fn [val] (get-in val path-or-fn)))
      (comp/atom-watch watchable path-or-fn))))
 
 (defn env-watch
