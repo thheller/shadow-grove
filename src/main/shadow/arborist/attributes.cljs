@@ -306,7 +306,7 @@
 (add-attr :dom/ref
   (fn [env node oval nval]
     (cond
-      (nil? nval)
+      (and oval (nil? nval))
       (vreset! oval nil)
 
       (some? nval)
