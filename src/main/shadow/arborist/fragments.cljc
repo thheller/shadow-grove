@@ -153,28 +153,16 @@
         (with-meta form m)))))
 
 (defn maybe-css-join [{:keys [class] :as attrs} html-class]
-  (if-not class
+  (cond
+    (not class)
     (assoc attrs :class html-class)
-    (assoc attrs :class `(css-join ~html-class ~class))))
 
-(defn combine-string-parts [children]
-  (reduce
-    (fn [children child]
-      (cond
-        (nil? children)
-        [child]
+    (vector? class)
+    (assoc attrs :class (into [html-class] class))
 
-        (string-part? child)
-        (let [last-idx (dec (count children))
-              last-val (nth children last-idx)]
-          (if-not (string-part? last-val)
-            (conj children child)
-            (update children last-idx str child)))
-
-        :else
-        (conj children child)))
-    nil
-    children))
+    :else
+    (assoc attrs :class `(css-join ~html-class ~class))
+    ))
 
 (defn can-interpolate-string?
   [children]
@@ -194,14 +182,54 @@
 (defn make-text-content [children]
   {:parts (mapv as-text-content-part children)})
 
-(defn analyze-dom-element [{:keys [parent] :as env} [tag-kw attrs :as el]]
-  (let [[attrs children]
-        (if (and attrs (map? attrs))
-          [attrs (subvec el 2)]
-          [nil (subvec el 1)])
+(defn maybe-merge-class [attrs css]
+  (assoc attrs
+    :class (if-not (contains? attrs :class)
+             css
+             [css (:class attrs)])))
 
-        children
-        (combine-string-parts children)
+(defn last-of-vec [v]
+  (if-not (seq v)
+    nil
+    (nth v (dec (count v)))))
+
+(defn parse-el [el]
+  (reduce-kv
+    (fn [{:keys [children] :as res} idx v]
+      (cond
+        (zero? idx)
+        res
+
+        (and (= 1 idx) (map? v))
+        (assoc res :attrs v)
+
+        (and (= 1 idx) (seq? v) (= 'css (first v)))
+        (assoc res :css v :attrs {:class v})
+
+        (and (= 2 idx) (map? v) (:css res))
+        (assoc res :attrs (maybe-merge-class v (:css res)))
+
+        (and (string-part? v) (string-part? (last-of-vec children)))
+        (update-in res [:children (dec (count children))] str v)
+
+        :else
+        (update res :children conj v)))
+
+    {:attrs {}
+     :children []}
+    el))
+
+(comment
+  (parse-el '[:div (css :p-4) {:foo bar} "hello" "world"])
+  (parse-el '[:div (css :p-4) {:foo bar} "hello" foo "world"])
+  (parse-el '[:div (css :p-4) {:foo bar :class "yo"} "hello" foo "world"])
+  (parse-el '[:div {:foo bar} "hello" 1 2 3 foo "world"])
+  (parse-el '[:div {:foo bar :class (css :x)} "hello" foo "world"])
+  (parse-el '[:div (css :p-4) "hello" "world"]))
+
+(defn analyze-dom-element [{:keys [parent] :as env} [tag-kw :as el]]
+  (let [{:keys [attrs children]}
+        (parse-el el)
 
         [tag html-id html-class]
         (parse-tag tag-kw)
