@@ -395,7 +395,7 @@
                    ::sg/tx-after (list) ;; FILO
                    ::sg/fx []
                    ::sg/origin origin
-                   ::sg/dom-event e}
+                   ::sg/dom-event dom-ev}
                   (cond->
                     (map? ev)
                     (assoc ::sg/event ev)))
