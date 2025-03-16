@@ -1,4 +1,4 @@
-(defproject com.thheller/shadow-grove "1.0.2"
+(defproject com.thheller/shadow-grove "1.0.3"
   :description "A ClojureScript system to build browser based frontends"
   :url "http://github.com/thheller/shadow-grove"
   :license {:name "Eclipse Public License"
