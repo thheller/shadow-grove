@@ -374,7 +374,8 @@
         handler
         (if (fn? ev)
           ev
-          (get event-config ev-id))]
+          (or (::sg/tx (meta ev))
+              (get event-config ev-id)))]
 
     (if-not handler
       (unhandled-event-ex! ev-id ev origin)
@@ -393,7 +394,8 @@
                    ::sg/runtime-ref rt-ref
                    ::sg/tx-after (list) ;; FILO
                    ::sg/fx []
-                   ::sg/origin origin}
+                   ::sg/origin origin
+                   ::sg/dom-event e}
                   (cond->
                     (map? ev)
                     (assoc ::sg/event ev)))

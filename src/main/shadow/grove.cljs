@@ -90,6 +90,16 @@
       (fn [state]
         (apply update-fn state args)))))
 
+(defn run
+  [env other-tx]
+  (let [process-fn (::tx (meta other-tx))]
+    (when-not process-fn
+      (throw (ex-info "invalid run call, expected a deftx result" {:other-tx other-tx})))
+    (-> env
+        ;; remember which other event was processed during tx
+        (update ::chain vec-conj other-tx)
+        (process-fn other-tx (::dom-event env)))))
+
 (defn run-tx
   ([{::keys [runtime-ref] :as env} tx]
    (impl/process-event runtime-ref tx nil env))

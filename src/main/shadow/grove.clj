@@ -1,4 +1,5 @@
-(ns shadow.grove)
+(ns shadow.grove
+  (:require [clojure.spec.alpha :as s]))
 
 ;; just for convenience, less imports for the user
 
@@ -35,3 +36,40 @@
     (let [{:keys [line column file]} (meta &form)]
       `(when-not (nil? shadow.grove/dev-log-handler)
          (shadow.grove/dev-log-handler {:ns ~(str *ns*) :line ~line :column ~column :file ~file} [~@args])))))
+
+(s/def ::deftx-args
+  (s/cat
+    :tx-name simple-symbol?
+    :args vector? ;; FIXME: core.specs for destructure help
+    :process-args vector?
+    :body (s/* any?)))
+
+(s/fdef deftx :args ::deftx-args)
+
+(defmacro deftx [& args]
+  (let [{:keys [tx-name args process-args body]}
+        (s/conform ::deftx-args args)
+
+        arg-syms
+        (vec (take (count args) (repeatedly #(gensym "arg"))))]
+
+    `(defn ~tx-name ~arg-syms
+       (with-meta
+         {:e ~(keyword (str *ns*) (str tx-name))
+          :args ~arg-syms}
+         ;; carry process fn in metadata so it doesn't need to be registered
+         ;; but also isn't part of event when serialized (e.g. devtools transfer)
+         {::tx (fn ~tx-name ~process-args
+                 (let ~(reduce-kv
+                         (fn [bindings idx arg-sym]
+                           (conj bindings (nth args idx) (nth arg-syms idx)))
+                         []
+                         arg-syms)
+                   ~@body))}))))
+
+(comment
+  (macroexpand-1
+    '(deftx foo
+       [a {:keys [b]}]
+       [env ev e]
+       :yo)))
