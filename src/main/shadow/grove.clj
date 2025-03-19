@@ -41,25 +41,34 @@
   (s/cat
     :tx-name simple-symbol?
     :args vector? ;; FIXME: core.specs for destructure help
+    :base-ev (s/? map?)
     :process-args vector?
     :body (s/* any?)))
 
 (s/fdef deftx :args ::deftx-args)
 
 (defmacro deftx [& args]
-  (let [{:keys [tx-name args process-args body]}
+  (let [{:keys [tx-name base-ev args process-args body]}
         (s/conform ::deftx-args args)
 
         arg-syms
-        (vec (take (count args) (repeatedly #(gensym "arg"))))]
+        (vec (take (count args) (repeatedly #(gensym "arg"))))
+
+        ev
+        (assoc base-ev
+          :e (keyword (str *ns*) (str tx-name))
+          :args arg-syms)]
 
     `(defn ~tx-name ~arg-syms
        (with-meta
-         {:e ~(keyword (str *ns*) (str tx-name))
-          :args ~arg-syms}
+         ~ev
          ;; carry process fn in metadata so it doesn't need to be registered
          ;; but also isn't part of event when serialized (e.g. devtools transfer)
          {::tx (fn ~tx-name ~process-args
+                 ;; idea here was to delay any destructuring until event is actually handled
+                 ;; to avoid doing as much work as possible in event construction
+                 ;; but that means the optional base event map cannot use the bindings
+                 ;; FIXME: it might want to?
                  (let ~(reduce-kv
                          (fn [bindings idx arg-sym]
                            (conj bindings (nth args idx) (nth arg-syms idx)))
@@ -69,7 +78,7 @@
 
 (comment
   (macroexpand-1
-    '(deftx foo
-       [a {:keys [b]}]
+    '(deftx foo [a {:keys [b]}]
+       {:e/debounce 50}
        [env ev e]
        :yo)))
