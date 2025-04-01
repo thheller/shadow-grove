@@ -238,22 +238,14 @@
 
     (not (map? result))
     (throw
-      (ex-info
-        (str "tx handler returned invalid result for event " (:e ev))
-        {:event ev
-         :env tx-env
-         :result result}))
+      (js/Error. (str "tx handler returned invalid result for event " (:e ev))))
 
     (identical? (::tx-guard tx-env) (::tx-guard result))
     result
 
     :else
     (throw
-      (ex-info
-        (str "tx handler returned invalid result for event" (:e ev) ", expected a modified env")
-        {:event ev
-         :env tx-env
-         :result result}))))
+      (js/Error. (str "tx handler returned invalid result for event" (:e ev) ", expected a modified env")))))
 
 (defn unhandled-event-ex! [ev-id tx origin]
   (if (and ^boolean js/goog.DEBUG (map? origin))
@@ -262,16 +254,15 @@
       (if-not comp
         ;; FIXME: directly outputting this is here is kinda ugly?
         (do (js/console.error err-msg)
-            (throw (ex-info (str "Unhandled Event " ev-id) {:ev-id ev-id :tx tx :origin origin})))
+            (throw (js/Error. (str "Unhandled Event " ev-id))))
 
         (recur
           (comp/get-parent comp)
           (str err-msg "\n    " (comp/get-component-name comp))
           )))
 
-    (throw (ex-info
-             (str "Unhandled Event " ev-id)
-             {:ev-id ev-id :tx tx}))))
+    (do (js/console.error "Unhandled event" ev-id tx origin)
+        (throw (js/Error. (str "Unhandled Event " ev-id))))))
 
 (defn call-interceptors [interceptors tx-env]
   (reduce
@@ -282,7 +273,7 @@
         (try
           (let [result (handler tx-env)]
             (when-not (identical? (::tx-guard result) (::tx-guard tx-env))
-              (throw (ex-info "interceptor didn't return tx-env" {:interceptor handler :result result})))
+              (throw (js/Error. "interceptor didn't return tx-env")))
             result))))
     tx-env
     interceptors))
@@ -312,7 +303,7 @@
     (update tx-env ::sg/tx-after conj
       (fn kv-interceptor-after [^not-native tx-env]
         (when-not (identical? (::sg/kv @rt-ref) before)
-          (throw (ex-info "someone messed with kv state while in tx" {})))
+          (throw (js/Error. "someone messed with kv state while in tx")))
 
         (let [tx-info
               (-kv-reduce
@@ -324,10 +315,7 @@
                     ;; FIXME: could actually allow that and so some sort of diff when getting a map?
                     ;; but user should have merged instead
                     (when-not (instance? kv/TransactedData kv)
-                      (throw (ex-info
-                               (str "during transaction the " kv-table " table was replaced. only a modified table can be returned.")
-                               {:kv-table kv-table
-                                :return kv})))
+                      (throw (js/Error. (str "during transaction the " kv-table " table was replaced. only a modified table can be returned."))))
 
                     (let [commit (kv/tx-commit! kv)]
                       (if (identical? (:data commit) (:data-before commit))
@@ -361,7 +349,7 @@
    ev
    dom-ev
    origin]
-  {:pre [(or (fn? ev) (map? ev))]}
+  {:pre [(map? ev)]}
 
   ;; (js/console.log ev-id ev origin @rt-ref)
 
@@ -369,13 +357,11 @@
         @rt-ref
 
         ev-id
-        (if (fn? ev) ::fn (:e ev))
+        (:e ev)
 
         handler
-        (if (fn? ev)
-          ev
-          (or (::sg/tx (meta ev))
-              (get event-config ev-id)))]
+        (or (::sg/tx (meta ev))
+            (get event-config ev-id))]
 
     (if-not handler
       (unhandled-event-ex! ev-id ev origin)
@@ -390,15 +376,13 @@
               tx-env
               ;; only set use namespaced keys
               ;; must avoid clashing with kv-tables overriding them
-              (-> {::tx-guard tx-guard
-                   ::sg/runtime-ref rt-ref
-                   ::sg/tx-after (list) ;; FILO
-                   ::sg/fx []
-                   ::sg/origin origin
-                   ::sg/dom-event dom-ev}
-                  (cond->
-                    (map? ev)
-                    (assoc ::sg/event ev)))
+              {::tx-guard tx-guard
+               ::sg/runtime-ref rt-ref
+               ::sg/tx-after (list) ;; FILO
+               ::sg/fx []
+               ::sg/origin origin
+               ::sg/dom-event dom-ev
+               ::sg/event ev}
 
               tx-env
               (call-interceptors event-interceptors tx-env)
@@ -434,12 +418,12 @@
                         :transact!
                         (fn [fx-tx]
                           (when-not @tx-done-ref
-                            (throw (ex-info "cannot start another tx yet, current one is still running. transact! is meant for async events" {})))
+                            (throw (js/Error. "cannot start another tx yet, current one is still running. transact! is meant for async events" {})))
 
                           (gp/run-now! ^not-native (::sg/scheduler env) #(process-event rt-ref fx-tx nil origin) [::fx-transact! fx-key])))]
 
                   (if-not fx-fn
-                    (throw (ex-info (str "unknown fx " fx-key) {:fx-key fx-key :fx-value value}))
+                    (throw (js/Error. (str "unknown fx " fx-key)))
 
                     (fx-fn fx-env value))))))
 
@@ -512,9 +496,7 @@
           ;; it needs to be forced since otherwise the key recording might miss something
           _ (when (lazy-seq? next-result)
               (throw
-                (ex-info
-                  "query functions are not allowed to return lazy sequences!"
-                  {:result next-result})))
+                (js/Error. "query functions are not allowed to return lazy sequences!")))
 
           new-keys
           (-kv-reduce

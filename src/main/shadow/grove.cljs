@@ -109,7 +109,11 @@
 (defn run-tx! [runtime-ref tx]
   (assert (rt/ref? runtime-ref) "expected runtime ref?")
   (let [{::keys [scheduler]} @runtime-ref]
-    (gp/run-now! scheduler #(impl/process-event runtime-ref tx nil nil) ::run-tx!)))
+    (let [tx (cond
+               (fn? tx) (with-meta {:e ::fn!} {::tx tx})
+               (and (map? tx) (keyword? (:e tx))) tx
+               :else (throw (js/Error. "run-tx! only accepts functions or maps as tx argument")))]
+      (gp/run-now! scheduler #(impl/process-event runtime-ref tx nil nil) ::run-tx!))))
 
 (defn unmount-root [^js root-el]
   (when-let [^sa/TreeRoot root (.-sg$root root-el)]
@@ -384,7 +388,26 @@
              (js/console.error ex)
              ::failed!)
            ::fx-config {}
+           ::timeouts {}
            ::env-init []})]
+
+    (swap! rt-ref update ::fx-config merge
+      {::timeout
+       (fn [env {:keys [timeout-id timeout ev]}]
+         (let [tid (js/setTimeout
+                     (fn []
+                       (swap! rt-ref update ::timeouts dissoc timeout-id)
+                       (run-tx! rt-ref ev))
+                     timeout)]
+
+           (swap! rt-ref update ::timeouts assoc timeout-id tid)))
+
+       ::timeout-clear
+       (fn [env {:keys [timeout-id]}]
+         (when-some [tid (get-in @rt-ref [::timeouts timeout-id])]
+           (js/clearTimeout tid)
+           (swap! rt-ref update ::timeouts dissoc timeout-id)
+           ))})
 
     (swap! rt/known-runtimes-ref assoc app-id rt-ref)
 
@@ -500,3 +523,15 @@
 (defn queue-after-interceptor [tx-env interceptor]
   {:pre [(fn? interceptor)]}
   (update tx-env ::tx-after conj interceptor))
+
+(defn fx-timeout [env timeout-id timeout ev]
+  (queue-fx env
+    ::timeout
+    {:timeout-id timeout-id
+     :timeout timeout
+     :ev ev}))
+
+(defn fx-timeout-clear [env timeout-id]
+  (queue-fx env
+    ::timeout-clear
+    {:timeout-id timeout-id}))

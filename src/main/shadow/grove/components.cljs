@@ -141,7 +141,6 @@
   (field ^boolean needs-render? true) ;; initially needs a render
   (field ^boolean suspended? false)
   (field ^boolean destroyed? false)
-  (field ^boolean error? false)
   (field ^boolean dom-entered? false)
   (field work-set (js/Set.)) ;; sub-tree pending work
 
@@ -206,14 +205,12 @@
 
   (dom-entered! [this]
     (set! dom-entered? true)
-    (when-not error?
-      (ap/dom-entered! root)
-      ;; trigger first on mount
-      (.did-update! this true)))
+    (ap/dom-entered! root)
+    ;; trigger first on mount
+    (.did-update! this true))
 
   (supports? [this next]
-    (and (not error?) ;; do not try to update an error component, prefer remount
-         (component-init? next)
+    (and (component-init? next)
          (let [other (.-component ^ComponentInit next)]
            (identical? config other))
          ;; (defc ui-thing [^:stable ident] ...)
@@ -324,33 +321,21 @@
   ;; parent tells us to work
   gp/IWork
   (work! [this]
-    (try
-      ;; always complete our own work first
-      ;; a re-render may cause the child tree to change
-      ;; and maybe some work to disappear
-      ;; work-pending? checks error?, no need to check that again
-      (while ^boolean (.work-pending? this)
-        (.run-next! this))
+    ;; always complete our own work first
+    ;; a re-render may cause the child tree to change
+    ;; and maybe some work to disappear
+    (while ^boolean (.work-pending? this)
+      (.run-next! this))
 
-      (catch :default ex
-        (.handle-error! this ex)))
+    (let [iter (.values work-set)]
+      (loop []
+        (let [current (.next iter)]
+          (when (not ^boolean (.-done current))
+            (gp/work! ^not-native (.-value current))
 
-    ;; FIXME: only process children when this is done and not suspended?
-    ;; FIXME: only process children when we are not in error state?
-    ;; child tasks should handle their own errors?
-    (try
-      (let [iter (.values work-set)]
-        (loop []
-          (let [current (.next iter)]
-            (when (not ^boolean (.-done current))
-              (gp/work! ^not-native (.-value current))
-
-              ;; should time slice later and only continue work
-              ;; until a given time budget is consumed
-              (recur)))))
-      (catch :default ex
-        ;; FIXME: actually treat sub-tree errors different that our own?
-        (.handle-error! this ex)))
+            ;; should time slice later and only continue work
+            ;; until a given time budget is consumed
+            (recur)))))
 
     js/undefined)
 
@@ -382,13 +367,6 @@
 
   ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
-  (handle-error! [this ex]
-    (set! error? true)
-    (.unschedule! this)
-
-    (let [err-fn (::error-handler parent-env)]
-      (err-fn this ex)))
-
   (get-slot-value [this idx]
     (aget slot-values idx))
 
@@ -474,7 +452,6 @@
   (work-pending? [this]
     (and (not destroyed?)
          (not suspended?)
-         (not error?)
          (or (pos? dirty-slots)
              needs-render?
              (>= (alength (.-slots config)) current-idx))))

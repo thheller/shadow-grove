@@ -933,7 +933,7 @@
 
 (comment
   (require 'clojure.pprint)
-  (tap>
+  (clojure.pprint/pprint
     (make-fragment
       {:locals {'foox {}}}
       nil

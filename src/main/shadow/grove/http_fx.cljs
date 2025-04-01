@@ -3,6 +3,12 @@
     [clojure.string :as str]
     [shadow.grove :as sg]))
 
+(defonce trace-state-ref
+  (atom {}))
+
+(defn trace-state [request-id]
+  (sg/watch trace-state-ref [request-id]))
+
 ;; this is using XMLHttpRequest. no intent on making this usable with anything else.
 ;; might split this up into different namespace so there could be one variant using js/fetch
 ;; or some other node-specific APIs
@@ -127,7 +133,7 @@
           (string? request)
           [:GET request nil {}])
 
-        {:keys [timeout]}
+        {:keys [timeout trace]}
         opts
 
         body? (some? body)
@@ -161,6 +167,9 @@
       ;; FIXME: last 2 args, from either env or request?
       (.open xhr-req request-method req-url true #_username #_password)
 
+      (when trace
+        (swap! trace-state-ref assoc trace {:status :started :request-at (js/Date.now)}))
+
       ;; old IE was picky about setting some of these only after open and before send
       ;; doesn't matter otherwise so just keep doing it this way
 
@@ -172,7 +181,11 @@
 
       (set! xhr-req -onerror
         (fn [e]
-          (js/console.warn "request error" request xhr-req e)))
+          (js/console.warn "request error" request xhr-req e)
+
+          (when trace
+            (swap! trace-state-ref assoc trace {:status :error}))
+          ))
 
       ;; FIXME: could use this point for cleanup duty if needed
       #_(set! xhr-req -onloadend
@@ -183,7 +196,19 @@
         (fn [e]
           (let [status (.-status xhr-req)
                 body (body-transform config env request xhr-req)]
+
+            (when trace
+              (swap! trace-state-ref update trace
+                (fn [{:keys [request-at] :as req}]
+                  (let [now (js/Date.now)
+                        runtime (- now request-at)]
+                    (assoc req
+                      :status :completed
+                      :duration runtime
+                      :completed-at now)))))
+
             (callback body status sent-request xhr-req)
+
             )))
 
       (when timeout
