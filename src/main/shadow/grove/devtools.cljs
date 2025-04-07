@@ -39,6 +39,10 @@
   (sg/add-kv-table rt-ref ::m/event
     {:primary-key :event-id})
 
+  (sg/add-kv-table rt-ref ::m/work-snapshot
+    ;; might get traces from different runtimes with same id, just an int
+    {:primary-key [:target-id :trace-id]})
+
   (register-events!)
 
   (transit/init! rt-ref

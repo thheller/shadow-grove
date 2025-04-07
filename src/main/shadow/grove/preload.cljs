@@ -209,24 +209,80 @@
     {:op ::snapshot
      :snapshot (take-snapshot* env)}))
 
+(defn defined-components []
+  (reduce-kv
+    (fn [m component-name config]
+      (assoc m
+        component-name
+        (assoc (.-debug-info config)
+          :component-name (.-component-name config)
+          :slots
+          (->> (.-slots config)
+               (map-indexed
+                 (fn [idx info]
+                   (assoc (.-debug-info info) :idx idx)))
+               (vec)))))
+
+    {}
+    @comp/components-ref))
+
+(defn component-snapshot []
+  ;; more lightweight variant for trace
+  ;; goal is to show component hierarchy properly, so only need id/name/parent
+  ;; maybe more later
+  (let [m
+        (reduce-kv
+          (fn [m instance-id instance]
+            (let [config (.-config instance)
+                  parent-env (.-parent-env instance)
+                  parent (::comp/component parent-env)]
+
+              (assoc m
+                instance-id
+                (-> {:instance-id instance-id
+                     :component-name (.-component-name config)
+                     ;; useful info only if snapshot is done before updates are done
+                     ;; can show which components are going to update because of which slots
+                     ;; but while update is in progress a component render may pass changed
+                     ;; data to children, which will make them update. so not totally accurate
+                     ;; but should make for good visualization?
+                     :dirty-slots (.-dirty-slots instance)}
+                    (cond->
+                      parent
+                      (assoc :parent-id (.-instance-id parent)))))))
+
+          {}
+          @comp/instances-ref)
+
+        tree-walker
+        (js/document.createTreeWalker
+          js/document.body
+          js/NodeFilter.SHOW_COMMENT)]
+
+    ;; adds an :idx value to each component denoting its relative position in the DOM
+    ;; used for ordering since components only manage a single child and thus have no notion of ordering
+    (loop [m m
+           idx 0]
+      (if-not (.nextNode tree-walker)
+        m
+        (let [node (.-currentNode tree-walker)
+              text (.-textContent node)]
+
+          (cond
+            ;; component marker-before
+            (str/starts-with? text "component:")
+            (let [id (.-instance-id (.-shadow$instance node))]
+              (recur (assoc-in m [id :idx] idx) (inc idx)))
+
+            :else
+            (recur m idx)))))))
+
 (defonce devtools-ref (atom nil))
 
 (defn extension-info []
   (doto (client-env/devtools-info)
     (unchecked-set "client_id" (shared/get-client-id (:runtime @devtools-ref)))
     ))
-
-
-(defn runtime-notify [svc {:keys [event-op client-id client-info] :as msg}]
-  (case event-op
-    :client-connect
-    (swap! devtools-ref update :devtools conj client-id)
-    :client-disconnect
-    (swap! devtools-ref update :devtools disj client-id)
-    ))
-
-(defn clients [svc {:keys [clients] :as msg}]
-  (swap! devtools-ref assoc :devtools (->> clients (map :client-id) (set))))
 
 (defonce border-highlight
   (doto (js/document.createElement "div")
@@ -268,7 +324,6 @@
 (defn remove-highlight [svc msg]
   (.remove border-highlight))
 
-
 (defn request-log [svc {:keys [name component type idx] :as msg}]
   (when-some [comp (get @comp/instances-ref component)]
     (let [val (case type
@@ -281,33 +336,20 @@
       (js/console.log val)
       (js/console.groupEnd))))
 
+(defn as-snapshot [trace-array]
+  (-> (.shift trace-array)
+      (assoc :ts-end (rt/now)
+             :snapshot-after (component-snapshot)
+             :tasks (vec (array-seq trace-array)))))
 
-(def traces (js/Array.))
+(defn notify-work-finished [{:keys [runtime] :as svc} work-snapshot]
 
-(defn request-traces [{:keys [runtime] :as svc} {:keys [from] :as msg}]
-  (shared/relay-msg runtime
-    {:op ::m/traces
-     :to from
-     :traces traces})
-
-  (set! traces (js/Array.)))
-
-(defn notify-work-finished [{:keys [runtime] :as svc} trace-array]
   ;; FIXME: should the UI opt-in for these first?
-
-  (let [{:keys [devtools]} @devtools-ref]
-
-    ;; devtools can request these when wanted
-    ;; sending them always leads to far too much data on the websocket
-    ;; and causes intermittent disconnects since it can't keep up
-    (.push traces trace-array)
-
-    (when (seq devtools)
-      (shared/relay-msg runtime
-        {:op ::m/work-finished
-         :to devtools
-         :work-tasks (alength trace-array)}))))
-
+  (shared/relay-msg runtime
+    {:op ::m/work-finished
+     ;; send to all runtimes matching query, so we do not have to keep that info replicated on this end
+     :to-query [:eq :type :shadow.grove.devtools]
+     :work-snapshot work-snapshot}))
 
 ;; FIXME: this needs some kind of garbage collection
 ;; these will pile up quick and they potentially hold large structures
@@ -463,6 +505,33 @@
 (set! impl/tx-reporter tx-reporter)
 (set! sg/dev-log-handler dev-log-handler)
 
+(defonce trace-id-seq (atom 0))
+(defn next-trace-id []
+  (swap! trace-id-seq inc))
+
+(set! sg/work-start
+  (fn [trigger]
+    {:ts (rt/now)
+     :trace-id (next-trace-id)
+     :action ::work-start!
+     :trigger trigger
+     ;; FIXME: this sends all defined components of which only a subset may be active
+     ;; but sending it as part of snapshot means it repeats for :snapshot-after most of the time
+     ;; should really send this separately but needs to be aware of hot-reload
+     ;; since a component may be redefined and will muck up UI showing slots incorrectly when changed
+     :components (defined-components)
+     :snapshot (component-snapshot)}))
+
+(defonce early-traces-ref
+  (atom []))
+
+;; work may occur before the entire relay stuff is connected and ready
+;; so until it is collect all traces and buffer them to publish on connect
+(set! sg/work-finish-trigger
+  (fn [trace-array]
+    (let [snapshot (as-snapshot trace-array)]
+      (swap! early-traces-ref conj snapshot))))
+
 (cljs-shared/add-plugin! ::tree #{:obj-support}
   (fn [{:keys [runtime obj-support] :as env}]
     (cljs-shared/add-transit-writers! runtime
@@ -494,14 +563,11 @@
         ::tree
         {:ops
          {::m/take-snapshot #(take-snapshot svc %)
-          ::runtime-notify #(runtime-notify svc %)
-          ::clients #(clients svc %)
           ::m/get-tx-diff #(get-tx-diff svc %)
           ::m/get-runtimes #(get-runtimes svc %)
           ::m/get-db-copy #(get-db-copy svc %)
           ::m/stream-sub #(stream-sub svc %)
           ::m/request-log #(request-log svc %)
-          ::m/request-traces #(request-traces svc %)
           ::m/highlight-component #(highlight-component svc %)
           ::m/remove-highlight #(remove-highlight svc %)}
 
@@ -509,7 +575,9 @@
          (fn []
            (reset! streams-ref #{})
            (set! impl/tx-reporter nil)
-           (set! sg/work-finish-trigger nil))
+
+           ;; FIXME: start buffering again?
+           )
 
          :on-welcome
          (fn []
@@ -517,15 +585,17 @@
              (str (client-env/get-url-base)
                   "/classpath/shadow/grove/devtools.html?runtime="
                   (:client-id @(:state-ref runtime))))
-           (set! sg/work-finish-trigger #(notify-work-finished svc %))
 
-           (shared/relay-msg runtime
-             {:op :request-clients
-              :notify true
-              :reply-op ::clients
-              :notify-op ::runtime-notify
-              :query [:eq :type :shadow.grove.devtools]
-              }))
+           (doseq [x @early-traces-ref]
+             (notify-work-finished svc x))
+
+           (reset! early-traces-ref [])
+
+           ;; no need to buffer anymore, just straight up send
+           (set! sg/work-finish-trigger
+             (fn [trace-array]
+               (let [work-snapshot (as-snapshot trace-array)]
+                 (notify-work-finished svc work-snapshot)))))
          ;; :on-tool-disconnect #(tool-disconnect svc %)
          })
       svc))

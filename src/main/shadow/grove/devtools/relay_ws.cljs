@@ -109,13 +109,11 @@
     (+ x y)))
 
 (defmethod handle-msg ::m/work-finished
-  [env {:keys [from] :as msg}]
-  (update-in env [::m/target from]
-    (fn [x]
-      (-> x
-          (assoc :last-update (js/Date.now))
-          (update :work-tasks safe-inc (:work-tasks msg))
-          ))))
+  [env {:keys [from work-snapshot] :as msg}]
+  (-> env
+      (kv/add ::m/work-snapshot
+        (-> work-snapshot
+            (assoc :target-id from)))))
 
 (defmethod handle-msg ::m/runtimes
   [env {:keys [from runtimes] :as msg}]

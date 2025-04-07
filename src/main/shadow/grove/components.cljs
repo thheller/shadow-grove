@@ -145,6 +145,7 @@
   (field work-set (js/Set.)) ;; sub-tree pending work
 
   (constructor [this e c a]
+
     (set! parent-env e)
     (set! config c)
     (set! args a)
@@ -170,8 +171,7 @@
       (let [id (rt/next-id)]
         (set! this -instance-id id)
 
-        (when rt/*work-trace*
-          (.push rt/*work-trace* #js [::create! (rt/now) (.-component-name config) id]))
+        (.trace this ::create! {})
 
         (swap! instances-ref assoc id this))
       (set! (.-marker-before this)
@@ -227,25 +227,16 @@
   (dom-sync! [this ^ComponentInit next]
     ;; check args flips the dirty bits when needed
     (. config (check-args-fn this args (.-args next)))
-
     (set! args (.-args next))
-
-    (when (.work-pending? this)
-
-      ;; no need for trace if no work was caused
-      (when DEBUG
-        (when rt/*work-trace*
-          (.push rt/*work-trace* #js [::sync! (rt/now) (.-component-name config) (.-instance-id this) args])))
-
-      (.schedule! this ::dom-sync!)))
+    (.trace this ::sync! {:dirty-from-args dirty-from-args})
+    (.work! this))
 
   (destroy! [this ^boolean dom-remove?]
     (.unschedule! this)
     (when DEBUG
       (swap! instances-ref dissoc (.-instance-id this))
 
-      (when rt/*work-trace*
-        (.push rt/*work-trace* #js [::destroy! (rt/now) (.-component-name config) (.-instance-id this)]))
+
 
       (when-some [parent (::parent component-env)]
         (.. parent -child-components (delete this)))
@@ -260,11 +251,7 @@
       slot-refs
       (fn [_ slot-idx ref]
         (when-some [cleanup (.-cleanup ref)]
-
-          (when DEBUG
-            (when rt/*work-trace*
-              (.push rt/*work-trace* #js [::slot-cleanup! (rt/now) (.-component-name config) (.-instance-id this) slot-idx])))
-
+          (.trace this ::slot-cleanup! {:slot-idx slot-idx})
           (cleanup @ref)))
       nil)
 
@@ -275,7 +262,13 @@
         (callback))
       nil)
 
-    (ap/destroy! root dom-remove?))
+    ;; FIXME: add more trace to know how long each part took?
+    (.trace this ::destroy! {})
+
+    ;; FIXME: should measure how long the removal took overall and add to trace?
+    (ap/destroy! root dom-remove?)
+
+    js/undefined)
 
   ;; FIXME: figure out default event handler
   ;; don't want to declare all events all the time
@@ -321,21 +314,8 @@
   ;; parent tells us to work
   gp/IWork
   (work! [this]
-    ;; always complete our own work first
-    ;; a re-render may cause the child tree to change
-    ;; and maybe some work to disappear
-    (while ^boolean (.work-pending? this)
-      (.run-next! this))
-
-    (let [iter (.values work-set)]
-      (loop []
-        (let [current (.next iter)]
-          (when (not ^boolean (.-done current))
-            (gp/work! ^not-native (.-value current))
-
-            ;; should time slice later and only continue work
-            ;; until a given time budget is consumed
-            (recur)))))
+    (.trace this ::work! {})
+    (.work! this)
 
     js/undefined)
 
@@ -401,7 +381,10 @@
     (if-not (bit-test dirty-slots idx)
       (set! current-idx (inc current-idx))
 
-      (let [slot-config
+      (let [ts-start
+            (rt/now)
+
+            slot-config
             (-> (.-slots config) (aget idx))
 
             prev-val
@@ -416,11 +399,13 @@
 
           (let [val (.run slot-config this)]
 
-            (when DEBUG
-              (when rt/*work-trace*
-                (.push rt/*work-trace* #js [::run-slot! (rt/now) (.-component-name config) (.-instance-id this) idx (= prev-val val)])))
-
             (aset slot-values idx val)
+
+            (.trace this ::run-slot!
+              {:slot-idx idx
+               :runtime (- (rt/now) ts-start)
+               :equal (= prev-val val)
+               :ready rt/*ready*})
 
             (if-not rt/*ready*
               (.suspend! this idx)
@@ -436,8 +421,9 @@
                     (when (bit-test (.-render-deps config) idx)
                       (set! needs-render? true)))
 
-                  (set! current-idx (inc current-idx))
-                  ))))))
+                  (set! current-idx (inc current-idx))))
+
+            ))))
 
     js/undefined)
 
@@ -446,6 +432,7 @@
       ;; all slots done
       (.component-render! this)
       (.run-slot! this current-idx))
+
 
     js/undefined)
 
@@ -456,11 +443,27 @@
              needs-render?
              (>= (alength (.-slots config)) current-idx))))
 
+  (work! [^not-native this]
+    ;; always complete our own work first
+    ;; a re-render may cause the child tree to change
+    ;; and maybe some work to disappear
+    (while ^boolean (.work-pending? this)
+      (.run-next! this))
+
+    (let [iter (.values work-set)]
+      (loop []
+        (let [current (.next iter)]
+          (when (not ^boolean (.-done current))
+            (gp/work! ^not-native (.-value current))
+
+            ;; should time slice later and only continue work
+            ;; until a given time budget is consumed
+            (recur)))))
+
+    js/undefined)
+
   (suspend! [this hook-causing-suspend]
     ;; (js/console.log "suspending" hook-causing-suspend this)
-    (when DEBUG
-      (when rt/*work-trace*
-        (.push rt/*work-trace* #js [::suspend! (rt/now) (.-component-name config) (.-instance-id this) hook-causing-suspend])))
 
     ;; just in case we were already scheduled. should really track this more efficiently
     (.unschedule! this)
@@ -474,6 +477,15 @@
   (unschedule! [this]
     (gp/unschedule! scheduler this))
 
+  (trace [this action opts]
+    (when DEBUG
+      (when rt/*work-trace*
+        (.push rt/*work-trace*
+          (assoc opts
+            :ts (rt/now)
+            :instance-id (.-instance-id this)
+            :action action)))))
+
   (component-render! [^ManagedComponent this]
     (assert (zero? dirty-slots) "Got to render while slots are dirty")
     ;; (js/console.log "Component:render!" (.-component-name config) updated-slots needs-render? suspended? destroyed? this)
@@ -482,9 +494,7 @@
 
     (let [did-render? needs-render?]
       (when needs-render?
-        (when DEBUG
-          (when rt/*work-trace*
-            (.push rt/*work-trace* #js [::render! (rt/now) (.-component-name config) (.-instance-id this)])))
+        (.trace this ::render! {})
 
         (let [frag (. config (render-fn this))]
 

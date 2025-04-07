@@ -239,7 +239,9 @@
     (keyword? x)
     x
 
-    (and (vector? x) (every? keyword? x) (not (empty x)))
+    (and (vector? x)
+         (every? keyword? x)
+         (seq x))
     (fn [val]
       (mapv #(get val %) x))
 

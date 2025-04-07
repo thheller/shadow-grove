@@ -272,6 +272,7 @@
   (gp/run-now! ^not-native (::scheduler @rt-ref) #(render* rt-ref root-el root-node) ::render))
 
 ;; for devtools, so it can add listener to be notified when work happened
+(def work-start nil)
 (def work-finish-trigger nil)
 
 (deftype RootScheduler [^:mutable update-pending? work-set]
@@ -281,7 +282,7 @@
 
     (when-not update-pending?
       (set! update-pending? true)
-      (rt/microtask #(.process-work! this trigger))))
+      (rt/microtask #(.microtask-start this trigger))))
 
   (unschedule! [this work-task]
     (.delete work-set work-task))
@@ -290,7 +291,10 @@
   (did-finish! [this target])
 
   (run-now! [this action trigger]
+    (.start-trace! this trigger)
+
     (set! update-pending? true)
+
     (action)
     ;; work must happen immediately since (action) may need the DOM event that triggered it
     ;; any delaying the work here may result in additional paint calls (making things slower overall)
@@ -298,23 +302,29 @@
     (.process-work! this trigger))
 
   Object
-  (process-work! [this trigger]
-    (when comp/DEBUG
-      (set! rt/*work-trace* #js [#js [::process-work! (rt/now) trigger]]))
+  (start-trace! [this trigger]
+    (when work-start
+      (set! rt/*work-trace* #js [(work-start trigger)])))
 
+  (microtask-start [this trigger]
+    (.start-trace! this trigger)
+
+    (.process-work! this trigger))
+
+  (process-work! [this trigger]
     (try
       (let [iter (.values work-set)]
         (loop []
           (let [current (.next iter)]
             (when (not ^boolean (.-done current))
+              ;; kick off work from scheduler root, going down through components and their schedulers
               (gp/work! ^not-native (.-value current))
 
-              ;; should time slice later and only continue work
-              ;; until a given time budget is consumed
               (recur)))))
 
       (when work-finish-trigger
         (work-finish-trigger rt/*work-trace*))
+
 
       js/undefined
 
@@ -322,7 +332,9 @@
         (when comp/DEBUG
           (set! rt/*work-trace* nil))
 
-        (set! update-pending? false)))))
+        (set! update-pending? false)))
+
+    js/undefined))
 
 ;; using datafy/nav tools (e.g. Inspect) can jump between tables with this
 ;; makes it slightly nicer to browse/explore

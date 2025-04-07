@@ -8,7 +8,7 @@
   (atom {}))
 
 (defn now []
-  (js/Date.now))
+  (js/performance.now))
 
 (defn ref? [x]
   (and (instance? cljs.core/Atom x)

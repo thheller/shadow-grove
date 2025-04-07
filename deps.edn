@@ -1,6 +1,7 @@
 {:paths
  ["src/main"
   "src/test"
+  "src/gen" ;; meh
   "src/ui-release"]
 
  :deps
