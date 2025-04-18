@@ -155,9 +155,7 @@
     slot-ref)
 
   (-invalidate-slot! [this idx]
-    (gp/run-now! (::sg/scheduler env)
-      #(.update-query! this)
-      ::slot-invalidate!))
+    (.update-query! this))
 
   ap/IManaged
   (supports? [this ^VirtualSeed next]

@@ -638,6 +638,37 @@
          (render
            [:div b c more]))))
 
+  (tap>
+    (s/conform ::defc-args
+      '([^:stable {x :foo :keys [y] ::keys [z z2 z3] :as p}
+         {sx :sx ::keys [sy sz] :as s}
+         unused-arg]
+
+        (bind {:keys [a]}
+          (hello-hook 1 p))
+
+        (bind {:keys [b2] :as b}
+          (hello-hook 2 s))
+
+        (bind c
+          (hello-hook 3 {:hello a :world b}))
+
+        (bind d
+          (hello-hook 4 [a b c x y z sy sz]))
+
+        (event ::some-event! [env e a]
+          (prn [:ev e a]))
+
+        (event ::some-event handled-elsewhere!)
+
+        (bind a (hello-hook 5 [:shadow a]))
+
+        (effect :mount [env]
+          (js/console.log "here be mounted"))
+
+        (render
+          [:div a [:h1 d]]))))
+
   (clojure.pprint/pprint
     (macroexpand
       '(defc hello

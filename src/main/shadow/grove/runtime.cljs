@@ -7,8 +7,6 @@
 (defonce known-runtimes-ref
   (atom {}))
 
-(defn now []
-  (js/performance.now))
 
 (defn ref? [x]
   (and (instance? cljs.core/Atom x)
@@ -33,9 +31,6 @@
 (def ^:dynamic *slot-value* ::pending)
 (def ^:dynamic *claimed* nil)
 (def ^:dynamic *ready* true)
-
-;; for devtools debugging
-(def ^:dynamic *work-trace* nil)
 
 (deftype SlotRef
   [provider

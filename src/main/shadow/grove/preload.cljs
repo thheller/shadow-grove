@@ -18,6 +18,7 @@
     [shadow.arborist.common]
     [shadow.arborist.collections]
     [shadow.grove :as sg]
+    [shadow.grove.trace :as trace]
     [shadow.grove.runtime :as rt]
     [shadow.grove.ui.portal]
     [shadow.grove.ui.suspense]
@@ -209,23 +210,6 @@
     {:op ::snapshot
      :snapshot (take-snapshot* env)}))
 
-(defn defined-components []
-  (reduce-kv
-    (fn [m component-name config]
-      (assoc m
-        component-name
-        (assoc (.-debug-info config)
-          :component-name (.-component-name config)
-          :slots
-          (->> (.-slots config)
-               (map-indexed
-                 (fn [idx info]
-                   (assoc (.-debug-info info) :idx idx)))
-               (vec)))))
-
-    {}
-    @comp/components-ref))
-
 (defn component-snapshot []
   ;; more lightweight variant for trace
   ;; goal is to show component hierarchy properly, so only need id/name/parent
@@ -336,20 +320,6 @@
       (js/console.log val)
       (js/console.groupEnd))))
 
-(defn as-snapshot [trace-array]
-  (-> (.shift trace-array)
-      (assoc :ts-end (rt/now)
-             :snapshot-after (component-snapshot)
-             :tasks (vec (array-seq trace-array)))))
-
-(defn notify-work-finished [{:keys [runtime] :as svc} work-snapshot]
-
-  ;; FIXME: should the UI opt-in for these first?
-  (shared/relay-msg runtime
-    {:op ::m/work-finished
-     ;; send to all runtimes matching query, so we do not have to keep that info replicated on this end
-     :to-query [:eq :type :shadow.grove.devtools]
-     :work-snapshot work-snapshot}))
 
 ;; FIXME: this needs some kind of garbage collection
 ;; these will pile up quick and they potentially hold large structures
@@ -505,32 +475,193 @@
 (set! impl/tx-reporter tx-reporter)
 (set! sg/dev-log-handler dev-log-handler)
 
+(defn now []
+  (js/performance.now))
+
 (defonce trace-id-seq (atom 0))
 (defn next-trace-id []
   (swap! trace-id-seq inc))
 
-(set! sg/work-start
-  (fn [trigger]
-    {:ts (rt/now)
+(defonce traces-ref
+  (atom {}))
+
+(def active-trace nil)
+
+(defn begin-trace [kind]
+  (when active-trace
+    (throw (js/Error. "already tracing?")))
+
+  (set! active-trace
+    {:ts (now)
+     :ts-date (js/Date.now)
      :trace-id (next-trace-id)
-     :action ::work-start!
-     :trigger trigger
-     ;; FIXME: this sends all defined components of which only a subset may be active
-     ;; but sending it as part of snapshot means it repeats for :snapshot-after most of the time
-     ;; should really send this separately but needs to be aware of hot-reload
-     ;; since a component may be redefined and will muck up UI showing slots incorrectly when changed
-     :components (defined-components)
-     :snapshot (component-snapshot)}))
+     :kind kind
+     :snapshot (component-snapshot)
+     :log #js []}))
 
-(defonce early-traces-ref
-  (atom []))
+(defn add-trace [& args]
+  (if-not active-trace
+    (js/console.error "not tracing?" args)
+    ;; logging as vectors since maps repeat keys a lot and make network messages huge
+    ;; structure is fixed, so easy to turn into maps later
+    (do (.push (:log active-trace) (into [(- (now) (:ts active-trace))] args))
+        (dec (alength (:log active-trace))))))
 
-;; work may occur before the entire relay stuff is connected and ready
-;; so until it is collect all traces and buffer them to publish on connect
-(set! sg/work-finish-trigger
-  (fn [trace-array]
-    (let [snapshot (as-snapshot trace-array)]
-      (swap! early-traces-ref conj snapshot))))
+(defn add-components [{:keys [snapshot snapshot-after] :as trace}]
+  ;; only add component infos for components actually used in this trace
+  ;; avoids sending too much noise
+  ;; needs to send with every trace so we have actual definition used
+  ;; and not something maybe outdated (via redef at REPL/hot-reload)
+  (let [used
+        (-> #{}
+            (into (map :component-name) (vals snapshot))
+            (into (map :component-name) (vals snapshot-after)))]
+
+    (assoc trace
+      :components
+      (reduce-kv
+        (fn [m component-name config]
+          (if-not (contains? used component-name)
+            m
+            (assoc m
+              component-name
+              (assoc (.-debug-info config)
+                :component-name (.-component-name config)
+                :slots
+                (->> (.-slots config)
+                     (map-indexed
+                       (fn [idx info]
+                         (assoc (.-debug-info info) :idx idx)))
+                     (vec))))))
+
+        {}
+        @comp/components-ref))))
+
+(defn broadcast-trace [trace])
+
+(defn end-trace []
+  (let [trace
+        (-> active-trace
+            (assoc :ts-end (now) :snapshot-after (component-snapshot))
+            (add-components)
+            (update :log vec))]
+
+    (swap! traces-ref assoc (:trace-id trace) trace)
+
+    (set! active-trace nil)
+
+    (broadcast-trace trace)))
+
+
+(set! js/shadow.grove.trace
+  #js {:component_create
+       (fn component_create [component]
+         (add-trace :component-create! (.-instance-id component)))
+
+       :component_dom_sync
+       (fn component_dom_sync [component]
+         (add-trace :component-dom-sync! (.-instance-id component)))
+
+       :component_dom_sync_done
+       (fn component_dom_sync_done [component t]
+         (add-trace :component-dom-sync-done! (.-instance-id component) t))
+
+       :component_slot_cleanup
+       (fn component_slot_cleanup [component slot-idx]
+         (add-trace :component-slot-cleanup (.-instance-id component) slot-idx))
+
+       :component_slot_cleanup_done
+       (fn component_slot_cleanup_done [component slot-idx t]
+         (add-trace :component-slot-cleanup-done t))
+
+       :component_run_slot
+       (fn component_run_slot [component slot-idx]
+         (let [t (add-trace :component-run-slot (.-instance-id component) slot-idx)]
+           [t (aget (.-slot-values component) slot-idx)]))
+
+       :component_run_slot_done
+       (fn component_run_slot_done [component slot-idx [t oval]]
+         (let [nval (aget (.-slot-values component) slot-idx)]
+           (add-trace :component-run-slot-done t (= oval nval) rt/*claimed* rt/*ready*)))
+
+       :component_after_render_cleanup
+       (fn component_after_render_cleanup [component]
+         (add-trace :component-after-render-cleanup (.-instance-id component)))
+
+       :component_after_render_cleanup_done
+       (fn component_after_render_cleanup_done [component t]
+         (add-trace :component-after-render-cleanup-done t))
+
+       :component_destroy
+       (fn component_destroy [component]
+         (add-trace :component-destroy (.-instance-id component)))
+
+       :component_destroy_done
+       (fn component_destroy_done [component t]
+         (add-trace :component-destroy-done t))
+
+       :component_work
+       (fn component_work [component]
+         (add-trace :component-work (.-instance-id component)))
+
+       :component_work_done
+       (fn component_work_done [component t]
+         (add-trace :component-work-done t))
+
+       :component_render
+       (fn component_render [component]
+         (add-trace :component-render (.-instance-id component)))
+
+       :component_render_done
+       (fn component_render_done [component t]
+         (add-trace :component-render-done t))
+
+       :run_action
+       (fn run_action [scheduler trigger]
+         (add-trace :run-action trigger))
+
+       :run_action_done
+       (fn run_action_done [scheduler trigger t]
+         (add-trace :run-action-done t))
+
+       :run_work
+       (fn run_work [scheduler trigger]
+         (add-trace :run-work trigger))
+
+       :run_work_done
+       (fn run_work_done [scheduler trigger t]
+         (add-trace :run-work-done t))
+
+       :run_microtask
+       (fn run_microtask [scheduler trigger]
+         (begin-trace :microtask))
+
+       :run_microtask_done
+       (fn run_microtask_done [scheduler trigger t]
+         (end-trace))
+
+       :render_root
+       (fn render_root []
+         (begin-trace :render-root))
+
+       :render_root_done
+       (fn render_root_done [t]
+         (end-trace))
+
+       :render_direct
+       (fn render_direct []
+         ;; used by managed-root, which my either update during a regular update cycle
+         ;; or on its own time, which we still want to trace, so join if active otherwise state
+         (when-not active-trace
+           (begin-trace :render-direct)))
+
+       :render_direct_done
+       (fn render_direct_done [t]
+         (when t
+           ;; only end when we started it
+           (end-trace)))
+       })
+
 
 (cljs-shared/add-plugin! ::tree #{:obj-support}
   (fn [{:keys [runtime obj-support] :as env}]
@@ -575,9 +706,7 @@
          (fn []
            (reset! streams-ref #{})
            (set! impl/tx-reporter nil)
-
-           ;; FIXME: start buffering again?
-           )
+           (set! broadcast-trace (fn [trace])))
 
          :on-welcome
          (fn []
@@ -586,16 +715,25 @@
                   "/classpath/shadow/grove/devtools.html?runtime="
                   (:client-id @(:state-ref runtime))))
 
-           (doseq [x @early-traces-ref]
-             (notify-work-finished svc x))
 
-           (reset! early-traces-ref [])
+           ;; FIXME: should the UI opt-in for these first?
+           (doseq [trace (vals @traces-ref)]
+             (shared/relay-msg runtime
+               {:op ::m/work-finished
+                ;; send to all runtimes matching query, so we do not have to keep that info replicated on this end
+                :to-query [:eq :type :shadow.grove.devtools]
+                :work-snapshot trace}))
 
-           ;; no need to buffer anymore, just straight up send
-           (set! sg/work-finish-trigger
-             (fn [trace-array]
-               (let [work-snapshot (as-snapshot trace-array)]
-                 (notify-work-finished svc work-snapshot)))))
+           ;; FIXME: this is dirty, but ensures messages are only sent when runtime is actually connected
+           ;; this is handled poorly currently, but not cleaning it up now
+           (set! broadcast-trace
+             (fn [trace]
+               (shared/relay-msg runtime
+                 {:op ::m/work-finished
+                  ;; send to all runtimes matching query, so we do not have to keep that info replicated on this end
+                  :to-query [:eq :type :shadow.grove.devtools]
+                  :work-snapshot trace})))
+           )
          ;; :on-tool-disconnect #(tool-disconnect svc %)
          })
       svc))

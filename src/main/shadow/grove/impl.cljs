@@ -420,7 +420,7 @@
                           (when-not @tx-done-ref
                             (throw (js/Error. "cannot start another tx yet, current one is still running. transact! is meant for async events" {})))
 
-                          (gp/run-now! ^not-native (::sg/scheduler env) #(process-event rt-ref fx-tx nil origin) [::fx-transact! fx-key])))]
+                          (process-event rt-ref fx-tx nil origin)))]
 
                   (if-not fx-fn
                     (throw (js/Error. (str "unknown fx " fx-key)))

@@ -1,7 +1,9 @@
 (ns shadow.arborist.common
   (:require
     [goog.dom :as gdom]
-    [shadow.arborist.protocols :as p]))
+    [shadow.arborist.protocols :as p]
+    [shadow.grove.trace :as trace]
+    ))
 
 ;; helper functions that lets us bypass the common CLJS ifn dispatch check
 ;; helpful in hot loops or places where the same function (or ifn) is called multiple times
@@ -98,26 +100,30 @@
   p/IDirectUpdate
   (update! [this next]
     (set! val next)
-    (cond
-      (not node)
-      (let [el (p/as-managed val env)]
-        (set! node el)
-        ;; root was already inserted to dom but no node was available at the time
-        (when-some [parent (.-parentElement marker)]
-          (p/dom-insert node parent (.-nextSibling marker))
-          ;; root might not be in document yet
+    (let [t (trace/render-direct)]
+      (cond
+        (not node)
+        (let [el (p/as-managed val env)]
+          (set! node el)
+          ;; root was already inserted to dom but no node was available at the time
+          (when-some [parent (.-parentElement marker)]
+            (p/dom-insert node parent (.-nextSibling marker))
+            ;; root might not be in document yet
+            (when dom-entered?
+              (p/dom-entered! node))))
+
+        (p/supports? node next)
+        (p/dom-sync! node next)
+
+        :else
+        (let [new (replace-managed env node next)]
+          (set! node new)
           (when dom-entered?
-            (p/dom-entered! node))))
+            (p/dom-entered! new)
+            )))
+      (trace/render-direct-done t))
 
-      (p/supports? node next)
-      (p/dom-sync! node next)
-
-      :else
-      (let [new (replace-managed env node next)]
-        (set! node new)
-        (when dom-entered?
-          (p/dom-entered! new)
-          )))))
+    js/undefined))
 
 (defn managed-root [env]
   (ManagedRoot. env false (dom-marker env) nil nil))

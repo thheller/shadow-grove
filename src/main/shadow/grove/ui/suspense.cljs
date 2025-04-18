@@ -25,9 +25,6 @@
   (unschedule! [this target]
     (gp/unschedule! parent-scheduler target))
 
-  (run-now! [this action trigger]
-    (gp/run-now! parent-scheduler action trigger))
-
   (did-suspend! [this target]
     ;; (js/console.log "did-suspend!" suspend-set target)
     ;; FIXME: suspend parent scheduler when going offscreen?

@@ -20,6 +20,7 @@
     [shadow.arborist.attributes :as a]
     [shadow.grove.kv :as kv]
     [shadow.grove.impl :as impl]
+    [shadow.grove.trace :as trace]
     [shadow.css] ;; used in macro ns
     ))
 
@@ -113,7 +114,9 @@
                (fn? tx) (with-meta {:e ::fn!} {::tx tx})
                (and (map? tx) (keyword? (:e tx))) tx
                :else (throw (js/Error. "run-tx! only accepts functions or maps as tx argument")))]
-      (gp/run-now! scheduler #(impl/process-event runtime-ref tx nil nil) ::run-tx!))))
+
+      (impl/process-event runtime-ref tx nil nil)
+      )))
 
 (defn unmount-root [^js root-el]
   (when-let [^sa/TreeRoot root (.-sg$root root-el)]
@@ -269,11 +272,11 @@
 
 (defn render [rt-ref ^js root-el root-node]
   {:pre [(rt/ref? rt-ref)]}
-  (gp/run-now! ^not-native (::scheduler @rt-ref) #(render* rt-ref root-el root-node) ::render))
+  (let [t (trace/render-root)
+        res (render* rt-ref root-el root-node)]
+    (trace/render-root-done t)
 
-;; for devtools, so it can add listener to be notified when work happened
-(def work-start nil)
-(def work-finish-trigger nil)
+    res))
 
 (deftype RootScheduler [^:mutable update-pending? work-set]
   gp/IScheduleWork
@@ -290,49 +293,31 @@
   (did-suspend! [this target])
   (did-finish! [this target])
 
-  (run-now! [this action trigger]
-    (.start-trace! this trigger)
-
-    (set! update-pending? true)
-
-    (action)
-    ;; work must happen immediately since (action) may need the DOM event that triggered it
-    ;; any delaying the work here may result in additional paint calls (making things slower overall)
-    ;; if things could have been async the work should have been queued as such and not ended up here
-    (.process-work! this trigger))
-
   Object
-  (start-trace! [this trigger]
-    (when work-start
-      (set! rt/*work-trace* #js [(work-start trigger)])))
-
   (microtask-start [this trigger]
-    (.start-trace! this trigger)
+    (let [t (trace/run-microtask this trigger)]
+      (.process-work! this trigger)
+      (trace/run-microtask-done this trigger t))
 
-    (.process-work! this trigger))
+    js/undefined)
 
   (process-work! [this trigger]
-    (try
-      (let [iter (.values work-set)]
-        (loop []
-          (let [current (.next iter)]
-            (when (not ^boolean (.-done current))
-              ;; kick off work from scheduler root, going down through components and their schedulers
-              (gp/work! ^not-native (.-value current))
+    (let [t (trace/run-work this trigger)]
+      (try
+        (let [iter (.values work-set)]
+          (loop []
+            (let [current (.next iter)]
+              (when (not ^boolean (.-done current))
+                ;; kick off work from scheduler root, going down through components and their schedulers
+                (gp/work! ^not-native (.-value current))
 
-              (recur)))))
+                (recur)))))
 
-      (when work-finish-trigger
-        (work-finish-trigger rt/*work-trace*))
+        js/undefined
 
-
-      js/undefined
-
-      (finally
-        (when comp/DEBUG
-          (set! rt/*work-trace* nil))
-
-        (set! update-pending? false)))
+        (finally
+          (trace/run-work-done this trigger t)
+          (set! update-pending? false))))
 
     js/undefined))
 

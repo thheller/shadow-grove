@@ -7,6 +7,7 @@
     [shadow.arborist.common :as common]
     [shadow.arborist.protocols :as ap]
     [shadow.arborist.attributes :as a]
+    [shadow.grove.trace :as trace]
     [shadow.grove :as-alias sg]
     [shadow.grove.runtime :as rt]
     [shadow.grove.protocols :as gp]))
@@ -171,7 +172,7 @@
       (let [id (rt/next-id)]
         (set! this -instance-id id)
 
-        (.trace this ::create! {})
+        (trace/component-create this)
 
         (swap! instances-ref assoc id this))
       (set! (.-marker-before this)
@@ -228,15 +229,16 @@
     ;; check args flips the dirty bits when needed
     (. config (check-args-fn this args (.-args next)))
     (set! args (.-args next))
-    (.trace this ::sync! {:dirty-from-args dirty-from-args})
-    (.work! this))
+    (let [t (trace/component-dom-sync this)]
+      (.work! this)
+      (trace/component-dom-sync-done this t))
+
+    js/undefined)
 
   (destroy! [this ^boolean dom-remove?]
     (.unschedule! this)
     (when DEBUG
       (swap! instances-ref dissoc (.-instance-id this))
-
-
 
       (when-some [parent (::parent component-env)]
         (.. parent -child-components (delete this)))
@@ -251,22 +253,26 @@
       slot-refs
       (fn [_ slot-idx ref]
         (when-some [cleanup (.-cleanup ref)]
-          (.trace this ::slot-cleanup! {:slot-idx slot-idx})
-          (cleanup @ref)))
+          (let [t (trace/component-slot-cleanup this slot-idx)]
+            (cleanup @ref)
+            (trace/component-slot-cleanup-done this slot-idx t))
+          js/undefined ;; if trace is last it is used as return value, might complicate DCE removal
+          ))
       nil)
 
     ;; cleanup fns returned by sg/effect fns
-    (-kv-reduce
-      after-render-cleanup
-      (fn [_ ref callback]
-        (callback))
-      nil)
+    (when (seq after-render-cleanup)
+      (let [t (trace/component-after-render-cleanup this)]
+        (-kv-reduce
+          after-render-cleanup
+          (fn [_ ref callback]
+            (callback))
+          nil)
+        (trace/component-after-render-cleanup-done this t)))
 
-    ;; FIXME: add more trace to know how long each part took?
-    (.trace this ::destroy! {})
-
-    ;; FIXME: should measure how long the removal took overall and add to trace?
-    (ap/destroy! root dom-remove?)
+    (let [t (trace/component-destroy this)]
+      (ap/destroy! root dom-remove?)
+      (trace/component-destroy-done this t))
 
     js/undefined)
 
@@ -308,14 +314,12 @@
     (when (zero? (.-size work-set))
       (gp/unschedule! scheduler this)))
 
-  (run-now! [this callback trigger]
-    (gp/run-now! scheduler callback trigger))
-
   ;; parent tells us to work
   gp/IWork
   (work! [this]
-    (.trace this ::work! {})
-    (.work! this)
+    (let [t (trace/component-work this)]
+      (.work! this)
+      (trace/component-work-done this t))
 
     js/undefined)
 
@@ -381,14 +385,14 @@
     (if-not (bit-test dirty-slots idx)
       (set! current-idx (inc current-idx))
 
-      (let [ts-start
-            (rt/now)
-
-            slot-config
+      (let [slot-config
             (-> (.-slots config) (aget idx))
 
             prev-val
-            (aget slot-values idx)]
+            (aget slot-values idx)
+
+            t
+            (trace/component-run-slot this idx)]
 
         (binding [rt/*slot-provider* this
                   rt/*env* component-env
@@ -400,12 +404,6 @@
           (let [val (.run slot-config this)]
 
             (aset slot-values idx val)
-
-            (.trace this ::run-slot!
-              {:slot-idx idx
-               :runtime (- (rt/now) ts-start)
-               :equal (= prev-val val)
-               :ready rt/*ready*})
 
             (if-not rt/*ready*
               (.suspend! this idx)
@@ -423,6 +421,7 @@
 
                   (set! current-idx (inc current-idx))))
 
+            (trace/component-run-slot-done this idx t)
             ))))
 
     js/undefined)
@@ -477,14 +476,6 @@
   (unschedule! [this]
     (gp/unschedule! scheduler this))
 
-  (trace [this action opts]
-    (when DEBUG
-      (when rt/*work-trace*
-        (.push rt/*work-trace*
-          (assoc opts
-            :ts (rt/now)
-            :instance-id (.-instance-id this)
-            :action action)))))
 
   (component-render! [^ManagedComponent this]
     (assert (zero? dirty-slots) "Got to render while slots are dirty")
@@ -494,14 +485,15 @@
 
     (let [did-render? needs-render?]
       (when needs-render?
-        (.trace this ::render! {})
-
-        (let [frag (. config (render-fn this))]
+        (let [t (trace/component-render this)
+              frag (. config (render-fn this))]
 
           (set! rendered-args args)
           (set! needs-render? false)
 
-          (ap/update! root frag)))
+          (ap/update! root frag)
+
+          (trace/component-render-done this t)))
 
       ;; only trigger dom effects when mounted
       (when dom-entered?
@@ -514,6 +506,7 @@
     (.unschedule! this))
 
   (did-update! [this did-render?]
+    ;; FIXME: trace for these?
     (-kv-reduce
       after-render
       (fn [_ key callback]
@@ -551,9 +544,8 @@
             {:e ev-value})]
 
       ;; (js/console.log "dom-event" this event-env event ev-map dom-event)
-      (gp/run-now! (.-scheduler this)
-        #(gp/handle-event! this ev-map dom-event event-env)
-        ::handle-dom-event!))))
+      (gp/handle-event! this ev-map dom-event event-env)
+      )))
 
 (set! *warn-on-infer* true)
 
