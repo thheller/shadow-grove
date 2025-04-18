@@ -98,14 +98,14 @@
             tree
 
             :component-run-slot-done
-            (let [[ref-idx changed claimed ready] more
+            (let [[ref-idx equal claimed ready] more
                   [ts-start _ instance-id slot-idx :as ref-log] (nth log ref-idx)]
               (assoc-in tree [instance-id :slots slot-idx]
                 {:ts ts-start
                  :ts-end ts
                  :action :run
                  :duration (- ts ts-start)
-                 :changed changed
+                 :equal equal
                  :claimed claimed
                  :ready ready}))
 
@@ -169,7 +169,7 @@
   (bind snapshot
     (sg/kv-lookup ::m/work-snapshot [target-id trace-id]))
 
-  (bind {:keys [updates ts ts-end trigger roots tree] :as snapshot}
+  (bind {:keys [updates ts-date ts ts-end kind roots tree] :as snapshot}
     (rollup-trace snapshot))
 
   (bind render-node
@@ -184,14 +184,12 @@
                  [:hover {:border-color "black"}])
                {:style/margin-left (js/CSS.px (* depth 20))}
                [:div
-                (str
-                  (cond
-                    (:created instance-info) "\uD83C\uDF31 " ;; sprout
-                    (:destroyed instance-info) "❌ "
-                    (:rendered instance-info) "\uD83C\uDF33 " ;; tree
-                    (:sync instance-info) "↓ " ;; component updated but skipped render
-                    :else "")
-                  component-name)]
+                (cond
+                  (:created instance-info) "\uD83C\uDF31" ;; sprout
+                  (:destroyed instance-info) "❌"
+                  :else "\uD83C\uDF33" ;; tree
+                  )]
+               [:div component-name]
                (sg/simple-seq (:args component-info)
                  (fn [arg-name]
                    (<< [:div (css :bg-gray-100) arg-name])))
@@ -230,7 +228,7 @@
     (<< [:div (css :p-4)
          [:div (css :font-semibold :border-b :mb-1)
           {:on-click (fn [e] (js/console.log "snapshot" snapshot))}
-          "Update started by: " (str trigger) " duration: " (.toFixed (- ts-end ts) 1) "ms"]
+          (str (.toLocaleTimeString (js/Date. ts-date) "de-DE") " - Update started by " kind " duration: " (.toFixed (- ts-end ts) 1) "ms")]
          [:div (css :text-xs)
           (sg/simple-seq roots render-node)]])))
 

@@ -556,15 +556,15 @@
 (set! js/shadow.grove.trace
   #js {:component_create
        (fn component_create [component]
-         (add-trace :component-create! (.-instance-id component)))
+         (add-trace :component-create (.-instance-id component)))
 
        :component_dom_sync
        (fn component_dom_sync [component]
-         (add-trace :component-dom-sync! (.-instance-id component)))
+         (add-trace :component-dom-sync (.-instance-id component)))
 
        :component_dom_sync_done
        (fn component_dom_sync_done [component t]
-         (add-trace :component-dom-sync-done! (.-instance-id component) t))
+         (add-trace :component-dom-sync-done (.-instance-id component) t))
 
        :component_slot_cleanup
        (fn component_slot_cleanup [component slot-idx]
