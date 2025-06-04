@@ -6,7 +6,7 @@
 
 (defn component-create [component])
 
-(defn component-dom-sync [component])
+(defn component-dom-sync [component dirty-from-args dirty-slots])
 (defn component-dom-sync-done [component t])
 
 (defn component-slot-cleanup [component slot-idx])
@@ -22,10 +22,10 @@
 (defn component-destroy [component])
 (defn component-destroy-done [component t])
 
-(defn component-work [component])
+(defn component-work [component dirty-slots])
 (defn component-work-done [component t])
 
-(defn component-render [component])
+(defn component-render [component updated-slots])
 (defn component-render-done [component t])
 
 (defn run-work [scheduler trigger])

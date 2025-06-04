@@ -550,7 +550,9 @@
 
     (set! active-trace nil)
 
-    (broadcast-trace trace)))
+    ;; sending snapshots can be done async. mostly to separate sending
+    ;; from actual work done. tracing overhead so far is already too big
+    (js/setTimeout #(broadcast-trace trace) 25)))
 
 
 (set! js/shadow.grove.trace
@@ -559,8 +561,8 @@
          (add-trace :component-create (.-instance-id component)))
 
        :component_dom_sync
-       (fn component_dom_sync [component]
-         (add-trace :component-dom-sync (.-instance-id component)))
+       (fn component_dom_sync [component dirty-from-args dirty-slots]
+         (add-trace :component-dom-sync (.-instance-id component) dirty-from-args dirty-slots))
 
        :component_dom_sync_done
        (fn component_dom_sync_done [component t]
@@ -601,16 +603,16 @@
          (add-trace :component-destroy-done t))
 
        :component_work
-       (fn component_work [component]
-         (add-trace :component-work (.-instance-id component)))
+       (fn component_work [component dirty-slots]
+         (add-trace :component-work (.-instance-id component) dirty-slots))
 
        :component_work_done
        (fn component_work_done [component t]
          (add-trace :component-work-done t))
 
        :component_render
-       (fn component_render [component]
-         (add-trace :component-render (.-instance-id component)))
+       (fn component_render [component updated-slots]
+         (add-trace :component-render (.-instance-id component) updated-slots))
 
        :component_render_done
        (fn component_render_done [component t]

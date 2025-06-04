@@ -2,7 +2,7 @@
   (:require
     [clojure.string :as str]
     [shadow.grove.devtools :as-alias m]
-    [shadow.grove :as sg :refer (defc << css)]
+    [shadow.grove :as sg :refer (defc << css deftx)]
     [shadow.grove.devtools.relay-ws :as relay-ws]
     [shadow.grove.components :as comp]
     [shadow.grove.events :as ev]
@@ -136,7 +136,7 @@
                  :duration (- ts ts-start)}))
 
             :component-render
-            (assoc-in tree [(nth task 2) :rendered] true)
+            (update tree (nth task 2) merge {:rendered true :updated-slots (nth task 3)})
 
             :component-render-done
             (let [[ref-idx] more
@@ -147,7 +147,7 @@
                  :duration (- ts ts-start)}))
 
             :component-dom-sync
-            (assoc-in tree [(nth task 2) :sync] true)
+            (update tree (nth task 2) merge {:sync true :dirty-from-args (nth task 3)})
 
             :component-work
             (assoc-in tree [(nth task 2) :work] true)
@@ -165,7 +165,11 @@
       (make-component-tree)
       (rollup-log)))
 
-(defc ui-trace [target-id trace-id]
+(deftx toggle-graph! [target-id trace-id]
+  [env]
+  (update-in env [::m/work-snapshot [target-id trace-id] :expanded] not))
+
+(defc ui-trace-graph [target-id trace-id]
   (bind snapshot
     (sg/kv-lookup ::m/work-snapshot [target-id trace-id]))
 
@@ -187,6 +191,7 @@
                 (cond
                   (:created instance-info) "\uD83C\uDF31" ;; sprout
                   (:destroyed instance-info) "❌"
+                  (:rendered instance-info) "\uD83D\uDD04"
                   :else "\uD83C\uDF33" ;; tree
                   )]
                [:div component-name]
@@ -204,7 +209,6 @@
 
                                     (:created instance-info) ;; show all as changed when component first mounts
                                     (css :bg-orange-200)
-
                                     (:equal slot-info) ;; execute and equal
                                     (css :bg-green-100)
 
@@ -219,18 +223,50 @@
                           (when (and slot-info (false? (:ready slot-info)))
                             " \uD83D\uDCA4")]))))
 
-               (when (:rendered instance-info)
-                 (<< [:div "[RENDER]"]))
+               (cond
+                 (:rendered instance-info)
+                 (<< [:div (css :flex-1 :text-right) (str (.toFixed (:duration (:render-timing instance-info)) 3) "ms")])
+
+                 (:destroyed instance-info)
+                 (<< [:div (css :flex-1 :text-right) (str (.toFixed (:duration (:destroy-timing instance-info)) 3) "ms")])
+
+                 :else nil)
                ]
               (sg/simple-seq children render-node))))))
 
   (render
-    (<< [:div (css :p-4)
-         [:div (css :font-semibold :border-b :mb-1)
-          {:on-click (fn [e] (js/console.log "snapshot" snapshot))}
-          (str (.toLocaleTimeString (js/Date. ts-date) "de-DE") " - Update started by " kind " duration: " (.toFixed (- ts-end ts) 1) "ms")]
-         [:div (css :text-xs)
-          (sg/simple-seq roots render-node)]])))
+    (<< [:div (css :text-xs :py-4)
+         (sg/simple-seq roots render-node)])))
+
+(defc ui-trace [target-id trace-id]
+  (bind {:keys [expanded ts ts-end ts-date kind] :as snapshot}
+    (sg/kv-lookup ::m/work-snapshot [target-id trace-id]))
+
+  (bind ts-label
+    (let [date (js/Date. ts-date)
+          hours (.getHours date)
+          minutes (.getMinutes date)
+          seconds (.getSeconds date)
+          ms (.getMilliseconds date)]
+
+      (str (.padStart (js/String hours) 2 "0")
+           ":"
+           (.padStart (js/String minutes) 2 "0")
+           ":"
+           (.padStart (js/String seconds) 2 "0")
+           "."
+           (.padStart (js/String ms) 3 "0"))))
+
+  (render
+    (<< [:div (css :px-4)
+         [:div (css  :cursor-pointer :py-1 :flex {:gap "0.5rem"} [:hover :bg-gray-100])
+          {:on-click (toggle-graph! target-id trace-id)}
+          [:div (css :font-semibold :text-right {:width "60px"}) (str (.toFixed (- ts-end ts) 1) "ms")]
+          [:div (css :text-center {:width "90px"}) ts-label]
+          [:div (str kind)]]
+         (when expanded
+           (ui-trace-graph target-id trace-id))])))
+
 
 (defn ?work-snapshots [env target-id]
   (->> (::m/work-snapshot env)
@@ -238,7 +274,7 @@
        (filter #(= target-id (:target-id %)))
        (sort-by :trace-id)
        (map :trace-id)
-       #_(reverse)
+       (reverse)
        (vec)))
 
 (defc ui-panel [target-id]
@@ -247,7 +283,6 @@
 
   (render
     (<< [:div {:class (css :flex-1 :overflow-auto :font-sans)}
-         [:div {:class (css :flex)}]
          (sg/simple-seq snapshots
            (fn [trace-id]
              (ui-trace target-id trace-id)))])))

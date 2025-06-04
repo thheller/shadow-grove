@@ -9,7 +9,7 @@
   "../shadow-css/src/main"]
 
  :version
- "2.28.21"
+ "3.0.3"
 
  :jvm-opts
  ["-XX:-OmitStackTraceInFastThrow"]

@@ -256,11 +256,21 @@
       :empty
 
       (map? nval)
-      (reduce-kv
-        (fn [_ ^not-native k v]
-          (set-style-property node (-name k) v))
-        nil
-        nval)
+      (do (reduce-kv
+            (fn [_ k v]
+              (set-style-property node (name k) v))
+            nil
+            nval)
+
+          ;; remove properties that no longer exists
+          ;; can happen in cases where :style (merge ... (when ...))
+          (when (map? oval)
+            (reduce-kv
+              (fn [_ k v]
+                (when-not (contains? nval k)
+                  (set-style-property node (name k) nil)))
+              nil
+              oval)))
 
       (string? nval)
       (set! (.. node -style -cssText) nval)

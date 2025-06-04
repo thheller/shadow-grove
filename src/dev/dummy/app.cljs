@@ -1,9 +1,8 @@
 (ns dummy.app
   (:require
     [shadow.grove :as sg :refer (<< defc css)]
-    [shadow.grove.operator :as op]
-    [shadow.arborist.interpreted]
-    [dummy.ops :as ops]))
+    [shadow.grove.ui.vgrid :as vgrid]
+    [shadow.arborist.interpreted]))
 
 (def dialog-in
   (sg/prepare-animation
@@ -55,30 +54,6 @@
     (for [x ["hello" "keyed" "seq"]]
       [:li {:dom/key x} x])]])
 
-(defn &bar [op id]
-  (let [foo-op (op/get-other op ops/&foo {})]
-
-    (op/set-attr op :foo foo-op)
-
-    (op/timeout op 1000
-      (fn timeout-fn []
-        (js/console.warn "one sec after bar init")
-        ))
-
-    #_(op/watch op foo-op
-        (fn [old-val new-val]
-          ))
-
-    (op/handle op :bar-event!
-      (fn [ev]
-        (js/console.log "bar got event" op ev)
-        (swap! op update :count inc)
-        (foo-op :foo-event! {:from-bar "true"})
-        ))
-
-    (reset! op {:hello "world" :count 0})
-    ))
-
 (defc ui-root []
   (bind state-ref
     (atom false))
@@ -108,21 +83,22 @@
     (when (pos? test)
       (shake @num-ref)))
 
-  (bind bar1-op (op/use &bar 1))
-  (bind bar1 (sg/watch bar1-op))
+  (bind grid
+    (vgrid/use {}))
 
-  (bind bar2-op (op/use &bar 2))
-  (bind bar2 (sg/watch bar2-op))
+  (bind grid-window
+    (js/console.log "getting-grid-window" grid)
+    {:total-rows 1000
+     :rows []})
 
   (render
-    (<< [:button
+    (<< [:div (css :p-8 {:height "400px"})
+         (vgrid/render grid grid-window {})]
+
+        [:button
          {:class (css :p-4 :text-lg :border)
           :on-click ::show!}
          "click me to open dialog"]
-
-        [:div {:on-click #(bar1-op :bar-event!)} "bar1: " (pr-str bar1)]
-        [:div {:on-click #(bar2-op :bar-event!)} "bar2: " (pr-str bar2)]
-
         [:div {:style/margin-top "10px"}
 
          [:button {:on-click ::inc! :data-test (zero? (mod test 3))} "click me to inc"]

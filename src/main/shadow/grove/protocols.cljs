@@ -27,10 +27,16 @@
   (get-scheduler [this]))
 
 (defprotocol IInvalidateSlot
-  (invalidate! [ref]))
+  (invalidate! [ref] "invalidates slot and causes it to execute again")
+  ;; FIXME: there is a substantial problem with this. providing a value is nice, but the result of the call of the `bind` might not represent the final value
+  ;; (bind something (count (sg/query ?some-query)))
+  ;; so if query decides to provide a new value it would just return the query result, instead of its count
+  ;; maybe need to rethink this whole defc system
+  (provide-new-value! [ref new-value] "invalidates slot, but only causes dependents to run again, not itself"))
 
 (defprotocol IProvideSlot
   (-invalidate-slot! [this idx])
+  (-provide-new-value! [this idx new-value])
   (-init-slot-ref [this idx]))
 
 ;; just here so that working on components file doesn't cause hot-reload issues

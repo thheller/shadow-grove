@@ -563,6 +563,54 @@
 
     (.get-result query)))
 
+(comment
+  (def kv-get
+    (stateful-slot ::slot-kv-get
+      {:on-init
+       (fn [slot opts]
+         (let [query-id (rt/next-id)]
+           (-swap! ref assoc :query-id query-id)
+           (.set active-queries-map query-id #(gp/invalidate! ref))
+
+           (run slot ::do-read opts)))
+
+       :on-trigger
+       (fn [slot old-opts new-opts]
+         (when (not= old-opts new-opts)
+
+           (let [{:keys [query-id read-key]} @slot]
+             (unindex-query-key query-id read-key))
+
+           (run slot ::do-read new-opts)
+           ))
+
+       ::do-read
+       (fn [slot [kv-table]]
+         (let [all (::sg/kv (rt/get-runtime slot))
+
+               {:keys [query-id read-key]}
+               @slot
+
+               kv
+               (kv/get-kv! all kv-table)]
+
+           (index-query-key query-id read-key kv-table)
+           (-swap! slot assoc :read-key kv-table)
+
+           (rt/set-value! ref kv)))
+
+       :on-destroy
+       (fn [slot]
+         (let [{:keys [query-id read-key] :as last-state} @slot]
+           (unindex-query-key query-id read-key)
+           (.delete active-queries-map query-id))
+         )}
+      ))
+
+  (bind x
+    (kv-get foo)))
+
+
 (defn slot-kv-get [kv-table]
   (let [^not-native ref
         (rt/claim-slot! ::slot-kv-get)

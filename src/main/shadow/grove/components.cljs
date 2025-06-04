@@ -226,11 +226,17 @@
                (custom-check args (.-args next))))))
 
   (dom-sync! [this ^ComponentInit next]
+    ;; this is called when a parent render triggers our update
     ;; check args flips the dirty bits when needed
     (. config (check-args-fn this args (.-args next)))
     (set! args (.-args next))
-    (let [t (trace/component-dom-sync this)]
-      (.work! this)
+    (let [t (trace/component-dom-sync this dirty-from-args dirty-slots)]
+      ;; only run own work which will cause updates to children on render
+      ;; scheduled work is done once the whole thing is sync'd
+      ;; assumes that sync already eliminates most work of direct children
+      ;; but indirect work may remain. which the scheduler will get to later.
+      ;; not the responsibility of this
+      (.run-own-work! this)
       (trace/component-dom-sync-done this t))
 
     js/undefined)
@@ -314,11 +320,25 @@
     (when (zero? (.-size work-set))
       (gp/unschedule! scheduler this)))
 
-  ;; parent tells us to work
   gp/IWork
   (work! [this]
-    (let [t (trace/component-work this)]
-      (.work! this)
+    ;; this is called for scheduled work, may be our own or subtree
+    (let [t (trace/component-work this dirty-slots)]
+      ;; always complete our own work first
+      ;; a re-render may cause the child tree to change
+      ;; and maybe some work to disappear
+      ;; only does work actually needed
+      (.run-own-work! this)
+
+      (let [iter (.values work-set)]
+        (loop []
+          (let [current (.next iter)]
+            (when (not ^boolean (.-done current))
+              (gp/work! ^not-native (.-value current))
+
+              ;; should time slice later and only continue work
+              ;; until a given time budget is consumed
+              (recur)))))
       (trace/component-work-done this t))
 
     js/undefined)
@@ -348,6 +368,20 @@
 
     js/undefined)
 
+  (-provide-new-value! [this idx new]
+    (when-not destroyed?
+      (let [old (aget slot-values idx)]
+        (aset slot-values idx new)
+
+        ;; FIXME: maybe not compare? trust that things triggering this already did?
+        (when (not= old new)
+          (let [slot-config (-> (.-slots config) (aget idx))]
+            (.mark-slots-dirty! this (.-affects slot-config))
+
+            (when (bit-test (.-render-deps config) idx)
+              (.set-render-required! this))
+
+            (.schedule! this ::slot-provided-new-value!))))))
 
   ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
@@ -432,7 +466,6 @@
       (.component-render! this)
       (.run-slot! this current-idx))
 
-
     js/undefined)
 
   (work-pending? [this]
@@ -442,22 +475,9 @@
              needs-render?
              (>= (alength (.-slots config)) current-idx))))
 
-  (work! [^not-native this]
-    ;; always complete our own work first
-    ;; a re-render may cause the child tree to change
-    ;; and maybe some work to disappear
+  (run-own-work! [^not-native this]
     (while ^boolean (.work-pending? this)
       (.run-next! this))
-
-    (let [iter (.values work-set)]
-      (loop []
-        (let [current (.next iter)]
-          (when (not ^boolean (.-done current))
-            (gp/work! ^not-native (.-value current))
-
-            ;; should time slice later and only continue work
-            ;; until a given time budget is consumed
-            (recur)))))
 
     js/undefined)
 
@@ -478,14 +498,13 @@
 
 
   (component-render! [^ManagedComponent this]
+    ;; FIXME: find better way to find misbehaving slots
+    ;; this guards against slots doing stuff when it is not their turn and is most likely a bug in implementation rather than user error
     (assert (zero? dirty-slots) "Got to render while slots are dirty")
     ;; (js/console.log "Component:render!" (.-component-name config) updated-slots needs-render? suspended? destroyed? this)
-    (set! updated-slots (int 0))
-    (set! dirty-from-args (int 0))
-
     (let [did-render? needs-render?]
       (when needs-render?
-        (let [t (trace/component-render this)
+        (let [t (trace/component-render this updated-slots)
               frag (. config (render-fn this))]
 
           (set! rendered-args args)
@@ -494,6 +513,9 @@
           (ap/update! root frag)
 
           (trace/component-render-done this t)))
+
+      (set! updated-slots (int 0))
+      (set! dirty-from-args (int 0))
 
       ;; only trigger dom effects when mounted
       (when dom-entered?
