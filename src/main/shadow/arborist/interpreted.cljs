@@ -91,14 +91,21 @@
   (field ^boolean ^:mutable entered?)
 
   (constructor [this ^not-native parent-env ^not-native hiccup]
-    (set! this -env parent-env)
     (set! this -form hiccup)
 
     (let [^TagInfo tag-info
           (desugar hiccup)
 
+          child-env
+          (-> parent-env
+              (cond->
+                (identical? "svg" (.-tag tag-info))
+                (assoc :dom/svg true)))
+
           node
-          (js/document.createElement (.-tag tag-info))
+          (if (:dom/svg child-env)
+            (js/document.createElementNS p/svg-ns (.-tag tag-info))
+            (js/document.createElement (.-tag tag-info)))
 
           tag-class
           (.-tag-class tag-info)
@@ -109,6 +116,7 @@
           children
           (subvec hiccup (.-child-offset tag-info))]
 
+      (set! this -env child-env)
       (set! this -node node)
       (set! this -tag-info tag-info)
 
