@@ -146,26 +146,44 @@
     (let [prev-val (-lookup data key NOT-FOUND)]
       (if (identical? prev-val value)
         this
-        (if (identical? NOT-FOUND prev-val)
-          ;; new
-          (TransactedData.
-            data-before
-            (-assoc data key value)
-            (conj! keys-new key)
-            keys-updated
-            keys-removed
-            completed-ref)
-          ;; update
-          (TransactedData.
-            data-before
-            (-assoc data key value)
-            keys-new
-            ;; new keys are only recorded as new, not modified in the same tx
-            (if (contains? keys-new key)
+        (let [data-next (-assoc data key value)
+              new? (identical? NOT-FOUND prev-val)
+              removed-in-tx? (contains? keys-removed key)]
+
+          (cond
+            ;; dissoc/assoc in one tx, instead count as update
+            (and new? removed-in-tx?)
+            (TransactedData.
+              data-before
+              data-next
+              keys-new
+              (conj! keys-updated key)
+              (disj! keys-removed key)
+              completed-ref)
+
+            new?
+            (TransactedData.
+              data-before
+              data-next
+              (conj! keys-new key)
               keys-updated
-              (conj! keys-updated key))
-            keys-removed
-            completed-ref)))))
+              keys-removed
+              completed-ref)
+
+            :update-with-previous-value
+            ;; using assert here since it is just a sanity check, shouldn't happen ever
+            ;; so assert just removes the check in release builds
+            (do (assert (not removed-in-tx?) "updating a removed key?")
+                (TransactedData.
+                  data-before
+                  data-next
+                  keys-new
+                  ;; new keys are only recorded as new, not modified in the same tx
+                  (if (contains? keys-new key)
+                    keys-updated
+                    (conj! keys-updated key))
+                  keys-removed
+                  completed-ref)))))))
 
   ICollection
   (-conj [coll ^not-native entry]
