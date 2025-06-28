@@ -127,7 +127,7 @@
 
         ;; [:div.foo]
         tag-class
-        (set! node -className tag-class)
+        (frag/set-attr env node :class nil tag-class)
 
         ;; [:div {:class "foo"}]
         attr-class
