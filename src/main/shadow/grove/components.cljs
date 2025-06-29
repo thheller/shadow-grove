@@ -237,6 +237,14 @@
       ;; but indirect work may remain. which the scheduler will get to later.
       ;; not the responsibility of this
       (.run-own-work! this)
+
+      ;; FIXME: this shouldn't be here but causes some strange behavior in an app
+      ;; the idea was that the component should only run its own work immediately on sync
+      ;; and then let the scheduler take care of updates deeper down
+      ;; but that scheduler may do other stuff first, so the ordering slightly changes
+      ;; leading to a hard to decipher problem. putting this here as a temporary patch
+      ;; until I can figure out if my plan is actually wrong or the other app
+      (.run-work-set! this)
       (trace/component-dom-sync-done this t))
 
     js/undefined)
@@ -329,16 +337,9 @@
       ;; and maybe some work to disappear
       ;; only does work actually needed
       (.run-own-work! this)
+      (.run-work-set! this)
 
-      (let [iter (.values work-set)]
-        (loop []
-          (let [current (.next iter)]
-            (when (not ^boolean (.-done current))
-              (gp/work! ^not-native (.-value current))
 
-              ;; should time slice later and only continue work
-              ;; until a given time budget is consumed
-              (recur)))))
       (trace/component-work-done this t))
 
     js/undefined)
@@ -478,6 +479,19 @@
   (run-own-work! [^not-native this]
     (while ^boolean (.work-pending? this)
       (.run-next! this))
+
+    js/undefined)
+
+  (run-work-set! [^not-native this]
+    (let [iter (.values work-set)]
+      (loop []
+        (let [current (.next iter)]
+          (when (not ^boolean (.-done current))
+            (gp/work! ^not-native (.-value current))
+
+            ;; should time slice later and only continue work
+            ;; until a given time budget is consumed
+            (recur)))))
 
     js/undefined)
 
