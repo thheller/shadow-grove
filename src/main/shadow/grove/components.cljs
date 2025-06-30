@@ -230,20 +230,32 @@
     ;; check args flips the dirty bits when needed
     (. config (check-args-fn this args (.-args next)))
     (set! args (.-args next))
+
+    ;; FIXME: what is a better strategy? parent passes new args to us, so we need to update
+
+    ;; A)
+    ;; schedule work so that runs as part of the normal work loop
+    ;; parent just called us with new args, so it is in its work loop, after it finishes its own work
+    ;; it'll tell this to do its work
+    #_(when (pos? dirty-from-args)
+        (.schedule! this ::dom-sync!))
+
+    ;; B)
+    ;; do the work immediately, as part of the parent components "render"
+
+    ;; B seems more natural and makes for better stack traces. however it may recur very deeply if an update cycle travels all the way down
+    ;; on deep trees that may be an issue? the order aspect may make this better. we are in parent render, so "first" child is processed first.
+
+    ;; variant A may jump a bit all over the place if something else is already scheduled in the work loop
+    ;; this would append to it, so the other work would finish, and then it would get back to this, although it was already here before
+    ;; does that matter?
+
     (let [t (trace/component-dom-sync this dirty-from-args dirty-slots)]
-      ;; only run own work which will cause updates to children on render
-      ;; scheduled work is done once the whole thing is sync'd
-      ;; assumes that sync already eliminates most work of direct children
-      ;; but indirect work may remain. which the scheduler will get to later.
-      ;; not the responsibility of this
+      ;; both do nothing if no work is pending, no need to check
       (.run-own-work! this)
 
-      ;; FIXME: this shouldn't be here but causes some strange behavior in an app
-      ;; the idea was that the component should only run its own work immediately on sync
-      ;; and then let the scheduler take care of updates deeper down
-      ;; but that scheduler may do other stuff first, so the ordering slightly changes
-      ;; leading to a hard to decipher problem. putting this here as a temporary patch
-      ;; until I can figure out if my plan is actually wrong or the other app
+      ;; maybe just do our own work and schedule the rest?
+      ;; can't just ignore since this may not be scheduled yet when only the args changed
       (.run-work-set! this)
       (trace/component-dom-sync-done this t))
 
