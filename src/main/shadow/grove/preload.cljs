@@ -644,11 +644,16 @@
 
        :render_root
        (fn render_root []
-         (begin-trace :render-root))
+         ;; it is valid if render is called while in render
+         ;; might be in intermediate step with 3rd party stuff rendering some embedded things
+         (when-not active-trace
+           (begin-trace :render-root)))
 
        :render_root_done
        (fn render_root_done [t]
-         (end-trace))
+         (when t
+           ;; only end when we started it
+           (end-trace)))
 
        :render_direct
        (fn render_direct []
