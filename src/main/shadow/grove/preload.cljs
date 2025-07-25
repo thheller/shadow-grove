@@ -488,16 +488,15 @@
 (def active-trace nil)
 
 (defn begin-trace [kind]
-  (when active-trace
-    (throw (js/Error. "already tracing?")))
-
-  (set! active-trace
-    {:ts (now)
-     :ts-date (js/Date.now)
-     :trace-id (next-trace-id)
-     :kind kind
-     :snapshot (component-snapshot)
-     :log #js []}))
+  (if active-trace
+    (js/console.error "was already tracing?" kind active-trace)
+    (set! active-trace
+      {:ts (now)
+       :ts-date (js/Date.now)
+       :trace-id (next-trace-id)
+       :kind kind
+       :snapshot (component-snapshot)
+       :log #js []})))
 
 (defn add-trace [& args]
   (if-not active-trace
