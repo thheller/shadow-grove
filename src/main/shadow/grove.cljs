@@ -296,8 +296,10 @@
   Object
   (microtask-start [this trigger]
     (let [t (trace/run-microtask this trigger)]
-      (.process-work! this trigger)
-      (trace/run-microtask-done this trigger t))
+      (try
+        (.process-work! this trigger)
+        (finally
+          (trace/run-microtask-done this trigger t))))
 
     js/undefined)
 

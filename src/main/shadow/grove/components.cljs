@@ -115,6 +115,10 @@
       idx
       (recur (bit-shift-right search 1) (inc idx)))))
 
+(defn handle-error-state! [component ex]
+  (js/console.error "component failed to render" component)
+  (js/console.error ex))
+
 (defclass ManagedComponent
   (field ^not-native scheduler)
   (field ^not-native parent-env)
@@ -489,8 +493,12 @@
              (>= (alength (.-slots config)) current-idx))))
 
   (run-own-work! [^not-native this]
-    (while ^boolean (.work-pending? this)
-      (.run-next! this))
+    (try
+      (while ^boolean (.work-pending? this)
+        (.run-next! this))
+
+      (catch :default e
+        (handle-error-state! this e)))
 
     js/undefined)
 

@@ -17,7 +17,7 @@
     [shadow.arborist :as sa]
     [shadow.arborist.common]
     [shadow.arborist.collections]
-    [shadow.grove :as sg]
+    [shadow.grove :as sg :refer (<< defc)]
     [shadow.grove.trace :as trace]
     [shadow.grove.runtime :as rt]
     [shadow.grove.ui.portal]
@@ -667,6 +667,18 @@
            ;; only end when we started it
            (end-trace)))
        })
+
+(set! js/shadow.grove.components -handle-error-state!
+  (fn [^ManagedComponent component ex]
+    ;; make it retry next render no matter what
+    (.set-render-required! component)
+
+    (ap/update! (.-root component)
+      (<< [:div (.. component -config -component-name) " failed to run properly!"]))
+
+    (js/console.error "component failed run properly!" component)
+    (js/console.error ex)
+    ))
 
 
 (cljs-shared/add-plugin! ::tree #{:obj-support}
