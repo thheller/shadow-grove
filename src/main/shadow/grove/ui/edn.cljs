@@ -173,6 +173,43 @@
                  (<< [:div {:class $seq-val} (render-edn item)]))))
            ]))))
 
+(def large-string-cutoff 120)
+
+(defc edn-large-string [val]
+  (bind short
+    (let [sub (pr-str (subs val 0 large-string-cutoff))]
+      (str (subs sub 0 (dec (count sub)))
+           " ...\"")))
+
+  (bind {:keys [open?] :as state}
+    (sg/use-state {:open? false}))
+
+  (event ::open! [env ev e]
+    (.preventDefault e)
+    (sg/swap-state! state assoc :open? true))
+
+  (event ::close! [env ev e]
+    (.preventDefault e)
+    (sg/swap-state! state assoc :open? false))
+
+  (render
+    (<< [:div {:class (css :pl-1 :whitespace-nowrap :cursor-pointer {:color "#008000"})
+               :on-click ::open!} short]
+        (when open?
+          (sg/portal
+            (<< [:div (css :fixed :inset-0 :p-12 :flex :flex-col {:z-index "1000" :background-color "#fff"})
+
+                 [:div (css :border :p-4 :h-full :overflow-auto)
+                  [:pre val]]
+                 [:div (css :p-4 :text-center)
+
+                  [:button (css :font-bold :text-lg :cursor-pointer :p-4 :border :shadow-sm :bg-gray-200
+                             {:border-radius "4px"
+                              :cursor "pointer"})
+                   {:on-click ::close!} "close"]]
+                 ]))
+          ))))
+
 (defn render-edn [val]
   (cond
     (map? val)
@@ -191,7 +228,9 @@
     (<< [:div {:class (css :pl-1 :whitespace-nowrap {:color "#0000ff"})} (str val)])
 
     (string? val)
-    (<< [:div {:class (css :pl-1 :whitespace-nowrap {:color "#008000"})} (pr-str val)])
+    (if (> (count val) large-string-cutoff)
+      (edn-large-string val)
+      (<< [:div {:class (css :pl-1 :whitespace-nowrap {:color "#008000"})} (pr-str val)]))
 
     (keyword? val)
     (<< [:div {:class (css :pl-1 :whitespace-nowrap {:color "#660e7a"})}
