@@ -1,9 +1,7 @@
 (ns shadow.grove.edn
   (:require
     [cljs.reader :as reader]
-    [shadow.grove :as sg]
-    [shadow.grove.runtime :as rt]
-    [shadow.grove.db :as db]))
+    [shadow.grove :as sg]))
 
 (defn init! [rt-ref opts]
   (let [edn-read
