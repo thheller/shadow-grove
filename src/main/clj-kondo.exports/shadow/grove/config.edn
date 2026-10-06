@@ -1,3 +1,0 @@
-{:hooks
- {:analyze-call
-  {shadow.grove/defc clj-kondo.shadow.grove/defc}}}

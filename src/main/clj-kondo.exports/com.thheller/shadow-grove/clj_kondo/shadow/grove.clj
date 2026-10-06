@@ -83,15 +83,15 @@
     (when-not (api/keyword-node? event-name)
       (api/reg-finding!
         (assoc (meta event-name)
-               :level :error
-               :message "Event name must be keyword"
-               :type :shadow.grove/invalid-event)))
+          :level :error
+          :message "Event name must be keyword"
+          :type :shadow.grove/invalid-event)))
     (when-not (<= 1 (count (:children params)) 3)
       (api/reg-finding!
         (assoc (meta params)
-               :level :error
-               :message "Must be arity 1, 2, or 3. Definition called with `env`, `ev`, `e`"
-               :type :shdow.grove/invalid-event-artity)))
+          :level :error
+          :message "Must be arity 1, 2, or 3. Definition called with `env`, `ev`, `e`"
+          :type :shdow.grove/invalid-event-artity)))
     (cons
       (api/list-node
         (list*
@@ -112,21 +112,21 @@
                        (-valid-effect-events (api/sexpr event-when))))
       (api/reg-finding!
         (assoc (meta event-when)
-               :level :error
-               :message
-               (format "Invalid effect trigger '%s'. Must be one of %s or a vector of dependencies"
-                       (str (api/sexpr event-when))
-                       (str/join ", " -valid-effect-events))
-               :type :shadow.grove/invalid-effect-deps)))
+          :level :error
+          :message
+          (format "Invalid effect trigger '%s'. Must be one of %s or a vector of dependencies"
+            (str (api/sexpr event-when))
+            (str/join ", " -valid-effect-events))
+          :type :shadow.grove/invalid-effect-deps)))
     (when-not (and (api/vector-node? binding-vec)
                    (= 1 (count (:children binding-vec))))
       (api/reg-finding!
         (assoc (meta binding-vec)
-               :level :error
-               :message
-               (format "Invalid binding vector '%s'. Must be an arity 1 vector."
-                       (str (api/sexpr binding-vec)))
-               :type :shadow.grove/invalid-effect-binding)))
+          :level :error
+          :message
+          (format "Invalid binding vector '%s'. Must be an arity 1 vector."
+            (str (api/sexpr binding-vec)))
+          :type :shadow.grove/invalid-effect-binding)))
     (cons
       (api/list-node
         (list*
@@ -139,15 +139,15 @@
 (defn validate-component!
   "Function to validate all hooks inside a `defc` and make sure they create a valid component."
   [component-node hook-nodes]
-  (let [hook-names         (->> hook-nodes
-                                (keep -hook-node->name))
-        has-render?        (some (set hook-names) ['<< 'render])
-        hook->last-ix      (->> hook-names
-                                (map-indexed (comp vec reverse vector))
-                                (into {}))
+  (let [hook-names (->> hook-nodes
+                        (keep -hook-node->name))
+        has-render? (some (set hook-names) ['<< 'render])
+        hook->last-ix (->> hook-names
+                           (map-indexed (comp vec reverse vector))
+                           (into {}))
         bind-after-render? (> (hook->last-ix 'bind -1)
                               (max (hook->last-ix 'render -1)
-                                   (hook->last-ix '<< -1)))]
+                                (hook->last-ix '<< -1)))]
     (when-not has-render?
       (api/reg-finding!
         (assoc
@@ -167,9 +167,9 @@
   [{:keys [node]}]
   (let [[_ name & args] (:children node)
         [comp-bindings
-         hooks]         (->> args
-                             (drop-while #(not (api/vector-node? %)))
-                             ((juxt first rest)))
+         hooks] (->> args
+                     (drop-while #(not (api/vector-node? %)))
+                     ((juxt first rest)))
         rewritten-hooks (->> hooks
                              (rewrite-hooks!))]
 
@@ -181,3 +181,16 @@
          name
          comp-bindings
          rewritten-hooks))}))
+
+(defn deftx
+  [{:keys [node]}]
+  (let [[_ name args tx-args & more] (:children node)]
+    ;; fuck if I know
+    {:node
+     (api/list-node
+       [(api/token-node 'defn)
+        name
+        args
+        (api/list-node
+          (into [(api/token-node 'fn) tx-args]
+            more))])}))
