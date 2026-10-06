@@ -293,14 +293,14 @@
   (let [rt-ref (::sg/runtime-ref tx-env)
         ^not-native before (::sg/kv @rt-ref)
 
-        tx-env
+        tx-before
         (-kv-reduce
           before
           (fn [^not-native tx-env kv-table kv]
             (-assoc tx-env kv-table (kv/transacted kv)))
           tx-env)]
 
-    (update tx-env ::sg/tx-after conj
+    (update tx-before ::sg/tx-after conj
       (fn kv-interceptor-after [^not-native tx-env]
         (when-not (identical? (::sg/kv @rt-ref) before)
           (throw (js/Error. "someone messed with kv state while in tx")))
@@ -309,20 +309,54 @@
               (-kv-reduce
                 before
                 (fn [^not-native tx-info kv-table _]
-                  (let [^not-native kv (-lookup tx-env kv-table)]
+                  (let [^not-native kv
+                        (-lookup tx-env kv-table)
 
-                    ;; completely disallow (assoc tx-env :a-defined-table {:a "new-map"})
-                    ;; FIXME: could actually allow that and so some sort of diff when getting a map?
-                    ;; but user should have merged instead
-                    (when-not (instance? kv/TransactedData kv)
-                      (throw (js/Error. (str "during transaction the " kv-table " table was replaced. only a modified table can be returned."))))
+                        ^not-native kv
+                        (cond
+                          (instance? kv/TransactedData kv)
+                          kv
 
-                    (let [commit (kv/tx-commit! kv)]
-                      (if (identical? (:data commit) (:data-before commit))
-                        ;; if no changes were done there should be no trace in tx-info
-                        ;; saves some time later in invalidate-kv!
-                        tx-info
-                        (-assoc tx-info kv-table commit)))))
+                          ;; acts as dissoc-all
+                          (nil? kv)
+                          (let [kv-actual (-lookup tx-before kv-table)]
+                            (-kv-reduce
+                              kv-actual
+                              (fn [kv k v]
+                                (dissoc kv k))
+                              kv-actual))
+
+                          ;; user turned transacted table into a map, acts as an override
+                          ;; where something may just want to empty out a table or replace a full table with remote data
+                          ;; merge it while
+                          (map? kv)
+                          (let [^not-native kv-actual (-lookup tx-before kv-table)
+                                sentinel (js-obj)]
+                            (reduce
+                              (fn [^not-native new-kv k]
+                                (let [new-v (-lookup kv k sentinel)]
+                                  (if (identical? new-v sentinel)
+                                    ;; entry was removed
+                                    (-dissoc new-kv k)
+                                    ;; otherwise just assoc, TransactedData checks if equal already
+                                    (-assoc new-kv k new-v)
+                                    )))
+                              kv-actual
+                              ;; need to process union of all keys, otherwise might miss new ones
+                              (into (set (keys kv-actual)) (keys kv))))
+
+                          :else
+                          (throw (js/Error. (str "during transaction the " kv-table " was replaced with an invalid return value: " (type kv)))))
+
+
+                        commit
+                        (kv/tx-commit! kv)]
+
+                    (if (identical? (:data commit) (:data-before commit))
+                      ;; if no changes were done there should be no trace in tx-info
+                      ;; saves some time later in invalidate-kv!
+                      tx-info
+                      (-assoc tx-info kv-table commit))))
                 {})
 
               kv-after
