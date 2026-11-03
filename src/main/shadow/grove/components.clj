@@ -1,6 +1,8 @@
 (ns shadow.grove.components
-  (:require [clojure.spec.alpha :as s]
-            [clojure.set :as set]))
+  (:require
+    [cljs.core :as cljs]
+    [clojure.spec.alpha :as s]
+    [clojure.set :as set]))
 
 (defn r-> [init rfn coll]
   (reduce rfn init coll))
@@ -17,91 +19,48 @@
 ;; would make env a dependency of some-hook although it isn't
 ;; should be rather unlikely though so doesn't matter for now
 
-(defn destructure-keys-key?
-  "true for the :keys/:syms/:strs (and ns/keys etc) keys in a map destructure"
-  [k]
-  (and (keyword? k)
-       (contains? #{"keys" "syms" "strs"} (name k))))
+(declare find-used-bindings)
+
+(defn binding-form-idents
+  "all symbol and keyword names used in a binding form.
+   every symbol a destructure binds is derived from one of those, gensyms are not."
+  [form]
+  (into #{}
+    (comp (filter ident?)
+      (map #(symbol (name %))))
+    (tree-seq coll? seq form)))
+
+(defn destructure-info
+  "analyzes a binding form by letting the cljs compiler destructure it, the same
+   way let and fn will. so whatever syntax the compiler supports (e.g. :keys! in 1.13)
+   works here too, without having to parse it.
+
+   returns {:syms [...] :deps #{...}}
+   :syms all symbols bound in order, without _. a symbol bound twice appears once, last binding wins as in let.
+   :deps the bindings used by the destructure itself, e.g. by :or defaults or lookup keys.
+         symbols bound earlier in the same form shadow bindings of the same name, same as in let."
+  [bindings form]
+  (let [idents (binding-form-idents form)]
+    (loop [syms []
+           deps #{}
+           visible bindings
+           pairs (seq (partition 2 (cljs/destructure [form (gensym "val")])))]
+      (if-not pairs
+        {:syms (into [] (comp (remove #(= '_ %)) (distinct)) syms)
+         :deps deps}
+        (let [[[sym init] & more] pairs
+              user-sym? (contains? idents sym)]
+          (recur
+            (cond-> syms user-sym? (conj sym))
+            (find-used-bindings deps visible init)
+            (cond-> visible user-sym? (dissoc sym))
+            more))))))
 
 (defn binding-syms
   "returns a vector of all symbols bound by a destructuring binding form
-   in the order they appear. _ is never included."
+   in the order they are bound. _ is never included."
   [form]
-  (cond
-    (symbol? form)
-    (if (= '_ form) [] [form])
-
-    (vector? form)
-    (loop [syms []
-           s (seq form)]
-      (if-not s
-        syms
-        (let [[x & more] s]
-          (if (or (= '& x) (= :as x))
-            (recur (into syms (binding-syms (first more))) (next more))
-            (recur (into syms (binding-syms x)) more)))))
-
-    (map? form)
-    (reduce-kv
-      (fn [syms k v]
-        (cond
-          (= :as k)
-          (into syms (binding-syms v))
-
-          (= :or k)
-          syms
-
-          (destructure-keys-key? k)
-          (into syms
-            (comp (map #(with-meta (symbol (name %)) (meta %)))
-                  (remove #(= '_ %)))
-            v)
-
-          ;; {binding-form lookup-key}
-          :else
-          (into syms (binding-syms k))))
-      []
-      form)
-
-    :else
-    (throw (ex-info "invalid binding form" {:form form}))))
-
-(declare find-used-bindings)
-
-(defn find-binding-form-deps
-  "returns the set of bindings used by a destructuring binding form.
-   only the parts evaluated at runtime can use bindings, :or defaults and map lookup keys.
-   the symbols being bound are not uses, even if they have the same name as an existing binding."
-  [bindings form]
-  (cond
-    (vector? form)
-    (into #{} (mapcat #(find-binding-form-deps bindings %)) form)
-
-    (map? form)
-    (reduce-kv
-      (fn [used k v]
-        (cond
-          (= :as k)
-          used
-
-          ;; whether the default is actually used is only known at runtime
-          ;; so the destructure always depends on it
-          (= :or k)
-          (find-used-bindings used bindings (vec (vals v)))
-
-          (destructure-keys-key? k)
-          used
-
-          ;; {binding-form lookup-key}
-          :else
-          (-> used
-              (set/union (find-binding-form-deps bindings k))
-              (find-used-bindings bindings v))))
-      #{}
-      form)
-
-    :else
-    #{}))
+  (:syms (destructure-info {} form)))
 
 (defn binding-top-level-as
   "returns the :as symbol of a map or vector binding form, only checks the top level"
@@ -123,7 +82,7 @@
   (binding-syms '{:keys [foo] :or {foo 1}})
   (binding-syms '{:keys [foo ::bar] ::keys [baz] :strs [s] qux :qux :as x})
   (binding-syms '{{:keys [nested] :as inner} :foo [a _ & more :as all] :bar})
-  (find-binding-form-deps
+  (destructure-info
     '{default-a {} some-key {} nested {} unused {}}
     '{{:keys [nested] :or {nested default-a}} some-key :or {x 1}})
   (binding-top-level-as '[a b :as x]))
@@ -220,25 +179,19 @@
 (defn add-destructure-slot
   "adds a slot running run-form whose result is destructured via binding-form.
    own-sym if set is bound to the slot value itself.
-   every symbol bound by binding-form except skip-sym gets a value cell."
+   every other symbol bound by binding-form gets a value cell."
   [{:keys [slot-idx bindings] :as state}
-   {:keys [binding-form own-sym skip-sym run-deps run-form debug-info]}]
+   {:keys [binding-form own-sym run-deps run-form debug-info]}]
 
-  (let [all-syms
-        (binding-syms binding-form)
-
-        _ (when-not (apply distinct? nil all-syms)
-            (throw (ex-info "duplicate symbol in binding" {:form binding-form :syms all-syms})))
+  (let [{:keys [syms] expr-deps :deps}
+        ;; expr-deps, :or defaults or lookup keys may use other bindings
+        ;; they are evaluated in the check fn, not the run fn
+        (destructure-info bindings binding-form)
 
         cell-syms
-        (->> all-syms
-             (remove #(= skip-sym %))
+        (->> syms
+             (remove #(= own-sym %))
              (vec))
-
-        ;; :or defaults or lookup keys may use other bindings
-        ;; they are evaluated in the check fn, not the run fn
-        expr-deps
-        (find-binding-form-deps bindings binding-form)
 
         deps
         (set/union run-deps expr-deps)
@@ -359,44 +312,45 @@
 
 (defmulti analyze-slot (fn [state slot] (:name slot)))
 
-(defn analyze-arg
-  [{:keys [comp-sym] :as state} idx binding]
-  (cond
-    (symbol? binding)
+;; args are destructured when the component is called, not when it mounts
+;;
+;; (defc ui-thing [{:keys [foo]} bar] ...)
+;;
+;; gets an args-fn of (fn [{:keys [foo]} bar] [foo bar]), so (ui-thing {:foo 1 :baz 2} 3)
+;; creates a seed with args [1 3]. every symbol bound by the arg vector is its own arg,
+;; the map itself is only kept if bound via :as. so changes to keys the component
+;; doesn't bind don't even make the seed not= and a destructure that throws
+;; (e.g. :keys! in 1.13) throws in the caller, not later on mount.
+;;
+;; ^:stable works on the whole form, marking everything it binds as stable,
+;; or on individual symbols, e.g. {:keys [^:stable id label]} or {:keys [label] :as ^:stable item}
+
+(defn analyze-args [state args]
+  (let [syms
+        ;; fn params are a valid vector destructure, & included
+        (binding-syms args)
+
+        stable-syms
+        (into #{}
+          (comp (filter #(:stable (meta %)))
+            (mapcat binding-syms))
+          ;; ^:stable on top level forms or plain symbols
+          (concat (remove #(= '& %) args)
+            ;; ^:stable on symbols inside destructure forms
+            syms))]
+
     (-> state
-        (assoc-in [:args idx] {:name binding :idx idx :stable (:stable (meta binding))})
-        (assoc-in [:bindings binding] {:type :arg :name binding :idx idx}))
-
-    (or (map? binding) (vector? binding))
-    (let [as
-          (binding-top-level-as binding)
-
-          arg-name
-          (or as (symbol (str "__arg$" idx)))
-
-          ;; allow both?
-          ;; ^:stable {:keys [foo bar] :as x}
-          ;; {:keys [foo bar] :as ^:stable x}
-          stable
-          (or (:stable (meta binding))
-              (:stable (meta as)))]
-
-      (-> state
-          (assoc-in [:args idx] {:name arg-name :idx idx :stable stable})
-          (assoc-in [:bindings arg-name] {:type :arg :name arg-name :idx idx})
-          ;; :as is the arg itself, the slot only provides the destructured values
-          (add-destructure-slot
-            {:binding-form binding
-             :skip-sym as
-             :run-deps #{arg-name}
-             :run-form `(fn [~comp-sym] (get-arg ~comp-sym ~idx))
-             :debug-info {:type :destructure-arg
-                          :name (str arg-name)
-                          :column (:column (meta binding))
-                          :line (:line (meta binding))}})))
-
-    :else
-    (throw (ex-info "unsupported form for component arg" {:binding binding :idx idx}))))
+        (assoc :args-fn
+               `(fn ~args
+                  [~@syms])
+               :min-args
+               (count (take-while #(not= '& %) args)))
+        (rkv->
+          (fn [state idx sym]
+            (-> state
+                (assoc-in [:args idx] {:name sym :idx idx :stable (contains? stable-syms sym)})
+                (assoc-in [:bindings sym] {:type :arg :name sym :idx idx})))
+          syms))))
 
 (defn add-data-binding
   [{:keys [comp-sym slot-idx bindings] :as state}
@@ -444,7 +398,6 @@
         (add-destructure-slot state
           {:binding-form binding
            :own-sym as
-           :skip-sym as
            :run-deps deps
            :run-form run-form
            :debug-info {:type :bind
@@ -597,7 +550,7 @@
              :opts opts
              :effect-idx 0
              :slot-idx 0}
-            (rkv-> analyze-arg args)
+            (analyze-args args)
             (r-> analyze-slot slots))
 
         include-debug-info?
@@ -635,6 +588,8 @@
     `(def ~(vary-meta comp-name assoc :tag 'not-native)
        (make-component-config
          ~(str *ns* "/" comp-name)
+         ~(:min-args state)
+         ~(:args-fn state)
          (cljs.core/array
            ~@(->> (:slots state)
                   (map-indexed
@@ -653,8 +608,8 @@
                (reduce bit-set 0))
          ~(or opts {})
          ;; fn that checks args and invalidates slots or sets render-required
+         ;; args are always produced by args-fn, so their count is correct
          (fn [~comp-sym ~old-args-sym ~new-args-sym]
-           (check-args! ~comp-sym ~new-args-sym ~(count (:args state)))
            ~@(for [{:keys [idx affects]} (:args state)
                    :let [affects-render? (contains? render-args idx)
                          affects-slots? (seq affects)]

@@ -211,3 +211,71 @@
          (fn []
            (is (= [:b] (take-log! log-ref)))
            (is (= "a=1 b=5" (.-textContent root))))]))))
+
+(defn seed-args [^clj seed]
+  (.-args seed))
+
+(defc ui-arg-keys [{:keys [foo]}]
+  (render (str foo)))
+
+(defc ui-arg-keys-as [{:keys [foo] :as m}]
+  (render (str foo (count m))))
+
+(deftest test-arg-destructure-on-call
+  ;; destructured when called, the seed only holds what the component binds
+  (is (= [1] (seed-args (ui-arg-keys {:foo 1}))))
+  ;; so keys it doesn't bind don't make seeds differ
+  (is (= (ui-arg-keys {:foo 1}) (ui-arg-keys {:foo 1 :bar 2})))
+  (is (not= (ui-arg-keys {:foo 1}) (ui-arg-keys {:foo 2})))
+
+  ;; :as keeps the map
+  (is (= #{1 {:foo 1}} (set (seed-args (ui-arg-keys-as {:foo 1})))))
+  (is (not= (ui-arg-keys-as {:foo 1}) (ui-arg-keys-as {:foo 1 :bar 2}))))
+
+;; stand-in for :keys! until the compiler supports it
+;; a vector destructure of something not sequential throws too
+(defc ui-arg-throws [[a b]]
+  (render (str a b)))
+
+(deftest test-arg-destructure-throws-on-call
+  (is (= [1 2] (seed-args (ui-arg-throws [1 2]))))
+  ;; throws in the caller, without anything mounting
+  (is (thrown? js/Error (ui-arg-throws 1))))
+
+(defc ui-arg-rest [a & more]
+  (render (str a (pr-str more))))
+
+(deftest test-arg-rest
+  (is (= [1 [2 3]] (seed-args (ui-arg-rest 1 2 3))))
+  (is (= [1 nil] (seed-args (ui-arg-rest 1))))
+  (is (thrown? js/Error (ui-arg-rest))))
+
+(defc ui-arg-stable [{:keys [^:stable id label]} log-ref]
+  (effect :mount [env]
+    (swap! log-ref conj [:mount id]))
+  (render (str id ":" label)))
+
+(deftest test-arg-destructure-stable
+  (let [{:keys [root rt-ref]} (make-env ::arg-stable)
+        log-ref (atom [])]
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root (ui-arg-stable {:id 1 :label "a"} log-ref))
+           (is (= "1:a" (.-textContent root))))
+
+         (fn []
+           (is (= [[:mount 1]] (take-log! log-ref)))
+           ;; label is not stable, updates in place
+           (sg/render rt-ref root (ui-arg-stable {:id 1 :label "b"} log-ref))
+           (is (= "1:b" (.-textContent root))))
+
+         (fn []
+           (is (= [] (take-log! log-ref)))
+           ;; id is, remounts
+           (sg/render rt-ref root (ui-arg-stable {:id 2 :label "b"} log-ref))
+           (is (= "2:b" (.-textContent root))))
+
+         (fn []
+           (is (= [[:mount 2]] (take-log! log-ref))))]))))

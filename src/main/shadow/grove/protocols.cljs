@@ -43,6 +43,8 @@
 ;; with already constructed components
 (deftype ComponentConfig
   [component-name
+   min-args
+   args-fn
    slots
    slot-init-bits
    opts
