@@ -21,6 +21,6 @@
    {com.thheller/shadow-css {:local/root "../shadow-css"}}}
 
   :server
-  {:extra-deps {thheller/shadow-cljs {:mvn/version "3.3.6"}}
+  {:extra-deps {thheller/shadow-cljs {:mvn/version "3.5.11"}}
    :jvm-opts ["-Dfile.encoding=UTF-8"]
    :main-opts ["-m" "shadow.cljs.devtools.cli" "run" "repl/start"]}}}
