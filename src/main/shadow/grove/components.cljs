@@ -78,25 +78,25 @@
   (-invoke
     ([this]
      (check-arity! this 0)
-     (ComponentInit. this ((.-args-fn this))))
+     (ComponentInit. this (.args-fn this)))
     ([this a1]
      (check-arity! this 1)
-     (ComponentInit. this ((.-args-fn this) a1)))
+     (ComponentInit. this (.args-fn this a1)))
     ([this a1 a2]
      (check-arity! this 2)
-     (ComponentInit. this ((.-args-fn this) a1 a2)))
+     (ComponentInit. this (.args-fn this a1 a2)))
     ([this a1 a2 a3]
      (check-arity! this 3)
-     (ComponentInit. this ((.-args-fn this) a1 a2 a3)))
+     (ComponentInit. this (.args-fn this a1 a2 a3)))
     ([this a1 a2 a3 a4]
      (check-arity! this 4)
-     (ComponentInit. this ((.-args-fn this) a1 a2 a3 a4)))
+     (ComponentInit. this (.args-fn this a1 a2 a3 a4)))
     ([this a1 a2 a3 a4 a5]
      (check-arity! this 5)
-     (ComponentInit. this ((.-args-fn this) a1 a2 a3 a4 a5)))
+     (ComponentInit. this (.args-fn this a1 a2 a3 a4 a5)))
     ([this a1 a2 a3 a4 a5 a6]
      (check-arity! this 6)
-     (ComponentInit. this ((.-args-fn this) a1 a2 a3 a4 a5 a6)))
+     (ComponentInit. this (.args-fn this a1 a2 a3 a4 a5 a6)))
     ;; FIXME: add more, user should really use maps at this point
     ))
 
