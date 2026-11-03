@@ -446,3 +446,529 @@
   (when-not (empty? coll)
     ;; forced vec, eliminates lazy seqs and allows skipping checks later
     (SimpleCollectionInit. (vec coll) render-fn)))
+
+;; diff-seq / diff-keyed-seq
+;;
+;; matching modes, each item has a key
+;;   diff-seq           key is the item, keys match when identical?
+;;                      (JS Map is SameValueZero, so strings/numbers by value)
+;;   diff-seq-by-value  key is the item, keys match when =
+;;   diff-keyed-seq     key is (key-fn item), keys match when =
+;;
+;; sync steps, all on the remaining old/new ranges
+;;   1. skip matching heads, then matching tails. covers insert/remove anywhere,
+;;      append, prepend, single item update, without any lookup structure
+;;   2. one side exhausted -> plain insert or remove
+;;   3. old head matches new tail (or vice versa) -> move it, back to 1.
+;;      handles swaps and single item moves
+;;   4. unkeyed only: heads differ but next pair matches -> render new head over
+;;      old head in place, back to 1. same for tails. handles scattered updates
+;;   5. otherwise general case: lookup over remaining old (head idx per key,
+;;      duplicates chained via Int32Array so [1 1 1] works), match remaining new.
+;;      unkeyed only: unmatched new reuse unmatched old in order (simple-seq
+;;      style render-over). leftover old destroyed, leftover new created.
+;;      if reused items are out of order, keep the longest increasing
+;;      subsequence in place, move the rest
+;;
+;; keyed mode never renders one key over another key's DOM, so per item DOM
+;; state stays with its key, same as keyed-seq.
+;;
+;; matched items skip rendering when render-fn is identical and the data is
+;; identical (or = in by-value mode). the idx passed to render-fn may be stale
+;; for such items, same as keyed-seq.
+
+(declare DiffCollectionInit)
+
+(deftype DiffItem [^:mutable key ^:mutable data ^:mutable managed])
+
+(defn- diff-lookup-key
+  "JS Map key. identity mode uses the key itself. = modes use strings/numbers
+   directly and hash everything else, collisions are resolved by checking ="
+  [^boolean equiv? k]
+  (if (and equiv? (not (string? k)) (not (number? k)))
+    (hash k)
+    k))
+
+(defn- diff-new-key
+  "key of new item n. new-keys is nil when unkeyed (key is the item),
+   otherwise a cache of computed (kfn item), filled lazily"
+  [^function kfn ^array new-keys ^not-native new-coll n]
+  (if (nil? new-keys)
+    (-nth new-coll n)
+    (let [k (aget new-keys n)]
+      (if (undefined? k)
+        (let [k (kfn (-nth new-coll n))]
+          (aset new-keys n k)
+          k)
+        k))))
+
+(defn- diff-match? [^boolean equiv? kfn new-keys ^DiffItem item new-coll n]
+  (or (identical? (.-data item) (-nth new-coll n))
+      (and equiv? (= (.-key item) (diff-new-key kfn new-keys new-coll n)))))
+
+(defn- diff-render [^function rfn ^boolean keyed? data idx key]
+  (if keyed?
+    (rfn data idx key)
+    (rfn data idx)))
+
+(defn- diff-item-sync!
+  [env ^DiffItem item key data idx ^function rfn ^boolean keyed? ^boolean skip-render? ^boolean dom-entered?]
+  (when-not skip-render?
+    (let [^not-native managed (.-managed item)
+          rendered (diff-render rfn keyed? data idx key)]
+      (if (p/supports? managed rendered)
+        (p/dom-sync! managed rendered)
+        (let [new-managed (common/replace-managed env managed rendered)]
+          (when dom-entered?
+            (p/dom-entered! new-managed))
+          (set! item -managed new-managed)))))
+  (set! item -key key)
+  (set! item -data data))
+
+(defn- diff-anchor
+  "DOM anchor for inserting at new idx ne. everything after ne is final."
+  [^array new-items ne marker-after]
+  (let [n (inc ne)]
+    (if (< n (alength new-items))
+      (p/dom-first ^not-native (.-managed ^DiffItem (aget new-items n)))
+      marker-after)))
+
+(defn- diff-lis
+  "positions in arr (ascending) forming a longest strictly increasing
+   subsequence, ignoring negative entries"
+  [^js arr]
+  (let [n (alength arr)
+        prev (js/Int32Array. n)
+        tails (js/Int32Array. n)]
+    (loop [i 0 len 0]
+      (if (< i n)
+        (let [v (aget arr i)]
+          (cond
+            (neg? v)
+            (recur (inc i) len)
+
+            (or (zero? len) (> v (aget arr (aget tails (dec len)))))
+            (do (aset prev i (if (zero? len) -1 (aget tails (dec len))))
+                (aset tails len i)
+                (recur (inc i) (inc len)))
+
+            :else
+            (let [x (loop [lo 0 hi (dec len)]
+                      (if (< lo hi)
+                        (let [mid (unsigned-bit-shift-right (+ lo hi) 1)]
+                          (if (< (aget arr (aget tails mid)) v)
+                            (recur (inc mid) hi)
+                            (recur lo mid)))
+                        lo))]
+              (aset prev i (if (pos? x) (aget tails (dec x)) -1))
+              (aset tails x i)
+              (recur (inc i) len))))
+
+        (let [out (js/Int32Array. len)]
+          (loop [k (dec len)
+                 j (if (pos? len) (aget tails (dec len)) -1)]
+            (when (>= k 0)
+              (aset out k j)
+              (recur (dec k) (aget prev j))))
+          out)))))
+
+(defn- diff-sync-range!
+  "general case for old-items[os..oe] -> new-coll[ns..ne], inclusive, both non-empty.
+   in the DOM the remaining old items sit between the final head and the final tail."
+  [env dom-parent marker-after ^array old-items ^not-native new-coll ^array new-items
+   os oe ns ne ^function rfn ^function kfn new-keys
+   ^boolean equiv? ^boolean keyed? ^boolean skip-equiv? ^boolean rfn-identical? ^boolean dom-entered?]
+  (let [om (inc (- oe os))
+        nm (inc (- ne ns))
+        anchor-after (diff-anchor new-items ne marker-after)
+
+        ;; lookup key -> relative old idx of first unclaimed item with that key
+        lookup (js/Map.)
+        ;; relative old idx -> next relative old idx with same lookup key, or -1
+        next-same (js/Int32Array. om)
+        ;; relative new idx -> relative old idx, or -1 for create
+        sources (.fill (js/Int32Array. nm) -1)
+        ;; 1 if new item matched an old item by key (render may be skipped)
+        matched (js/Uint8Array. nm)
+        ;; 1 if old item is reused
+        used (js/Uint8Array. om)]
+
+    ;; build lookup backwards so chains are in ascending order
+    (loop [k (dec om)]
+      (when (>= k 0)
+        (let [lkey (diff-lookup-key equiv? (.-key ^DiffItem (aget old-items (+ os k))))
+              head (.get lookup lkey)]
+          (aset next-same k (if (undefined? head) -1 head))
+          (.set lookup lkey k)
+          (recur (dec k)))))
+
+    ;; match new against old
+    (dotimes [j nm]
+      (let [key (diff-new-key kfn new-keys new-coll (+ ns j))
+            lkey (diff-lookup-key equiv? key)
+            head (.get lookup lkey)]
+        (when-not (undefined? head)
+          (let [k (if-not equiv?
+                    ;; identity: head always matches, unlink it
+                    (let [nxt (aget next-same head)]
+                      (if (neg? nxt)
+                        (.delete lookup lkey)
+                        (.set lookup lkey nxt))
+                      head)
+                    ;; =: hash collision possible, walk chain checking =
+                    (loop [prev -1 k head]
+                      (cond
+                        (neg? k)
+                        -1
+
+                        (= key (.-key ^DiffItem (aget old-items (+ os k))))
+                        (let [nxt (aget next-same k)]
+                          (cond
+                            (not (neg? prev))
+                            (aset next-same prev nxt)
+                            (neg? nxt)
+                            (.delete lookup lkey)
+                            :else
+                            (.set lookup lkey nxt))
+                          k)
+
+                        :else
+                        (recur k (aget next-same k)))))]
+            (when-not (neg? k)
+              (aset sources j k)
+              (aset matched j 1)
+              (aset used k 1))))))
+
+    ;; unkeyed only: pair unmatched new with unmatched old, in order
+    (when-not keyed?
+      (loop [j 0 k 0]
+        (when (and (< j nm) (< k om))
+          (cond
+            (not (neg? (aget sources j)))
+            (recur (inc j) k)
+
+            (== 1 (aget used k))
+            (recur j (inc k))
+
+            :else
+            (do (aset sources j k)
+                (aset used k 1)
+                (recur (inc j) (inc k)))))))
+
+    ;; destroy old items nobody wants, before moving anything
+    (dotimes [k om]
+      (when (zero? (aget used k))
+        (p/destroy! ^not-native (.-managed ^DiffItem (aget old-items (+ os k))) true)))
+
+    ;; only need moves if reused items are out of order
+    (let [moved?
+          (loop [j 0 max-k -1]
+            (if (< j nm)
+              (let [k (aget sources j)]
+                (cond
+                  (neg? k) (recur (inc j) max-k)
+                  (< k max-k) true
+                  :else (recur (inc j) k)))
+              false))
+
+          stay (if moved? (diff-lis sources) (js/Int32Array. 0))]
+
+      ;; walk backwards, insert before anchor
+      (loop [j (dec nm)
+             anchor anchor-after
+             stay-pos (dec (alength stay))]
+        (when (>= j 0)
+          (let [idx (+ ns j)
+                data (-nth new-coll idx)
+                key (diff-new-key kfn new-keys new-coll idx)
+                k (aget sources j)]
+            (if (neg? k)
+              (let [^not-native managed (p/as-managed (diff-render rfn keyed? data idx key) env)]
+                (p/dom-insert managed dom-parent anchor)
+                (when dom-entered?
+                  (p/dom-entered! managed))
+                (aset new-items idx (DiffItem. key data managed))
+                (recur (dec j) (p/dom-first managed) stay-pos))
+
+              (let [^DiffItem item (aget old-items (+ os k))
+                    stays? (and (>= stay-pos 0) (== j (aget stay stay-pos)))]
+                (diff-item-sync! env item key data idx rfn keyed?
+                  (and rfn-identical?
+                       (== 1 (aget matched j))
+                       (or skip-equiv? (identical? data (.-data item))))
+                  dom-entered?)
+                (let [^not-native managed (.-managed item)]
+                  (when (and moved? (not stays?))
+                    (p/dom-insert managed dom-parent anchor))
+                  (aset new-items idx item)
+                  (recur (dec j)
+                    (p/dom-first managed)
+                    (if stays? (dec stay-pos) stay-pos)))))))))))
+
+(deftype DiffCollection
+  [env
+   ^:mutable coll
+   ^:mutable ^function render-fn
+   ^:mutable key-fn
+   ^:mutable ^array items
+   marker-before
+   marker-after
+   ^boolean ^:mutable dom-entered?]
+
+  p/IManaged
+  (dom-first [this] marker-before)
+
+  (dom-insert [this parent anchor]
+    (.insertBefore parent marker-before anchor)
+    (.forEach items
+      (fn [^DiffItem item]
+        (p/dom-insert ^not-native (.-managed item) parent anchor)))
+    (.insertBefore parent marker-after anchor))
+
+  (dom-entered! [this]
+    (set! dom-entered? true)
+    (.forEach items
+      (fn [^DiffItem item]
+        (p/dom-entered! ^not-native (.-managed item)))))
+
+  (supports? [this next]
+    (and (instance? DiffCollectionInit next)
+         ;; stored keys mean something else when switching between keyed and unkeyed
+         (identical? (nil? key-fn) (nil? (.-key-fn ^DiffCollectionInit next)))))
+
+  (dom-sync! [this ^DiffCollectionInit next]
+    (let [rfn-identical? (identical? render-fn (.-render-fn next))
+          ^not-native old-coll coll
+          ^not-native new-coll (.-coll next)]
+
+      (when-not (and rfn-identical? (identical? old-coll new-coll))
+        (let [dom-parent (.-parentNode marker-after)]
+          (when-not dom-parent
+            (throw (ex-info "sync while not in dom?" {})))
+
+          (set! coll new-coll)
+          (set! render-fn (.-render-fn next))
+          (set! key-fn (.-key-fn next))
+
+          (let [keyed? (some? key-fn)
+                by-value? (.-by-value? next)
+                ;; keys compared by = instead of identical?
+                equiv? (or keyed? by-value?)
+                ;; key match implies data match, so render can be skipped
+                skip-equiv? (and by-value? (not keyed?))
+
+                ^function rfn (if keyed? (common/ifn3-wrap render-fn) (common/ifn2-wrap render-fn))
+                ^function kfn (when keyed? (common/ifn1-wrap key-fn))
+                old-items items
+                nc (-count new-coll)
+                new-items (js/Array. nc)
+                new-keys (when keyed? (js/Array. nc))]
+
+            (loop [os 0
+                   oe (dec (alength old-items))
+                   ns 0
+                   ne (dec nc)]
+
+              ;; 1. matching heads
+              (let [h (loop [h 0]
+                        (let [o (+ os h)
+                              n (+ ns h)]
+                          (if (and (<= o oe) (<= n ne))
+                            (let [^DiffItem item (aget old-items o)
+                                  data (-nth new-coll n)]
+                              (cond
+                                ;; hot path, no key work needed
+                                (identical? (.-data item) data)
+                                (do (when-not rfn-identical?
+                                      (diff-item-sync! env item (.-key item) data n rfn keyed? false dom-entered?))
+                                    (aset new-items n item)
+                                    (recur (inc h)))
+
+                                (and equiv? (= (.-key item) (if keyed? (diff-new-key kfn new-keys new-coll n) data)))
+                                (do (diff-item-sync! env item (if keyed? (diff-new-key kfn new-keys new-coll n) data) data n rfn keyed?
+                                      (and rfn-identical? skip-equiv?) dom-entered?)
+                                    (aset new-items n item)
+                                    (recur (inc h)))
+
+                                :else
+                                h))
+                            h)))
+                    os (+ os h)
+                    ns (+ ns h)
+
+                    ;; 1. matching tails
+                    t (loop [t 0]
+                        (let [o (- oe t)
+                              n (- ne t)]
+                          (if (and (>= o os) (>= n ns))
+                            (let [^DiffItem item (aget old-items o)
+                                  data (-nth new-coll n)]
+                              (cond
+                                ;; hot path, no key work needed
+                                (identical? (.-data item) data)
+                                (do (when-not rfn-identical?
+                                      (diff-item-sync! env item (.-key item) data n rfn keyed? false dom-entered?))
+                                    (aset new-items n item)
+                                    (recur (inc t)))
+
+                                (and equiv? (= (.-key item) (if keyed? (diff-new-key kfn new-keys new-coll n) data)))
+                                (do (diff-item-sync! env item (if keyed? (diff-new-key kfn new-keys new-coll n) data) data n rfn keyed?
+                                      (and rfn-identical? skip-equiv?) dom-entered?)
+                                    (aset new-items n item)
+                                    (recur (inc t)))
+
+                                :else
+                                t))
+                            t)))
+                    oe (- oe t)
+                    ne (- ne t)]
+
+                (cond
+                  ;; 2. old exhausted, insert remaining new
+                  (> os oe)
+                  (let [anchor (diff-anchor new-items ne marker-after)]
+                    (loop [idx ns]
+                      (when (<= idx ne)
+                        (let [data (-nth new-coll idx)
+                              key (diff-new-key kfn new-keys new-coll idx)
+                              ^not-native managed (p/as-managed (diff-render rfn keyed? data idx key) env)]
+                          (p/dom-insert managed dom-parent anchor)
+                          (when dom-entered?
+                            (p/dom-entered! managed))
+                          (aset new-items idx (DiffItem. key data managed))
+                          (recur (inc idx))))))
+
+                  ;; 2. new exhausted, remove remaining old
+                  (> ns ne)
+                  (loop [idx os]
+                    (when (<= idx oe)
+                      (p/destroy! ^not-native (.-managed ^DiffItem (aget old-items idx)) true)
+                      (recur (inc idx))))
+
+                  :else
+                  (let [^DiffItem os-item (aget old-items os)
+                        ^DiffItem oe-item (aget old-items oe)]
+                    (cond
+                      ;; 3. old head moved to tail
+                      (diff-match? equiv? kfn new-keys os-item new-coll ne)
+                      (let [data (-nth new-coll ne)]
+                        (diff-item-sync! env os-item (diff-new-key kfn new-keys new-coll ne) data ne rfn keyed?
+                          (and rfn-identical? (or skip-equiv? (identical? data (.-data os-item))))
+                          dom-entered?)
+                        (p/dom-insert ^not-native (.-managed os-item) dom-parent
+                          (diff-anchor new-items ne marker-after))
+                        (aset new-items ne os-item)
+                        (recur (inc os) oe ns (dec ne)))
+
+                      ;; 3. old tail moved to head, goes before first remaining old
+                      (diff-match? equiv? kfn new-keys oe-item new-coll ns)
+                      (let [data (-nth new-coll ns)]
+                        (diff-item-sync! env oe-item (diff-new-key kfn new-keys new-coll ns) data ns rfn keyed?
+                          (and rfn-identical? (or skip-equiv? (identical? data (.-data oe-item))))
+                          dom-entered?)
+                        (p/dom-insert ^not-native (.-managed oe-item) dom-parent
+                          (p/dom-first ^not-native (.-managed os-item)))
+                        (aset new-items ns oe-item)
+                        (recur os (dec oe) (inc ns) ne))
+
+                      ;; 4. unkeyed: render new head over old head, if next pair matches or it's the last pair
+                      (and (not keyed?)
+                           (or (and (== os oe) (== ns ne))
+                               (and (< os oe) (< ns ne)
+                                    (diff-match? equiv? kfn new-keys (aget old-items (inc os)) new-coll (inc ns)))))
+                      (let [data (-nth new-coll ns)]
+                        (diff-item-sync! env os-item data data ns rfn false false dom-entered?)
+                        (aset new-items ns os-item)
+                        (recur (inc os) oe (inc ns) ne))
+
+                      ;; 4. unkeyed: same for tails
+                      (and (not keyed?)
+                           (< os oe) (< ns ne)
+                           (diff-match? equiv? kfn new-keys (aget old-items (dec oe)) new-coll (dec ne)))
+                      (let [data (-nth new-coll ne)]
+                        (diff-item-sync! env oe-item data data ne rfn false false dom-entered?)
+                        (aset new-items ne oe-item)
+                        (recur os (dec oe) ns (dec ne)))
+
+                      ;; 5.
+                      :else
+                      (diff-sync-range! env dom-parent marker-after old-items new-coll new-items
+                        os oe ns ne rfn kfn new-keys
+                        equiv? keyed? skip-equiv? rfn-identical? dom-entered?))))))
+
+            (set! items new-items)))))
+
+    :synced)
+
+  (destroy! [this ^boolean dom-remove?]
+    (when dom-remove?
+      (doto (js/document.createRange)
+        (.setStartBefore marker-before)
+        (.setEndAfter marker-after)
+        (.deleteContents)))
+
+    (.forEach items
+      (fn [^DiffItem item]
+        (p/destroy! ^not-native (.-managed item) false)))))
+
+(defn construct-diff-seq [env coll render-fn key-fn]
+  (let [marker-before (common/dom-marker env "diff-seq-start")
+        marker-after (common/dom-marker env "diff-seq-end")
+        arr (js/Array. (count coll))
+        keyed? (some? key-fn)
+        rfn (if keyed? (common/ifn3-wrap render-fn) (common/ifn2-wrap render-fn))
+        kfn (when keyed? (common/ifn1-wrap key-fn))]
+
+    (reduce-kv
+      (fn [_ idx data]
+        (let [key (if keyed? (kfn data) data)]
+          (aset arr idx (DiffItem. key data (p/as-managed (diff-render rfn keyed? data idx key) env)))))
+      nil
+      coll)
+
+    (DiffCollection. env coll render-fn key-fn arr marker-before marker-after false)))
+
+(deftype DiffCollectionInit [coll render-fn ^boolean by-value? key-fn]
+  p/IConstruct
+  (as-managed [this env]
+    (construct-diff-seq env coll render-fn key-fn))
+
+  IEquiv
+  (-equiv [this ^DiffCollectionInit other]
+    (and (instance? DiffCollectionInit other)
+         (identical? render-fn (.-render-fn other))
+         (identical? by-value? (.-by-value? other))
+         ;; could be a keyword, can't use identical?
+         (keyword-identical? key-fn (.-key-fn other))
+         (= coll (.-coll other)))))
+
+(defn diff-seq
+  "like simple-seq, but tracks items by identical? so inserts, removes and
+   reorders move existing DOM instead of rendering over it"
+  [coll render-fn]
+  {:pre [(or (nil? coll) (sequential? coll))
+         (ifn? render-fn)]}
+  (when-not (empty? coll)
+    (DiffCollectionInit. (vec coll) render-fn false nil)))
+
+(defn diff-seq-by-value
+  "like diff-seq, but items match by ="
+  [coll render-fn]
+  {:pre [(or (nil? coll) (sequential? coll))
+         (ifn? render-fn)]}
+  (when-not (empty? coll)
+    (DiffCollectionInit. (vec coll) render-fn true nil)))
+
+(defn diff-keyed-seq
+  "same contract as keyed-seq, using the diff-seq algorithm.
+   duplicate keys only throw in dev builds."
+  [coll key-fn render-fn]
+  {:pre [(or (nil? coll) (sequential? coll))
+         (ifn? key-fn)
+         (ifn? render-fn)]}
+  (when-not (empty? coll)
+    (let [coll (vec coll)]
+      (when ^boolean js/goog.DEBUG
+        (when (not= (count coll) (count (into #{} (map key-fn) coll)))
+          (throw (ex-info "collection contains duplicated keys" {:coll coll}))))
+      (DiffCollectionInit. coll render-fn false key-fn))))

@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{color-scheme:light}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>diff-seq Benchmarks</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;700;800&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* layout: one reading column for prose, wider bands for heatmaps and tables; DOM-tree green as the accent */
+:root {
+  --bg: #f4f5f2;
+  --surface: #fdfdfc;
+  --ink: #141a17;
+  --ink-2: #4a524d;
+  --muted: #747c76;
+  --rule: #dce0db;
+  --accent: #1d6b57;
+  --accent-wash: #e2eee9;
+  --code-bg: #ebeee9;
+
+  --grid: #e3e6e1;
+  --axis: #c3c8c2;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4;
+
+  --mid: #ecedea; --mid-ink: #141a17;
+  --b1: #b7d3f6; --b2: #86b6ef; --b3: #5598e7; --b4: #2a78d6; --b5: #1c5cab;
+  --r1: #f4c2be; --r2: #ea9a93; --r3: #dd716a; --r4: #c74845; --r5: #9e3432;
+  --cell-dark: #0b0d0c; --cell-light: #ffffff;
+  --b1-ink: var(--cell-dark); --b2-ink: var(--cell-dark); --b3-ink: var(--cell-dark); --b4-ink: var(--cell-light); --b5-ink: var(--cell-light);
+  --r1-ink: var(--cell-dark); --r2-ink: var(--cell-dark); --r3-ink: var(--cell-dark); --r4-ink: var(--cell-light); --r5-ink: var(--cell-light);
+
+  --f-display: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1211; --surface: #171b19; --ink: #e6ebe8; --ink-2: #b3bcb6; --muted: #838c86; --rule: #2a302d;
+    --accent: #62bb9f; --accent-wash: #1b2b25; --code-bg: #1d2220;
+    --grid: #252a28; --axis: #3a403d;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+    --mid: #2c302e; --mid-ink: #e6ebe8;
+    --b1: #233e61; --b2: #295388; --b3: #2f69b2; --b4: #3b80d7; --b5: #5aa0f9;
+    --r1: #5d2d2a; --r2: #813936; --r3: #a74541; --r4: #ca5551; --r5: #ed756e;
+    --b1-ink: var(--cell-light); --b2-ink: var(--cell-light); --b3-ink: var(--cell-light); --b4-ink: var(--cell-dark); --b5-ink: var(--cell-dark);
+    --r1-ink: var(--cell-light); --r2-ink: var(--cell-light); --r3-ink: var(--cell-light); --r4-ink: var(--cell-dark); --r5-ink: var(--cell-dark);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1211; --surface: #171b19; --ink: #e6ebe8; --ink-2: #b3bcb6; --muted: #838c86; --rule: #2a302d;
+  --accent: #62bb9f; --accent-wash: #1b2b25; --code-bg: #1d2220;
+  --grid: #252a28; --axis: #3a403d;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+  --mid: #2c302e; --mid-ink: #e6ebe8;
+  --b1: #233e61; --b2: #295388; --b3: #2f69b2; --b4: #3b80d7; --b5: #5aa0f9;
+  --r1: #5d2d2a; --r2: #813936; --r3: #a74541; --r4: #ca5551; --r5: #ed756e;
+  --b1-ink: var(--cell-light); --b2-ink: var(--cell-light); --b3-ink: var(--cell-light); --b4-ink: var(--cell-dark); --b5-ink: var(--cell-dark);
+  --r1-ink: var(--cell-light); --r2-ink: var(--cell-light); --r3-ink: var(--cell-light); --r4-ink: var(--cell-dark); --r5-ink: var(--cell-dark);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 17px;
+  line-height: 1.55;
+}
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 72px;
+  display: grid;
+  gap: 56px;
+}
+.prose { max-width: 70ch; display: grid; gap: 14px; min-width: 0; }
+.prose p, .prose ul, .prose ol { margin: 0; }
+.prose ul, .prose ol { padding-left: 1.3em; display: grid; gap: 8px; }
+
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(2.1rem, 5vw, 3.2rem); font-weight: 800; line-height: 1.05; }
+h2 { font-size: 1.55rem; font-weight: 700; line-height: 1.2; }
+h3 { font-size: 1.1rem; font-weight: 700; line-height: 1.3; }
+.eyebrow {
+  font-family: var(--f-mono); font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--accent); margin: 0;
+}
+.dek { font-size: 1.2rem; color: var(--ink-2); max-width: 60ch; margin: 0; }
+.meta { font-size: 0.9rem; color: var(--muted); margin: 0; }
+header.top { display: grid; gap: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--rule); }
+
+section { display: grid; gap: 20px; min-width: 0; }
+.section-head { display: grid; gap: 8px; max-width: 70ch; }
+.section-head p { margin: 0; color: var(--ink-2); }
+
+code, .mono { font-family: var(--f-mono); font-size: 0.86em; }
+code { background: var(--code-bg); padding: 0.08em 0.35em; border-radius: 4px; }
+pre { margin: 0; font-family: var(--f-mono); font-size: 0.84rem; background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+a { color: var(--accent); }
+strong { font-weight: 600; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* findings */
+.findings { display: grid; gap: 0; border-top: 1px solid var(--rule); max-width: 78ch; }
+.finding { display: grid; grid-template-columns: 9.5rem 1fr; gap: 6px 20px; padding: 14px 0; border-bottom: 1px solid var(--rule); }
+.finding .fig { font-family: var(--f-display); font-weight: 700; font-size: 1.35rem; line-height: 1.2; color: var(--ink); }
+.finding .fig small { display: block; font-family: var(--f-body); font-weight: 400; font-size: 0.8rem; color: var(--muted); }
+.finding p { margin: 0; }
+@media (max-width: 560px) { .finding { grid-template-columns: 1fr; } }
+
+/* algorithm steps */
+.steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 0; counter-reset: step; max-width: 86ch; }
+.steps li { counter-increment: step; display: grid; grid-template-columns: 2.2rem minmax(0, 1fr) minmax(0, 15rem); gap: 4px 18px; padding: 14px 0; border-top: 1px solid var(--rule); align-items: start; }
+.steps li::before { content: counter(step); font-family: var(--f-display); font-weight: 800; font-size: 1.3rem; color: var(--accent); line-height: 1.3; }
+.steps .what p { margin: 0; }
+.steps .what h3 { margin-bottom: 4px; }
+.steps .ex { font-family: var(--f-mono); font-size: 0.8rem; color: var(--ink-2); background: var(--code-bg); padding: 8px 10px; border-radius: 6px; line-height: 1.55; overflow-x: auto; }
+@media (max-width: 720px) {
+  .steps li { grid-template-columns: 2.2rem minmax(0, 1fr); }
+  .steps .ex { grid-column: 2; }
+}
+
+table.plain { border-collapse: collapse; font-size: 0.95rem; }
+table.plain th, table.plain td { text-align: left; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+table.plain th { font-weight: 600; color: var(--ink-2); font-size: 0.85rem; }
+.scroll { overflow-x: auto; min-width: 0; }
+
+/* controls */
+.controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
+.control { display: flex; gap: 8px; align-items: center; font-size: 0.9rem; color: var(--ink-2); }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 8px; padding: 2px; background: var(--surface); }
+.seg button {
+  font: inherit; font-size: 0.88rem; border: 0; background: transparent; color: var(--ink-2);
+  padding: 5px 11px; border-radius: 6px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--accent-wash); color: var(--ink); font-weight: 600; }
+.seg button:focus-visible, select:focus-visible, .hm td[tabindex]:focus-visible, .bar-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+select {
+  font: inherit; font-size: 0.9rem; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--rule); border-radius: 6px; padding: 5px 8px;
+}
+.filter-row { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); padding-block: 10px; border-bottom: 1px solid var(--rule); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+
+/* cards */
+.card { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 18px; display: grid; gap: 14px; min-width: 0; }
+.card-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+.card-head h3 { font-size: 1.05rem; }
+.card-head p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+/* heatmap */
+.hm { border-collapse: separate; border-spacing: 2px; font-size: 0.82rem; }
+.hm th { font-weight: 600; color: var(--muted); font-size: 0.78rem; padding: 2px 4px; white-space: nowrap; }
+.hm thead th { text-align: center; font-family: var(--f-mono); font-weight: 500; }
+.hm tbody th { text-align: left; color: var(--ink-2); font-weight: 400; font-size: 0.86rem; padding-right: 10px; position: sticky; left: 0; background: var(--surface); z-index: 1; max-width: 17rem; white-space: normal; line-height: 1.25; }
+.hm td { min-width: 54px; height: 32px; text-align: center; font-variant-numeric: tabular-nums; border-radius: 3px; cursor: default; font-weight: 500; }
+.hm td.na { color: var(--muted); background: transparent; font-weight: 400; }
+.hm td.mid { background: var(--mid); color: var(--mid-ink); }
+.hm td.b1 { background: var(--b1); color: var(--b1-ink); } .hm td.b2 { background: var(--b2); color: var(--b2-ink); }
+.hm td.b3 { background: var(--b3); color: var(--b3-ink); } .hm td.b4 { background: var(--b4); color: var(--b4-ink); }
+.hm td.b5 { background: var(--b5); color: var(--b5-ink); }
+.hm td.r1 { background: var(--r1); color: var(--r1-ink); } .hm td.r2 { background: var(--r2); color: var(--r2-ink); }
+.hm td.r3 { background: var(--r3); color: var(--r3-ink); } .hm td.r4 { background: var(--r4); color: var(--r4-ink); }
+.hm td.r5 { background: var(--r5); color: var(--r5-ink); }
+.hm td:not(.na):hover { filter: brightness(1.08); }
+.scale { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 0.8rem; color: var(--muted); }
+.scale .sw { display: flex; gap: 2px; }
+.scale .sw span { width: 30px; height: 12px; border-radius: 2px; }
+.hm-grid { display: grid; gap: 20px; }
+
+/* charts */
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart text { font-family: var(--f-body); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.86rem; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 16px; height: 2px; border-radius: 1px; display: inline-block; }
+
+.bars { display: grid; gap: 18px; }
+.bar-group { display: grid; gap: 6px; }
+.bar-group h4 { margin: 0; font-size: 0.9rem; font-weight: 600; color: var(--ink-2); }
+.bar-row { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); gap: 12px; align-items: center; font-size: 0.86rem; border-radius: 4px; }
+.bar-row .lab { color: var(--ink-2); line-height: 1.25; }
+.bar-row .track { position: relative; height: 20px; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bar-row .bar { height: 14px; background: var(--s1); border-radius: 0 4px 4px 0; flex: none; }
+.bar-row.chosen .bar { background: var(--accent); }
+.bar-row .val { font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; font-size: 0.84rem; }
+.bar-row .val small { color: var(--muted); }
+@media (max-width: 560px) { .bar-row { grid-template-columns: 1fr; gap: 2px; } }
+
+/* results table */
+.results { border-collapse: collapse; font-size: 0.86rem; font-variant-numeric: tabular-nums; }
+.results th, .results td { padding: 7px 12px; border-bottom: 1px solid var(--rule); text-align: right; white-space: nowrap; }
+.results th:first-child, .results td:first-child { text-align: left; white-space: normal; min-width: 14rem; position: sticky; left: 0; background: var(--surface); }
+.results thead th { color: var(--ink-2); font-weight: 600; font-size: 0.82rem; vertical-align: bottom; }
+.results td small { display: block; color: var(--muted); font-size: 0.76rem; }
+.results td.best { font-weight: 600; color: var(--accent); }
+
+.tooltip {
+  position: fixed; z-index: 20; pointer-events: none; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; font-size: 0.82rem;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.16); max-width: 300px; line-height: 1.4;
+}
+.tooltip .t-title { color: var(--muted); font-size: 0.76rem; margin-bottom: 6px; }
+.tooltip .t-row { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; }
+.tooltip .t-row i { width: 12px; height: 2px; display: inline-block; }
+.tooltip .t-row b { font-variant-numeric: tabular-nums; font-weight: 600; }
+.tooltip .t-row span { color: var(--ink-2); }
+.tooltip .t-big { font-size: 1.05rem; font-weight: 600; }
+
+.decisions { display: grid; gap: 14px; max-width: 78ch; padding: 0; margin: 0; list-style: none; }
+.decisions li { padding: 14px 16px; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); display: grid; gap: 6px; }
+.decisions li p { margin: 0; }
+.decisions .rec { color: var(--ink-2); }
+.decisions .rec strong { color: var(--accent); }
+
+footer { color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--rule); padding-top: 16px; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="page">
+
+<header class="top">
+  <p class="eyebrow">shadow-grove · arborist collections · 3 Nov 2026</p>
+  <h1>diff-seq benchmarks</h1>
+  <p class="dek">A <code>simple-seq</code> that uses each item as its own key, plus a <code>keyed-seq</code> rebuilt on the same algorithm, measured against the current implementations at list sizes from 1 to 1000.</p>
+  <p class="meta">Headless Chromium 156 · arm64 Linux · release build · fragment rows · times are µs per update, median of 7 batches</p>
+</header>
+
+<section id="summary">
+  <div class="section-head">
+    <h2>Summary</h2>
+  </div>
+  <div class="prose">
+    <p>Removing one item from a <code>simple-seq</code> makes every following row render its neighbour's data. <code>diff-seq</code> keeps the <code>simple-seq</code> API but uses the item itself as its key. It compares the old and new list from both ends with <code>identical?</code>, which handles inserts, removes, swaps, single moves and in-place updates without any lookup structure, and only builds a lookup for real reorders. The same code with a <code>key-fn</code> is a drop-in <code>keyed-seq</code> replacement, and it was faster than the current one everywhere it was measured.</p>
+  </div>
+  <div class="findings">
+    <div class="finding">
+      <div class="fig">9×<small>remove first, 100 rows, incl. layout</small></div>
+      <p>Removing or inserting near the front of 100 rows takes 104 µs instead of 935 µs, with 0.5 renders and 2 DOM mutations per update instead of 99.5 and 464. The gain starts at 2 items (1.4×) and reaches 13× at 1000 rows. Removing from the middle is 4.8× faster at 100 rows.</p>
+    </div>
+    <div class="finding">
+      <div class="fig">1.0–22×<small>keyed-seq new vs keyed-seq, script time</small></div>
+      <p>The rebuilt <code>keyed-seq</code> was faster than the current one in every scenario and size. The only exceptions are a few cells at 1–3 items, 0.94–0.99×, which is within noise. The current one rebuilds a persistent map of all keys on every update, about 155 µs at 1000 rows even when one row changes; the new one takes 7 µs there. Including layout the gain is 1.0–1.3×, because both make the same DOM changes.</p>
+    </div>
+    <div class="finding">
+      <div class="fig">1–5 items<small>small lists</small></div>
+      <p>At these sizes every implementation costs 0.2–5 µs of script and 12–70 µs including layout per update. <code>diff-seq</code> already wins removals and inserts at 2 items, 1.4–2.5× including layout. It loses on swaps and reverses once layout is counted, about 0.73× (a swap in 5 rows takes 42 µs instead of 31). For in-place updates it is a fraction of a microsecond slower in script time.</p>
+    </div>
+    <div class="finding">
+      <div class="fig">0.68×<small>reverse, 1000 rows, incl. layout</small></div>
+      <p>Moving DOM costs more layout than rewriting text. Reverses, shuffles and swaps are faster with <code>simple-seq</code> once layout counts (reverse at 1000 rows: 10.2 ms vs 14.8 ms), and the same holds for both keyed implementations. Moves still keep per-row DOM state such as focus and input values.</p>
+    </div>
+    <div class="finding">
+      <div class="fig">8.6×<small>fresh equal maps, 1000 rows</small></div>
+      <p>Identity matching misses maps that a query builds fresh on every run, so <code>diff-seq</code> then does what <code>simple-seq</code> does plus a lookup. <code>diff-seq-by-value</code> matches them with <code>=</code> and is 8.6× faster there in script time (90 vs 777 µs; 0.92 vs 9.7 ms with layout). Elsewhere <code>=</code> costs up to 10% more script time, more for in-place updates: 1.8× for one changed row in a small list (under 0.3 µs) and 1.5× when every 10th row changes (17 µs at 1000 rows). Layout hides both.</p>
+    </div>
+    <div class="finding">
+      <div class="fig">6.6×<small>matching 1000 shuffled maps</small></div>
+      <p>The Map + Set proposal works, but a JS <code>Map</code> with duplicates chained in an <code>Int32Array</code> is 6.6× cheaper (37 vs 242 µs). The savings come from not allocating a Set per value and not hashing through a CLJS map. Both costs are small next to the 14 ms of moves and layout a 1000-row shuffle takes.</p>
+    </div>
+  </div>
+</section>
+
+
+<section id="algorithm">
+  <div class="section-head">
+    <h2>How diff-seq syncs a list</h2>
+    <p>Every item has a key. Steps 1 to 4 run in a loop on the part of the list that is still unresolved, and only step 5 needs a lookup structure. Most edits never get there.</p>
+  </div>
+  <ol class="steps">
+    <li>
+      <div class="what"><h3>Skip matching heads, then matching tails</h3>
+        <p>Compare old and new from the front while keys match, then from the back. Single inserts and removes anywhere, appends, prepends and single in-place updates all end here.</p></div>
+      <div class="ex">[a b c d] → [a c d]<br>head a · tails c d<br>old middle [b], new middle []</div>
+    </li>
+    <li>
+      <div class="what"><h3>One side empty: insert or remove</h3>
+        <p>If the old middle is empty the new items are created before the first tail item. If the new middle is empty the old ones are destroyed. No renders for anything else.</p></div>
+      <div class="ex">old middle [b] → destroy b<br>0 renders, 2 DOM mutations</div>
+    </li>
+    <li>
+      <div class="what"><h3>Old head is new tail, or old tail is new head: move it</h3>
+        <p>Checks both crossings and moves the one DOM item, then goes back to step 1. Swaps, rotations and single moves resolve with <code>identical?</code> checks only.</p></div>
+      <div class="ex">[1 2 3 4 5] → [1 5 3 4 2]<br>2 is new tail: move<br>5 is new head: move<br>3 4 match as heads</div>
+    </li>
+    <li>
+      <div class="what"><h3>Unkeyed only: render over in place</h3>
+        <p>If the heads differ but the next pair matches, render the new head over the old head, which is what <code>simple-seq</code> does. Same for tails. Scattered updates stay linear. Keyed mode skips this step so a key's DOM never shows another key.</p></div>
+      <div class="ex">[a B c D e] (B, D updated)<br>a matches · B≠b, c=c → render<br>c matches · D≠d, e=e → render</div>
+    </li>
+    <li>
+      <div class="what"><h3>General case: lookup, match, minimal moves</h3>
+        <p>A JS <code>Map</code> from key to the first unclaimed old index, with duplicate keys chained through an <code>Int32Array</code>. Unmatched new items render over unmatched old ones in order (unkeyed only). Leftovers are created or destroyed. The longest increasing subsequence of reused items stays put and the rest move.</p></div>
+      <div class="ex">old [x y x], new [x x y]<br>Map x→0 (chain 0→2), y→1<br>new x→0, x→2, y→1<br>sources [0 2 1], LIS keeps 0 1</div>
+    </li>
+  </ol>
+
+  <div class="scroll">
+    <table class="plain">
+      <thead><tr><th>Function</th><th>Key</th><th>Keys match when</th><th>Renders over other items</th><th>Skips render when</th></tr></thead>
+      <tbody>
+        <tr><td><code>diff-seq</code></td><td>the item</td><td><code>identical?</code> (strings and numbers by value)</td><td>yes, like <code>simple-seq</code></td><td>render-fn and item identical</td></tr>
+        <tr><td><code>diff-seq-by-value</code></td><td>the item</td><td><code>=</code>, looked up by <code>hash</code></td><td>yes, like <code>simple-seq</code></td><td>render-fn identical and item <code>=</code></td></tr>
+        <tr><td><code>diff-keyed-seq</code></td><td><code>(key-fn item)</code></td><td><code>=</code>, looked up by <code>hash</code></td><td>never</td><td>render-fn and item identical</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="matching">
+  <div class="section-head">
+    <h2>Matching cost: Map + Set or something cheaper</h2>
+    <p>The lookup only runs for real reorders (step 5). This measures it alone, without any DOM: build the lookup from the old items and match every new item. The proposal from the start of this exploration keys a CLJS map by item value and keeps a <code>js/Set</code> of indexes per value so duplicates work.</p>
+  </div>
+  <div class="card">
+    <div class="card-head">
+      <h3>µs per sync, lookup build plus matching all items</h3>
+      <div class="control"><span>List size</span><div class="seg" id="match-n"></div></div>
+    </div>
+    <div class="bars" id="match-bars"></div>
+    <p class="meta">Highlighted bars are what diff-seq uses: identity <code>Map</code> + chain for <code>diff-seq</code>, hash + chain + <code>=</code> for <code>diff-seq-by-value</code> and <code>diff-keyed-seq</code>. Identity strategies match nothing on fresh copies by design; that case is what the <code>=</code> mode is for.</p>
+  </div>
+  
+</section>
+
+<section id="results">
+  <div class="section-head">
+    <h2>Where each implementation wins</h2>
+    <p>Each cell is the baseline's time divided by the candidate's, for one scenario and list size. Above 1× the candidate is faster. Each scenario alternates between two states, so "remove first" averages one removal and one insertion. Hover or focus a cell for absolute times, renders and DOM mutations.</p>
+  </div>
+
+  <div class="filter-row controls">
+    <div class="control"><span>Time</span>
+      <div class="seg" id="metric">
+        <button type="button" data-v="us-layout" aria-pressed="true">incl. forced layout</button>
+        <button type="button" data-v="us" aria-pressed="false">script only</button>
+      </div>
+    </div>
+    <div class="scale" aria-label="color scale">
+      <span>candidate slower</span>
+      <span class="sw"><span style="background:var(--r5)"></span><span style="background:var(--r4)"></span><span style="background:var(--r3)"></span><span style="background:var(--r2)"></span><span style="background:var(--r1)"></span><span style="background:var(--mid)"></span><span style="background:var(--b1)"></span><span style="background:var(--b2)"></span><span style="background:var(--b3)"></span><span style="background:var(--b4)"></span><span style="background:var(--b5)"></span></span>
+      <span>candidate faster</span>
+      <span class="mono">bins: ±15% · 1.5× · 2.5× · 5× · 10×</span>
+    </div>
+  </div>
+
+  <div class="hm-grid">
+    <div class="card">
+      <div class="card-head"><h3>diff-seq vs simple-seq</h3><p>unkeyed, item identity</p></div>
+      <div class="scroll"><table class="hm" id="hm-diff"></table></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>keyed-seq new vs keyed-seq</h3><p>both keyed by <code>:id</code>; strings with duplicates can't be keyed</p></div>
+      <div class="scroll"><table class="hm" id="hm-keyed"></table></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h3>Compare any two</h3>
+        <div class="controls">
+          <label class="control" for="cmp-cand">Candidate <select id="cmp-cand"></select></label>
+          <label class="control" for="cmp-base">vs <select id="cmp-base"></select></label>
+        </div>
+      </div>
+      <div class="scroll"><table class="hm" id="hm-custom"></table></div>
+    </div>
+  </div>
+
+    <div class="prose">
+    <h3>Reading the heatmaps</h3>
+    <ul>
+      <li><strong>Removals and inserts away from the end</strong> are where <code>diff-seq</code> pays off, from 2 items up. <code>simple-seq</code> renders every following row over its neighbour; <code>diff-seq</code> destroys or creates one row.</li>
+      <li><strong>simple-seq's own best cases</strong> (append, remove last, update one row, update every 10th) cost <code>diff-seq</code> up to about 1.5× more script time, because it also builds a new item array. With layout counted they are even.</li>
+      <li><strong>Full reorders and swaps</strong> turn red in the first heatmap once layout is counted. Moving a row costs more layout than rewriting its text, and both keyed implementations move rows too (compare either against <code>simple-seq</code> in the third heatmap). In script time alone they are within about 25% either way.</li>
+      <li><strong>Fresh equal maps</strong> defeat identity matching, so <code>diff-seq</code> does what <code>simple-seq</code> does plus a lookup. Pick <code>diff-seq =</code> as the candidate in the third heatmap to see the <code>=</code> mode remove that cost.</li>
+      <li><strong>keyed-seq new vs keyed-seq</strong> is blue or neutral everywhere, by up to 22× in script time at 1000 rows. The gap with layout is smaller, 1.0–1.3×, because both create and move the same DOM.</li>
+      <li><strong>keyed-seq new vs diff-seq</strong> (pick them in the third heatmap): the same speed, except "replace all", where keyed mode destroys and creates every row instead of rendering over them (3.5–4× slower), and fresh maps, where keys still match and identity does not.</li>
+    </ul>
+  </div>
+
+
+  <div class="card chart">
+    <div class="card-head">
+      <h3 id="line-title">Cost by list size</h3>
+      <label class="control" for="line-scn">Scenario <select id="line-scn"></select></label>
+    </div>
+    <div class="legend" id="line-legend"></div>
+    <div id="line-chart"></div>
+    <p class="meta">Log scale on both axes. Values for every point are in the full results table below.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h3>Full results</h3>
+      <div class="control"><span>List size</span><div class="seg" id="table-n"></div></div>
+    </div>
+    <p class="meta">Per update: µs (for the selected time above), then renders · DOM mutations. The fastest implementation per row is highlighted.</p>
+    <div class="scroll"><table class="results" id="results-table"></table></div>
+  </div>
+</section>
+
+<section id="decisions">
+  <div class="section-head">
+    <h2>Decisions for you</h2>
+    <p>None of this is wired into <code>shadow.grove</code> yet, and the existing <code>simple-seq</code> and <code>keyed-seq</code> are unchanged.</p>
+  </div>
+  <ul class="decisions">
+    <li>
+      <h3>Replace the keyed-seq implementation?</h3>
+      <p><code>diff-keyed-seq</code> keeps the <code>keyed-seq</code> contract: same arguments, the render fn gets <code>[item idx key]</code>, a key's DOM is never reused for another key, and items with identical data skip rendering. It was faster than the current implementation in every measured scenario and size. The one behavior change: duplicate keys throw only in dev builds. Checking them in release would mean building the full key set on every update, which is most of what makes the current version slow.</p>
+      <p class="rec"><strong>Recommendation:</strong> put it behind <code>sg/keyed-seq</code> after trying it in a real app, and keep the dev-only duplicate check.</p>
+    </li>
+    <li>
+      <h3>Default matching for the unkeyed version: <code>identical?</code> or <code>=</code></h3>
+      <p>Identity is cheapest when list items are shared between renders, which is the case for vectors updated with <code>conj</code>, <code>assoc</code> or <code>into</code>, and for ids, strings and numbers. It misses maps that a query builds fresh on every run. <code>=</code> catches those, and costs little elsewhere because <code>=</code> returns early for identical items. Its risk is large, freshly built items, where every update pays a full hash and a deep comparison per item.</p>
+      <p class="rec"><strong>Recommendation:</strong> <code>=</code> as the default, with identity available for hot lists of shared items.</p>
+    </li>
+    <li>
+      <h3>What the render fn receives</h3>
+      <p>Matched items are not re-rendered, so the <code>idx</code> they saw can be out of date after a move. The current <code>keyed-seq</code> already behaves this way. A <code>simple-seq</code> render fn that uses <code>idx</code> for numbering or striping would break without any error if switched to <code>diff-seq</code>. Re-rendering whenever the index changes would bring back the cost diff-seq exists to remove.</p>
+      <p class="rec"><strong>Recommendation:</strong> call the unkeyed render fn with just the item, so lists that need the index stay on <code>simple-seq</code>. Keep <code>[item idx key]</code> for the keyed version for compatibility.</p>
+    </li>
+    <li>
+      <h3>Where simple-seq still fits</h3>
+      <p><code>simple-seq</code> stays about 1.5× cheaper in script time for appends, removing the last item and in-place updates. It is also faster for full reorders once layout is counted, because rewriting text in place costs less layout than moving nodes. Neither difference is visible next to layout for appends and updates, but the reorder one is.</p>
+      <p class="rec"><strong>Recommendation:</strong> keep <code>simple-seq</code> as is, and point the docs at <code>diff-seq</code> for any list that inserts or removes in the middle.</p>
+    </li>
+    <li>
+      <h3>Names</h3>
+      <p><code>diff-seq</code>, <code>diff-seq-by-value</code> and <code>diff-keyed-seq</code> are working names in <code>shadow.arborist.collections</code>. All three are one <code>deftype</code> with a mode, so the public surface can be any split you like, for example <code>(sg/seq coll render-fn)</code> with an option for identity.</p>
+    </li>
+  </ul>
+</section>
+
+
+<section id="method">
+  <div class="section-head">
+    <h2>Method and caveats</h2>
+  </div>
+  <div class="prose">
+    <ul>
+      <li>Rows are <code>&lt;&lt;</code> fragments with 4 dynamic slots (<code>tr</code> class, id, link href and label, count) in a <code>table</code> attached to the document. Items are maps <code>{:id :label :href :count :done}</code>. No <code>defc</code> rows: those need a runtime, and component arg comparison would make rendering over a little cheaper.</li>
+      <li>Each implementation is called through its public function on a fresh root. Calibration picks a batch size of about 25 ms, then one warmup batch, then 7 timed batches with <code>gc()</code> before each. The reported value is the median batch divided by its update count.</li>
+      <li>"incl. forced layout" calls <code>getBoundingClientRect()</code> on the table after every update. An earlier run used <code>.offsetHeight</code>, which Closure removed in the advanced build, so that column measured nothing until it was fixed.</li>
+      <li>"Fresh equal maps" scenarios build new map instances with equal content for every update, outside the timed region, like a query doing <code>(map #(assoc % …))</code>. Their hashes are not cached.</li>
+      <li>Renders count render-fn calls; DOM mutations count <code>MutationObserver</code> records (added and removed nodes, attribute and text changes) over one full A ⇄ B cycle, divided by two. Moving one fragment is 4 mutations: marker and row, each removed and added.</li>
+      <li>One machine, one browser. Run-to-run noise is about ±10%, more for sub-microsecond cells. Ratios at n ≤ 3 compare times under 2 µs and should be read as roughly equal unless the gap is large.</li>
+      <li>Release builds skip the duplicate-key check in <code>diff-keyed-seq</code>; dev builds run it on every render.</li>
+    </ul>
+    <p>Re-run: release the <code>:bench-seq</code> build, then <code>node examples/bench-seq/run.mjs</code>. <code>--sizes=1,10,100</code>, <code>--scenarios=swap,shuffle</code> and <code>--json=out.json</code> narrow the run or keep the raw data.</p>
+  </div>
+</section>
+
+<section id="files">
+  <div class="section-head">
+    <h2>Code, tests and other findings</h2>
+  </div>
+  <div class="prose">
+    <h3>Correctness</h3>
+    <ul>
+      <li>26 node tests with 174 assertions pass in the <code>:node-test</code> build, which also still runs <code>components-test</code>. They cover fixed transitions including duplicates, render counts, preserved DOM nodes for removals, swaps, rotations and scattered updates, and the dev-only duplicate key error.</li>
+      <li>Six fuzz tests run 3000 random transitions each: identity, by value, identity with fresh maps, long lists in both modes, and keyed. The keyed fuzz also checks that no DOM node ever shows a different key than the one it was created for.</li>
+      <li>The tests were checked against deliberately broken versions: with moves disabled, with the wrong anchor for the tail-to-head move, and with render-over enabled in keyed mode. Each one failed the fuzz.</li>
+    </ul>
+    <h3>Files, uncommitted</h3>
+    <ul>
+      <li><code>src/main/shadow/arborist/collections.cljs</code>: <code>DiffCollection</code>, <code>diff-seq</code>, <code>diff-seq-by-value</code>, <code>diff-keyed-seq</code> appended. The existing code above is byte-identical to HEAD.</li>
+      <li><code>src/test/shadow/arborist/diff_seq_test.cljs</code>: the tests above, jsdom based.</li>
+      <li><code>src/dev/shadow/arborist/bench_seq.cljs</code>, <code>examples/bench-seq/index.html</code>, <code>examples/bench-seq/run.mjs</code>: the benchmark and its headless Chromium driver.</li>
+      <li><code>shadow-cljs.edn</code>: new <code>:bench-seq</code> build; <code>:node-test</code> now also picks up <code>diff-seq-test</code>.</li>
+    </ul>
+    <h3>Found along the way</h3>
+    <ul>
+      <li><code>sa/destroy!</code> always throws: it calls the <code>p/destroy!</code> protocol method, but <code>TreeRoot</code> only defines <code>destroy!</code> as an <code>Object</code> method.</li>
+      <li>The current <code>keyed-seq</code> seeks moved items with <code>.indexOf</code> from the front, which is quadratic for heavily shuffled lists. The new implementation replaces that path.</li>
+    </ul>
+  </div>
+</section>
+
+
+<footer>Generated from <span class="mono">bench5.json</span> · shadow-grove working tree, uncommitted · numbers are from one run</footer>
+
+</div>
+
+<div class="tooltip" id="tip" hidden></div>
+
+<script id="bench-data" type="application/json">{"dom":[{"n":1,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"simple-seq","us":10.574,"us-layout":23.09,"renders":0.5,"mutations":5},{"n":1,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq :id","us":8.859,"us-layout":23.93,"renders":0.5,"mutations":5},{"n":1,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq new","us":8.738,"us-layout":24.84,"renders":0.5,"mutations":5},{"n":1,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq","us":8.827,"us-layout":24.85,"renders":0.5,"mutations":5},{"n":1,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq =","us":8.609,"us-layout":23.21,"renders":0.5,"mutations":5},{"n":1,"scenario":"update 1 row","scenario-id":"update-1","impl":"simple-seq","us":0.233,"us-layout":11.63,"renders":1,"mutations":1},{"n":1,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq :id","us":0.353,"us-layout":12.43,"renders":1,"mutations":1},{"n":1,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq new","us":0.253,"us-layout":11.97,"renders":1,"mutations":1},{"n":1,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq","us":0.268,"us-layout":12.8,"renders":1,"mutations":1},{"n":1,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq =","us":0.481,"us-layout":12.12,"renders":1,"mutations":1},{"n":1,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"simple-seq","us":0.683,"us-layout":19.37,"renders":1,"mutations":5},{"n":1,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq :id","us":3.065,"us-layout":30.71,"renders":1,"mutations":4},{"n":1,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq new","us":2.941,"us-layout":31.19,"renders":1,"mutations":4},{"n":1,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq","us":0.73,"us-layout":19.55,"renders":1,"mutations":5},{"n":1,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq =","us":0.795,"us-layout":19.65,"renders":1,"mutations":5},{"n":1,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"simple-seq","us":0.157,"us-layout":0.58,"renders":1,"mutations":0},{"n":1,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq :id","us":0.28,"us-layout":0.72,"renders":1,"mutations":0},{"n":1,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq new","us":0.195,"us-layout":0.62,"renders":1,"mutations":0},{"n":1,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq","us":0.19,"us-layout":0.61,"renders":1,"mutations":0},{"n":1,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq =","us":0.143,"us-layout":0.55,"renders":0,"mutations":0},{"n":2,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"simple-seq","us":2.079,"us-layout":29.32,"renders":1.5,"mutations":7},{"n":2,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq :id","us":1.511,"us-layout":21.54,"renders":0.5,"mutations":2},{"n":2,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq new","us":1.361,"us-layout":21.35,"renders":0.5,"mutations":2},{"n":2,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq","us":1.362,"us-layout":20.62,"renders":0.5,"mutations":2},{"n":2,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq =","us":1.386,"us-layout":20.26,"renders":0.5,"mutations":2},{"n":2,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"simple-seq","us":1.381,"us-layout":20.08,"renders":0.5,"mutations":2},{"n":2,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq :id","us":1.561,"us-layout":20.75,"renders":0.5,"mutations":2},{"n":2,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq new","us":1.363,"us-layout":21.19,"renders":0.5,"mutations":2},{"n":2,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq","us":1.362,"us-layout":20.41,"renders":0.5,"mutations":2},{"n":2,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq =","us":1.324,"us-layout":20.79,"renders":0.5,"mutations":2},{"n":2,"scenario":"update 1 row","scenario-id":"update-1","impl":"simple-seq","us":0.238,"us-layout":14.11,"renders":1,"mutations":1},{"n":2,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq :id","us":0.4,"us-layout":13.74,"renders":1,"mutations":1},{"n":2,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq new","us":0.298,"us-layout":12.71,"renders":1,"mutations":1},{"n":2,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq","us":0.295,"us-layout":13.64,"renders":1,"mutations":1},{"n":2,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq =","us":0.5,"us-layout":13.57,"renders":1,"mutations":1},{"n":2,"scenario":"reverse","scenario-id":"reverse","impl":"simple-seq","us":1.323,"us-layout":28.23,"renders":2,"mutations":10},{"n":2,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq :id","us":1.477,"us-layout":41.8,"renders":0,"mutations":8},{"n":2,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq new","us":0.764,"us-layout":26.79,"renders":0,"mutations":4},{"n":2,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq","us":0.694,"us-layout":27.47,"renders":0,"mutations":4},{"n":2,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq =","us":0.747,"us-layout":28.09,"renders":0,"mutations":4},{"n":2,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"simple-seq","us":1.318,"us-layout":28.03,"renders":2,"mutations":10},{"n":2,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq :id","us":5.545,"us-layout":46.76,"renders":2,"mutations":8},{"n":2,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq new","us":5.547,"us-layout":47.93,"renders":2,"mutations":8},{"n":2,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq","us":1.635,"us-layout":29.72,"renders":2,"mutations":10},{"n":2,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq =","us":1.733,"us-layout":30.05,"renders":2,"mutations":10},{"n":2,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"simple-seq","us":0.267,"us-layout":0.69,"renders":2,"mutations":0},{"n":2,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq :id","us":0.444,"us-layout":0.88,"renders":2,"mutations":0},{"n":2,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq new","us":0.335,"us-layout":0.76,"renders":2,"mutations":0},{"n":2,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq","us":0.504,"us-layout":0.98,"renders":2,"mutations":0},{"n":2,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq =","us":0.248,"us-layout":0.65,"renders":0,"mutations":0},{"n":2,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"simple-seq","us":2.191,"us-layout":31.59,"renders":1.5,"mutations":7},{"n":2,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq :id","us":1.78,"us-layout":23.84,"renders":1.5,"mutations":2},{"n":2,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq new","us":1.624,"us-layout":21.77,"renders":1.5,"mutations":2},{"n":2,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq","us":2.454,"us-layout":30.03,"renders":1.5,"mutations":7},{"n":2,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq =","us":1.529,"us-layout":20.51,"renders":0.5,"mutations":2},{"n":2,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"simple-seq","us":0.729,"us-layout":17.27,"renders":1.5,"mutations":3},{"n":2,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq","us":0.578,"us-layout":13.8,"renders":0.5,"mutations":2},{"n":2,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq =","us":0.629,"us-layout":13.71,"renders":0.5,"mutations":2},{"n":2,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"simple-seq","us":2.211,"us-layout":28.91,"renders":1.5,"mutations":7},{"n":2,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq :id","us":1.722,"us-layout":22.07,"renders":1.5,"mutations":2},{"n":2,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq new","us":1.561,"us-layout":21.5,"renders":1.5,"mutations":2},{"n":2,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq","us":1.545,"us-layout":20.21,"renders":1.5,"mutations":2},{"n":2,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq =","us":1.614,"us-layout":21.11,"renders":1.5,"mutations":2},{"n":3,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"simple-seq","us":2.755,"us-layout":44.07,"renders":2.5,"mutations":11},{"n":3,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq :id","us":1.663,"us-layout":21.58,"renders":0.5,"mutations":2},{"n":3,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq new","us":1.401,"us-layout":22.28,"renders":0.5,"mutations":2},{"n":3,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq","us":1.451,"us-layout":22.93,"renders":0.5,"mutations":2},{"n":3,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq =","us":1.505,"us-layout":23.86,"renders":0.5,"mutations":2},{"n":3,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"simple-seq","us":2.216,"us-layout":33.59,"renders":1.5,"mutations":6},{"n":3,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"keyed-seq :id","us":1.819,"us-layout":23.98,"renders":0.5,"mutations":2},{"n":3,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"keyed-seq new","us":1.506,"us-layout":22.51,"renders":0.5,"mutations":2},{"n":3,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"diff-seq","us":1.44,"us-layout":20.69,"renders":0.5,"mutations":2},{"n":3,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"diff-seq =","us":1.414,"us-layout":21.34,"renders":0.5,"mutations":2},{"n":3,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"simple-seq","us":1.387,"us-layout":29.39,"renders":0.5,"mutations":2},{"n":3,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq :id","us":1.761,"us-layout":30.0,"renders":0.5,"mutations":2},{"n":3,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq new","us":1.412,"us-layout":28.49,"renders":0.5,"mutations":2},{"n":3,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq","us":1.375,"us-layout":26.5,"renders":0.5,"mutations":2},{"n":3,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq =","us":1.356,"us-layout":25.89,"renders":0.5,"mutations":2},{"n":3,"scenario":"update 1 row","scenario-id":"update-1","impl":"simple-seq","us":0.26,"us-layout":14.16,"renders":1,"mutations":1},{"n":3,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq :id","us":0.462,"us-layout":14.18,"renders":1,"mutations":1},{"n":3,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq new","us":0.318,"us-layout":14.1,"renders":1,"mutations":1},{"n":3,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq","us":0.323,"us-layout":14.81,"renders":1,"mutations":1},{"n":3,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq =","us":0.549,"us-layout":14.27,"renders":1,"mutations":1},{"n":3,"scenario":"reverse","scenario-id":"reverse","impl":"simple-seq","us":1.339,"us-layout":30.23,"renders":2,"mutations":10},{"n":3,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq :id","us":1.5,"us-layout":43.1,"renders":0,"mutations":8},{"n":3,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq new","us":1.601,"us-layout":43.71,"renders":0,"mutations":8},{"n":3,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq","us":1.376,"us-layout":40.68,"renders":0,"mutations":8},{"n":3,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq =","us":1.415,"us-layout":42.03,"renders":0,"mutations":8},{"n":3,"scenario":"shuffle","scenario-id":"shuffle","impl":"simple-seq","us":1.848,"us-layout":36.93,"renders":3,"mutations":14},{"n":3,"scenario":"shuffle","scenario-id":"shuffle","impl":"keyed-seq :id","us":2.119,"us-layout":54.59,"renders":0,"mutations":12},{"n":3,"scenario":"shuffle","scenario-id":"shuffle","impl":"keyed-seq new","us":0.797,"us-layout":27.73,"renders":0,"mutations":4},{"n":3,"scenario":"shuffle","scenario-id":"shuffle","impl":"diff-seq","us":0.703,"us-layout":28.19,"renders":0,"mutations":4},{"n":3,"scenario":"shuffle","scenario-id":"shuffle","impl":"diff-seq =","us":0.766,"us-layout":28.25,"renders":0,"mutations":4},{"n":3,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"simple-seq","us":1.686,"us-layout":39.47,"renders":3,"mutations":12},{"n":3,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq :id","us":8.753,"us-layout":70.88,"renders":3,"mutations":12},{"n":3,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq new","us":8.886,"us-layout":68.41,"renders":3,"mutations":12},{"n":3,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq","us":2.011,"us-layout":41.27,"renders":3,"mutations":12},{"n":3,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq =","us":2.19,"us-layout":39.48,"renders":3,"mutations":12},{"n":3,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"simple-seq","us":0.393,"us-layout":0.82,"renders":3,"mutations":0},{"n":3,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq :id","us":0.624,"us-layout":1.07,"renders":3,"mutations":0},{"n":3,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq new","us":0.48,"us-layout":0.92,"renders":3,"mutations":0},{"n":3,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq","us":0.745,"us-layout":1.25,"renders":3,"mutations":0},{"n":3,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq =","us":0.334,"us-layout":0.76,"renders":0,"mutations":0},{"n":3,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"simple-seq","us":3.108,"us-layout":44.94,"renders":2.5,"mutations":11},{"n":3,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq :id","us":2.025,"us-layout":24.9,"renders":2.5,"mutations":2},{"n":3,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq new","us":1.821,"us-layout":22.54,"renders":2.5,"mutations":2},{"n":3,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq","us":3.17,"us-layout":39.25,"renders":2.5,"mutations":11},{"n":3,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq =","us":1.601,"us-layout":20.82,"renders":0.5,"mutations":2},{"n":3,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"simple-seq","us":0.836,"us-layout":21.71,"renders":2.5,"mutations":4},{"n":3,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq","us":0.673,"us-layout":14.7,"renders":0.5,"mutations":2},{"n":3,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq =","us":0.676,"us-layout":15.07,"renders":0.5,"mutations":2},{"n":3,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"simple-seq","us":2.736,"us-layout":42.83,"renders":2.5,"mutations":11},{"n":3,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq :id","us":2.055,"us-layout":24.42,"renders":2.5,"mutations":2},{"n":3,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq new","us":1.717,"us-layout":22.57,"renders":2.5,"mutations":2},{"n":3,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq","us":1.646,"us-layout":25.11,"renders":2.5,"mutations":2},{"n":3,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq =","us":1.748,"us-layout":22.11,"renders":2.5,"mutations":2},{"n":5,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"simple-seq","us":4.083,"us-layout":60.77,"renders":4.5,"mutations":21},{"n":5,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq :id","us":1.661,"us-layout":23.19,"renders":0.5,"mutations":2},{"n":5,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq new","us":1.511,"us-layout":22.64,"renders":0.5,"mutations":2},{"n":5,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq","us":1.402,"us-layout":23.95,"renders":0.5,"mutations":2},{"n":5,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq =","us":1.516,"us-layout":25.53,"renders":0.5,"mutations":2},{"n":5,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"simple-seq","us":3.031,"us-layout":46.74,"renders":2.5,"mutations":12},{"n":5,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"keyed-seq :id","us":1.846,"us-layout":25.0,"renders":0.5,"mutations":2},{"n":5,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"keyed-seq new","us":1.449,"us-layout":24.71,"renders":0.5,"mutations":2},{"n":5,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"diff-seq","us":1.465,"us-layout":23.41,"renders":0.5,"mutations":2},{"n":5,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"diff-seq =","us":1.469,"us-layout":24.24,"renders":0.5,"mutations":2},{"n":5,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"simple-seq","us":1.355,"us-layout":24.02,"renders":0.5,"mutations":2},{"n":5,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq :id","us":1.738,"us-layout":23.72,"renders":0.5,"mutations":2},{"n":5,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq new","us":1.387,"us-layout":23.64,"renders":0.5,"mutations":2},{"n":5,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq","us":1.349,"us-layout":22.25,"renders":0.5,"mutations":2},{"n":5,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq =","us":1.363,"us-layout":23.36,"renders":0.5,"mutations":2},{"n":5,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"simple-seq","us":1.377,"us-layout":30.58,"renders":2,"mutations":10},{"n":5,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"keyed-seq :id","us":1.613,"us-layout":43.57,"renders":0,"mutations":8},{"n":5,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"keyed-seq new","us":1.448,"us-layout":41.36,"renders":0,"mutations":8},{"n":5,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"diff-seq","us":1.294,"us-layout":42.34,"renders":0,"mutations":8},{"n":5,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"diff-seq =","us":1.391,"us-layout":42.78,"renders":0,"mutations":8},{"n":5,"scenario":"update 1 row","scenario-id":"update-1","impl":"simple-seq","us":0.269,"us-layout":15.63,"renders":1,"mutations":1},{"n":5,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq :id","us":0.577,"us-layout":16.49,"renders":1,"mutations":1},{"n":5,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq new","us":0.324,"us-layout":15.58,"renders":1,"mutations":1},{"n":5,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq","us":0.331,"us-layout":16.31,"renders":1,"mutations":1},{"n":5,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq =","us":0.573,"us-layout":16.3,"renders":1,"mutations":1},{"n":5,"scenario":"reverse","scenario-id":"reverse","impl":"simple-seq","us":2.594,"us-layout":49.6,"renders":4,"mutations":20},{"n":5,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq :id","us":2.885,"us-layout":67.65,"renders":0,"mutations":16},{"n":5,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq new","us":2.849,"us-layout":69.14,"renders":0,"mutations":16},{"n":5,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq","us":2.508,"us-layout":68.21,"renders":0,"mutations":16},{"n":5,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq =","us":2.767,"us-layout":69.72,"renders":0,"mutations":16},{"n":5,"scenario":"shuffle","scenario-id":"shuffle","impl":"simple-seq","us":2.434,"us-layout":48.59,"renders":4,"mutations":18},{"n":5,"scenario":"shuffle","scenario-id":"shuffle","impl":"keyed-seq :id","us":2.865,"us-layout":67.33,"renders":0,"mutations":16},{"n":5,"scenario":"shuffle","scenario-id":"shuffle","impl":"keyed-seq new","us":2.541,"us-layout":57.18,"renders":0,"mutations":12},{"n":5,"scenario":"shuffle","scenario-id":"shuffle","impl":"diff-seq","us":2.345,"us-layout":57.95,"renders":0,"mutations":12},{"n":5,"scenario":"shuffle","scenario-id":"shuffle","impl":"diff-seq =","us":2.646,"us-layout":58.29,"renders":0,"mutations":12},{"n":5,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"simple-seq","us":3.333,"us-layout":54.63,"renders":5,"mutations":24},{"n":5,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq :id","us":13.098,"us-layout":98.45,"renders":5,"mutations":20},{"n":5,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq new","us":13.205,"us-layout":92.31,"renders":5,"mutations":20},{"n":5,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq","us":3.662,"us-layout":55.61,"renders":5,"mutations":24},{"n":5,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq =","us":3.74,"us-layout":56.11,"renders":5,"mutations":24},{"n":5,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"simple-seq","us":0.597,"us-layout":1.03,"renders":5,"mutations":0},{"n":5,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq :id","us":0.997,"us-layout":1.44,"renders":5,"mutations":0},{"n":5,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq new","us":0.76,"us-layout":1.21,"renders":5,"mutations":0},{"n":5,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq","us":1.134,"us-layout":1.65,"renders":5,"mutations":0},{"n":5,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq =","us":0.516,"us-layout":0.92,"renders":0,"mutations":0},{"n":5,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"simple-seq","us":4.331,"us-layout":59.25,"renders":4.5,"mutations":21},{"n":5,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq :id","us":2.322,"us-layout":25.2,"renders":4.5,"mutations":2},{"n":5,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq new","us":2.019,"us-layout":23.88,"renders":4.5,"mutations":2},{"n":5,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq","us":4.692,"us-layout":58.61,"renders":4.5,"mutations":21},{"n":5,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq =","us":1.829,"us-layout":24.79,"renders":0.5,"mutations":2},{"n":5,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"simple-seq","us":1.037,"us-layout":27.29,"renders":4.5,"mutations":6},{"n":5,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq","us":0.64,"us-layout":14.29,"renders":0.5,"mutations":2},{"n":5,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq =","us":0.658,"us-layout":14.68,"renders":0.5,"mutations":2},{"n":5,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"simple-seq","us":4.063,"us-layout":63.93,"renders":4.5,"mutations":21},{"n":5,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq :id","us":2.311,"us-layout":28.04,"renders":4.5,"mutations":2},{"n":5,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq new","us":2.014,"us-layout":25.96,"renders":4.5,"mutations":2},{"n":5,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq","us":1.997,"us-layout":26.29,"renders":4.5,"mutations":2},{"n":5,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq =","us":2.027,"us-layout":27.24,"renders":4.5,"mutations":2},{"n":5,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"simple-seq","us":1.72,"us-layout":34.39,"renders":5,"mutations":10},{"n":5,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"keyed-seq :id","us":2.237,"us-layout":50.56,"renders":5,"mutations":8},{"n":5,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"keyed-seq new","us":2.13,"us-layout":46.96,"renders":5,"mutations":8},{"n":5,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"diff-seq","us":1.922,"us-layout":45.16,"renders":5,"mutations":8},{"n":5,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"diff-seq =","us":2.029,"us-layout":47.21,"renders":5,"mutations":8},{"n":10,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"simple-seq","us":7.72,"us-layout":111.11,"renders":9.5,"mutations":44},{"n":10,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq :id","us":2.947,"us-layout":30.78,"renders":0.5,"mutations":2},{"n":10,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq new","us":1.509,"us-layout":28.8,"renders":0.5,"mutations":2},{"n":10,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq","us":1.51,"us-layout":27.53,"renders":0.5,"mutations":2},{"n":10,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq =","us":1.518,"us-layout":27.6,"renders":0.5,"mutations":2},{"n":10,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"simple-seq","us":4.21,"us-layout":65.51,"renders":4.5,"mutations":21},{"n":10,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"keyed-seq :id","us":2.988,"us-layout":29.8,"renders":0.5,"mutations":2},{"n":10,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"keyed-seq new","us":1.514,"us-layout":28.31,"renders":0.5,"mutations":2},{"n":10,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"diff-seq","us":1.485,"us-layout":28.29,"renders":0.5,"mutations":2},{"n":10,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"diff-seq =","us":1.533,"us-layout":30.39,"renders":0.5,"mutations":2},{"n":10,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"simple-seq","us":1.426,"us-layout":27.14,"renders":0.5,"mutations":2},{"n":10,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq :id","us":2.914,"us-layout":29.78,"renders":0.5,"mutations":2},{"n":10,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq new","us":1.48,"us-layout":27.35,"renders":0.5,"mutations":2},{"n":10,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq","us":1.423,"us-layout":28.28,"renders":0.5,"mutations":2},{"n":10,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq =","us":1.472,"us-layout":27.4,"renders":0.5,"mutations":2},{"n":10,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"simple-seq","us":1.225,"us-layout":34.41,"renders":2,"mutations":8},{"n":10,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"keyed-seq :id","us":2.829,"us-layout":56.19,"renders":0,"mutations":8},{"n":10,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"keyed-seq new","us":1.675,"us-layout":50.2,"renders":0,"mutations":8},{"n":10,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"diff-seq","us":1.394,"us-layout":49.43,"renders":0,"mutations":8},{"n":10,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"diff-seq =","us":1.498,"us-layout":50.78,"renders":0,"mutations":8},{"n":10,"scenario":"update 1 row","scenario-id":"update-1","impl":"simple-seq","us":0.316,"us-layout":20.83,"renders":1,"mutations":1},{"n":10,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq :id","us":1.829,"us-layout":22.4,"renders":1,"mutations":1},{"n":10,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq new","us":0.361,"us-layout":20.16,"renders":1,"mutations":1},{"n":10,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq","us":0.38,"us-layout":20.31,"renders":1,"mutations":1},{"n":10,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq =","us":0.622,"us-layout":19.9,"renders":1,"mutations":1},{"n":10,"scenario":"reverse","scenario-id":"reverse","impl":"simple-seq","us":5.55,"us-layout":101.57,"renders":10,"mutations":40},{"n":10,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq :id","us":7.611,"us-layout":153.09,"renders":0,"mutations":40},{"n":10,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq new","us":6.154,"us-layout":134.09,"renders":0,"mutations":36},{"n":10,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq","us":5.677,"us-layout":136.78,"renders":0,"mutations":36},{"n":10,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq =","us":6.111,"us-layout":141.67,"renders":0,"mutations":36},{"n":10,"scenario":"shuffle","scenario-id":"shuffle","impl":"simple-seq","us":5.744,"us-layout":94.09,"renders":9,"mutations":42},{"n":10,"scenario":"shuffle","scenario-id":"shuffle","impl":"keyed-seq :id","us":6.948,"us-layout":139.67,"renders":0,"mutations":36},{"n":10,"scenario":"shuffle","scenario-id":"shuffle","impl":"keyed-seq new","us":4.161,"us-layout":86.86,"renders":0,"mutations":20},{"n":10,"scenario":"shuffle","scenario-id":"shuffle","impl":"diff-seq","us":3.771,"us-layout":91.9,"renders":0,"mutations":20},{"n":10,"scenario":"shuffle","scenario-id":"shuffle","impl":"diff-seq =","us":4.2,"us-layout":90.37,"renders":0,"mutations":20},{"n":10,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"simple-seq","us":6.279,"us-layout":104.2,"renders":10,"mutations":47},{"n":10,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq :id","us":28.819,"us-layout":184.33,"renders":10,"mutations":40},{"n":10,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq new","us":27.386,"us-layout":176.09,"renders":10,"mutations":40},{"n":10,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq","us":6.949,"us-layout":102.52,"renders":10,"mutations":47},{"n":10,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq =","us":7.147,"us-layout":105.17,"renders":10,"mutations":47},{"n":10,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"simple-seq","us":1.237,"us-layout":1.7,"renders":10,"mutations":0},{"n":10,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq :id","us":2.816,"us-layout":3.35,"renders":10,"mutations":0},{"n":10,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq new","us":1.528,"us-layout":2.04,"renders":10,"mutations":0},{"n":10,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq","us":2.153,"us-layout":2.65,"renders":10,"mutations":0},{"n":10,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq =","us":0.987,"us-layout":1.43,"renders":0,"mutations":0},{"n":10,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"simple-seq","us":7.696,"us-layout":104.05,"renders":9.5,"mutations":44},{"n":10,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq :id","us":4.188,"us-layout":31.04,"renders":9.5,"mutations":2},{"n":10,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq new","us":2.845,"us-layout":29.67,"renders":9.5,"mutations":2},{"n":10,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq","us":8.683,"us-layout":112.72,"renders":9.5,"mutations":44},{"n":10,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq =","us":2.464,"us-layout":28.75,"renders":0.5,"mutations":2},{"n":10,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"simple-seq","us":1.622,"us-layout":46.19,"renders":9.5,"mutations":11},{"n":10,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq","us":0.679,"us-layout":18.5,"renders":0.5,"mutations":2},{"n":10,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq =","us":0.695,"us-layout":16.64,"renders":0.5,"mutations":2},{"n":10,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"simple-seq","us":7.588,"us-layout":105.83,"renders":9.5,"mutations":44},{"n":10,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq :id","us":3.912,"us-layout":31.43,"renders":9.5,"mutations":2},{"n":10,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq new","us":2.553,"us-layout":29.13,"renders":9.5,"mutations":2},{"n":10,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq","us":2.776,"us-layout":29.6,"renders":9.5,"mutations":2},{"n":10,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq =","us":2.682,"us-layout":33.08,"renders":9.5,"mutations":2},{"n":10,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"simple-seq","us":2.124,"us-layout":38.41,"renders":10,"mutations":8},{"n":10,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"keyed-seq :id","us":4.466,"us-layout":55.33,"renders":10,"mutations":8},{"n":10,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"keyed-seq new","us":2.905,"us-layout":52.27,"renders":10,"mutations":8},{"n":10,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"diff-seq","us":2.566,"us-layout":54.49,"renders":10,"mutations":8},{"n":10,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"diff-seq =","us":2.787,"us-layout":52.84,"renders":10,"mutations":8},{"n":20,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"simple-seq","us":15.09,"us-layout":221.19,"renders":19.5,"mutations":91},{"n":20,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq :id","us":5.297,"us-layout":48.42,"renders":0.5,"mutations":2},{"n":20,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq new","us":1.642,"us-layout":42.79,"renders":0.5,"mutations":2},{"n":20,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq","us":1.769,"us-layout":38.87,"renders":0.5,"mutations":2},{"n":20,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq =","us":1.639,"us-layout":38.25,"renders":0.5,"mutations":2},{"n":20,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"simple-seq","us":7.778,"us-layout":124.24,"renders":9.5,"mutations":44},{"n":20,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"keyed-seq :id","us":5.52,"us-layout":45.4,"renders":0.5,"mutations":2},{"n":20,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"keyed-seq new","us":1.622,"us-layout":39.54,"renders":0.5,"mutations":2},{"n":20,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"diff-seq","us":1.64,"us-layout":39.91,"renders":0.5,"mutations":2},{"n":20,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"diff-seq =","us":1.649,"us-layout":40.57,"renders":0.5,"mutations":2},{"n":20,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"simple-seq","us":1.521,"us-layout":37.65,"renders":0.5,"mutations":2},{"n":20,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq :id","us":5.548,"us-layout":43.49,"renders":0.5,"mutations":2},{"n":20,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq new","us":1.563,"us-layout":37.7,"renders":0.5,"mutations":2},{"n":20,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq","us":2.352,"us-layout":41.26,"renders":0.5,"mutations":2},{"n":20,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq =","us":1.591,"us-layout":38.19,"renders":0.5,"mutations":2},{"n":20,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"simple-seq","us":1.509,"us-layout":43.04,"renders":2,"mutations":10},{"n":20,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"keyed-seq :id","us":4.931,"us-layout":63.09,"renders":0,"mutations":8},{"n":20,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"keyed-seq new","us":1.612,"us-layout":57.51,"renders":0,"mutations":8},{"n":20,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"diff-seq","us":1.464,"us-layout":58.91,"renders":0,"mutations":8},{"n":20,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"diff-seq =","us":1.541,"us-layout":55.18,"renders":0,"mutations":8},{"n":20,"scenario":"update 1 row","scenario-id":"update-1","impl":"simple-seq","us":0.348,"us-layout":30.11,"renders":1,"mutations":1},{"n":20,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq :id","us":3.683,"us-layout":33.83,"renders":1,"mutations":1},{"n":20,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq new","us":0.412,"us-layout":28.39,"renders":1,"mutations":1},{"n":20,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq","us":0.458,"us-layout":29.23,"renders":1,"mutations":1},{"n":20,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq =","us":0.688,"us-layout":29.62,"renders":1,"mutations":1},{"n":20,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"simple-seq","us":0.557,"us-layout":30.95,"renders":2,"mutations":2},{"n":20,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"keyed-seq :id","us":3.824,"us-layout":38.54,"renders":2,"mutations":2},{"n":20,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"keyed-seq new","us":0.684,"us-layout":32.88,"renders":2,"mutations":2},{"n":20,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"diff-seq","us":0.703,"us-layout":32.02,"renders":2,"mutations":2},{"n":20,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"diff-seq =","us":1.104,"us-layout":32.97,"renders":2,"mutations":2},{"n":20,"scenario":"reverse","scenario-id":"reverse","impl":"simple-seq","us":12.263,"us-layout":199.21,"renders":20,"mutations":94},{"n":20,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq :id","us":16.464,"us-layout":298.78,"renders":0,"mutations":80},{"n":20,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq new","us":13.182,"us-layout":293.62,"renders":0,"mutations":76},{"n":20,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq","us":11.874,"us-layout":281.82,"renders":0,"mutations":76},{"n":20,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq =","us":13.104,"us-layout":272.62,"renders":0,"mutations":76},{"n":20,"scenario":"shuffle","scenario-id":"shuffle","impl":"simple-seq","us":13.005,"us-layout":189.23,"renders":20,"mutations":90},{"n":20,"scenario":"shuffle","scenario-id":"shuffle","impl":"keyed-seq :id","us":15.945,"us-layout":285.23,"renders":0,"mutations":80},{"n":20,"scenario":"shuffle","scenario-id":"shuffle","impl":"keyed-seq new","us":10.911,"us-layout":209.48,"renders":0,"mutations":56},{"n":20,"scenario":"shuffle","scenario-id":"shuffle","impl":"diff-seq","us":10.762,"us-layout":203.39,"renders":0,"mutations":56},{"n":20,"scenario":"shuffle","scenario-id":"shuffle","impl":"diff-seq =","us":10.905,"us-layout":205.36,"renders":0,"mutations":56},{"n":20,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"simple-seq","us":12.903,"us-layout":193.65,"renders":20,"mutations":94},{"n":20,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq :id","us":55.924,"us-layout":344.59,"renders":20,"mutations":80},{"n":20,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq new","us":52.212,"us-layout":334.21,"renders":20,"mutations":80},{"n":20,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq","us":15.476,"us-layout":197.62,"renders":20,"mutations":94},{"n":20,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq =","us":14.884,"us-layout":188.1,"renders":20,"mutations":94},{"n":20,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"simple-seq","us":2.457,"us-layout":2.89,"renders":20,"mutations":0},{"n":20,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq :id","us":6.32,"us-layout":6.95,"renders":20,"mutations":0},{"n":20,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq new","us":3.002,"us-layout":3.51,"renders":20,"mutations":0},{"n":20,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq","us":4.448,"us-layout":5.08,"renders":20,"mutations":0},{"n":20,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq =","us":1.784,"us-layout":2.31,"renders":0,"mutations":0},{"n":20,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"simple-seq","us":15.009,"us-layout":188.52,"renders":19.5,"mutations":91},{"n":20,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq :id","us":7.943,"us-layout":47.76,"renders":19.5,"mutations":2},{"n":20,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq new","us":4.339,"us-layout":38.95,"renders":19.5,"mutations":2},{"n":20,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq","us":17.757,"us-layout":201.64,"renders":19.5,"mutations":91},{"n":20,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq =","us":3.162,"us-layout":39.93,"renders":0.5,"mutations":2},{"n":20,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"simple-seq","us":2.574,"us-layout":71.73,"renders":19.5,"mutations":21},{"n":20,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq","us":0.743,"us-layout":20.83,"renders":0.5,"mutations":2},{"n":20,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq =","us":0.784,"us-layout":22.18,"renders":0.5,"mutations":2},{"n":20,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"simple-seq","us":14.419,"us-layout":193.55,"renders":19.5,"mutations":91},{"n":20,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq :id","us":7.406,"us-layout":43.45,"renders":19.5,"mutations":2},{"n":20,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq new","us":3.82,"us-layout":38.94,"renders":19.5,"mutations":2},{"n":20,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq","us":3.796,"us-layout":39.43,"renders":19.5,"mutations":2},{"n":20,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq =","us":3.828,"us-layout":39.12,"renders":19.5,"mutations":2},{"n":20,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"simple-seq","us":3.332,"us-layout":44.92,"renders":20,"mutations":10},{"n":20,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"keyed-seq :id","us":7.147,"us-layout":66.07,"renders":20,"mutations":8},{"n":20,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"keyed-seq new","us":3.798,"us-layout":63.01,"renders":20,"mutations":8},{"n":20,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"diff-seq","us":3.63,"us-layout":58.01,"renders":20,"mutations":8},{"n":20,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"diff-seq =","us":3.768,"us-layout":59.27,"renders":20,"mutations":8},{"n":50,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"simple-seq","us":34.923,"us-layout":457.69,"renders":49.5,"mutations":231},{"n":50,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq :id","us":8.45,"us-layout":72.91,"renders":0.5,"mutations":2},{"n":50,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq new","us":1.863,"us-layout":60.2,"renders":0.5,"mutations":2},{"n":50,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq","us":1.796,"us-layout":60.21,"renders":0.5,"mutations":2},{"n":50,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq =","us":1.774,"us-layout":60.42,"renders":0.5,"mutations":2},{"n":50,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"simple-seq","us":17.93,"us-layout":271.88,"renders":24.5,"mutations":114},{"n":50,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"keyed-seq :id","us":8.627,"us-layout":70.93,"renders":0.5,"mutations":2},{"n":50,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"keyed-seq new","us":1.863,"us-layout":61.79,"renders":0.5,"mutations":2},{"n":50,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"diff-seq","us":1.771,"us-layout":65.22,"renders":0.5,"mutations":2},{"n":50,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"diff-seq =","us":1.835,"us-layout":62.38,"renders":0.5,"mutations":2},{"n":50,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"simple-seq","us":1.663,"us-layout":66.32,"renders":0.5,"mutations":2},{"n":50,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq :id","us":9.214,"us-layout":76.79,"renders":0.5,"mutations":2},{"n":50,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq new","us":1.777,"us-layout":64.25,"renders":0.5,"mutations":2},{"n":50,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq","us":1.702,"us-layout":62.38,"renders":0.5,"mutations":2},{"n":50,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq =","us":1.699,"us-layout":61.48,"renders":0.5,"mutations":2},{"n":50,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"simple-seq","us":1.7,"us-layout":71.18,"renders":2,"mutations":10},{"n":50,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"keyed-seq :id","us":8.264,"us-layout":94.49,"renders":0,"mutations":8},{"n":50,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"keyed-seq new","us":1.813,"us-layout":86.36,"renders":0,"mutations":8},{"n":50,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"diff-seq","us":1.633,"us-layout":83.45,"renders":0,"mutations":8},{"n":50,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"diff-seq =","us":1.776,"us-layout":83.81,"renders":0,"mutations":8},{"n":50,"scenario":"update 1 row","scenario-id":"update-1","impl":"simple-seq","us":0.518,"us-layout":52.37,"renders":1,"mutations":1},{"n":50,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq :id","us":6.827,"us-layout":62.63,"renders":1,"mutations":1},{"n":50,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq new","us":0.625,"us-layout":55.41,"renders":1,"mutations":1},{"n":50,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq","us":0.685,"us-layout":55.45,"renders":1,"mutations":1},{"n":50,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq =","us":0.965,"us-layout":57.45,"renders":1,"mutations":1},{"n":50,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"simple-seq","us":1.391,"us-layout":68.16,"renders":5,"mutations":5},{"n":50,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"keyed-seq :id","us":8.053,"us-layout":76.56,"renders":5,"mutations":5},{"n":50,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"keyed-seq new","us":1.587,"us-layout":71.97,"renders":5,"mutations":5},{"n":50,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"diff-seq","us":1.756,"us-layout":72.49,"renders":5,"mutations":5},{"n":50,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"diff-seq =","us":2.753,"us-layout":72.29,"renders":5,"mutations":5},{"n":50,"scenario":"reverse","scenario-id":"reverse","impl":"simple-seq","us":34.985,"us-layout":490,"renders":50,"mutations":234},{"n":50,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq :id","us":39.013,"us-layout":764.71,"renders":0,"mutations":200},{"n":50,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq new","us":34.404,"us-layout":711.76,"renders":0,"mutations":196},{"n":50,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq","us":31.154,"us-layout":702.78,"renders":0,"mutations":196},{"n":50,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq =","us":34.294,"us-layout":719.44,"renders":0,"mutations":196},{"n":50,"scenario":"shuffle","scenario-id":"shuffle","impl":"simple-seq","us":30.376,"us-layout":451.79,"renders":47,"mutations":204},{"n":50,"scenario":"shuffle","scenario-id":"shuffle","impl":"keyed-seq :id","us":38.735,"us-layout":688.89,"renders":0,"mutations":188},{"n":50,"scenario":"shuffle","scenario-id":"shuffle","impl":"keyed-seq new","us":27.283,"us-layout":527.08,"renders":0,"mutations":152},{"n":50,"scenario":"shuffle","scenario-id":"shuffle","impl":"diff-seq","us":26.897,"us-layout":515.22,"renders":0,"mutations":152},{"n":50,"scenario":"shuffle","scenario-id":"shuffle","impl":"diff-seq =","us":27.7,"us-layout":518.18,"renders":0,"mutations":152},{"n":50,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"simple-seq","us":32.979,"us-layout":461.11,"renders":50,"mutations":234},{"n":50,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq :id","us":137.349,"us-layout":815.63,"renders":50,"mutations":200},{"n":50,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq new","us":129.67,"us-layout":806.25,"renders":50,"mutations":200},{"n":50,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq","us":36.526,"us-layout":462.96,"renders":50,"mutations":234},{"n":50,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq =","us":36.562,"us-layout":461.11,"renders":50,"mutations":234},{"n":50,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"simple-seq","us":6.439,"us-layout":6.85,"renders":50,"mutations":0},{"n":50,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq :id","us":13.79,"us-layout":15.26,"renders":50,"mutations":0},{"n":50,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq new","us":7.676,"us-layout":8.43,"renders":50,"mutations":0},{"n":50,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq","us":10.768,"us-layout":11.61,"renders":50,"mutations":0},{"n":50,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq =","us":4.524,"us-layout":5.11,"renders":0,"mutations":0},{"n":50,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"simple-seq","us":37.295,"us-layout":514.58,"renders":49.5,"mutations":231},{"n":50,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq :id","us":16.705,"us-layout":83.21,"renders":49.5,"mutations":2},{"n":50,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq new","us":9.502,"us-layout":75.0,"renders":49.5,"mutations":2},{"n":50,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq","us":42.922,"us-layout":532.0,"renders":49.5,"mutations":231},{"n":50,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq =","us":6.364,"us-layout":70.07,"renders":0.5,"mutations":2},{"n":50,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"simple-seq","us":5.575,"us-layout":171.92,"renders":49.5,"mutations":51},{"n":50,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq","us":1.017,"us-layout":36.69,"renders":0.5,"mutations":2},{"n":50,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq =","us":1.081,"us-layout":37.26,"renders":0.5,"mutations":2},{"n":50,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"simple-seq","us":36.495,"us-layout":478.85,"renders":49.5,"mutations":231},{"n":50,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq :id","us":14.832,"us-layout":81.37,"renders":49.5,"mutations":2},{"n":50,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq new","us":7.725,"us-layout":72.56,"renders":49.5,"mutations":2},{"n":50,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq","us":7.769,"us-layout":71.52,"renders":49.5,"mutations":2},{"n":50,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq =","us":7.723,"us-layout":71.13,"renders":49.5,"mutations":2},{"n":50,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"simple-seq","us":6.873,"us-layout":74.22,"renders":50,"mutations":10},{"n":50,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"keyed-seq :id","us":14.261,"us-layout":107.56,"renders":50,"mutations":8},{"n":50,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"keyed-seq new","us":7.597,"us-layout":91.97,"renders":50,"mutations":8},{"n":50,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"diff-seq","us":7.369,"us-layout":92.37,"renders":50,"mutations":8},{"n":50,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"diff-seq =","us":7.406,"us-layout":85.25,"renders":50,"mutations":8},{"n":100,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"simple-seq","us":69.186,"us-layout":934.62,"renders":99.5,"mutations":464},{"n":100,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq :id","us":14.038,"us-layout":120.5,"renders":0.5,"mutations":2},{"n":100,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq new","us":2.353,"us-layout":102.5,"renders":0.5,"mutations":2},{"n":100,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq","us":2.27,"us-layout":103.6,"renders":0.5,"mutations":2},{"n":100,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq =","us":2.238,"us-layout":105.85,"renders":0.5,"mutations":2},{"n":100,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"simple-seq","us":35.714,"us-layout":502.17,"renders":49.5,"mutations":231},{"n":100,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"keyed-seq :id","us":14.044,"us-layout":116.04,"renders":0.5,"mutations":2},{"n":100,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"keyed-seq new","us":2.209,"us-layout":100.0,"renders":0.5,"mutations":2},{"n":100,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"diff-seq","us":2.204,"us-layout":104.95,"renders":0.5,"mutations":2},{"n":100,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"diff-seq =","us":2.235,"us-layout":102.12,"renders":0.5,"mutations":2},{"n":100,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"simple-seq","us":1.856,"us-layout":96.55,"renders":0.5,"mutations":2},{"n":100,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq :id","us":13.859,"us-layout":122.28,"renders":0.5,"mutations":2},{"n":100,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq new","us":2.119,"us-layout":98.25,"renders":0.5,"mutations":2},{"n":100,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq","us":1.996,"us-layout":101.75,"renders":0.5,"mutations":2},{"n":100,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq =","us":2.015,"us-layout":99.57,"renders":0.5,"mutations":2},{"n":100,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"simple-seq","us":1.72,"us-layout":102.23,"renders":2,"mutations":8},{"n":100,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"keyed-seq :id","us":13.479,"us-layout":134.66,"renders":0,"mutations":8},{"n":100,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"keyed-seq new","us":2.118,"us-layout":118.63,"renders":0,"mutations":8},{"n":100,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"diff-seq","us":1.962,"us-layout":118.42,"renders":0,"mutations":8},{"n":100,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"diff-seq =","us":2.071,"us-layout":117.53,"renders":0,"mutations":8},{"n":100,"scenario":"update 1 row","scenario-id":"update-1","impl":"simple-seq","us":0.775,"us-layout":88.76,"renders":1,"mutations":1},{"n":100,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq :id","us":11.876,"us-layout":107.26,"renders":1,"mutations":1},{"n":100,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq new","us":0.985,"us-layout":90.08,"renders":1,"mutations":1},{"n":100,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq","us":1.051,"us-layout":87.31,"renders":1,"mutations":1},{"n":100,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq =","us":1.287,"us-layout":90.23,"renders":1,"mutations":1},{"n":100,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"simple-seq","us":2.578,"us-layout":119.39,"renders":10,"mutations":10},{"n":100,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"keyed-seq :id","us":14.213,"us-layout":140.8,"renders":10,"mutations":10},{"n":100,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"keyed-seq new","us":3.027,"us-layout":117.55,"renders":10,"mutations":10},{"n":100,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"diff-seq","us":3.345,"us-layout":121.72,"renders":10,"mutations":10},{"n":100,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"diff-seq =","us":5.239,"us-layout":123.4,"renders":10,"mutations":10},{"n":100,"scenario":"reverse","scenario-id":"reverse","impl":"simple-seq","us":57.073,"us-layout":885.71,"renders":100,"mutations":400},{"n":100,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq :id","us":70.455,"us-layout":1325,"renders":0,"mutations":400},{"n":100,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq new","us":66.954,"us-layout":1280.0,"renders":0,"mutations":396},{"n":100,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq","us":60.825,"us-layout":1260.0,"renders":0,"mutations":396},{"n":100,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq =","us":67.027,"us-layout":1265.0,"renders":0,"mutations":396},{"n":100,"scenario":"shuffle","scenario-id":"shuffle","impl":"simple-seq","us":64.205,"us-layout":883.33,"renders":99,"mutations":446},{"n":100,"scenario":"shuffle","scenario-id":"shuffle","impl":"keyed-seq :id","us":71.914,"us-layout":1300,"renders":0,"mutations":396},{"n":100,"scenario":"shuffle","scenario-id":"shuffle","impl":"keyed-seq new","us":57.039,"us-layout":1100.0,"renders":0,"mutations":328},{"n":100,"scenario":"shuffle","scenario-id":"shuffle","impl":"diff-seq","us":55.991,"us-layout":1075.0,"renders":0,"mutations":328},{"n":100,"scenario":"shuffle","scenario-id":"shuffle","impl":"diff-seq =","us":58.929,"us-layout":1066.67,"renders":0,"mutations":328},{"n":100,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"simple-seq","us":64.451,"us-layout":892.86,"renders":100,"mutations":467},{"n":100,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq :id","us":269.565,"us-layout":1625,"renders":100,"mutations":400},{"n":100,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq new","us":260.87,"us-layout":1562.5,"renders":100,"mutations":400},{"n":100,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq","us":71.29,"us-layout":896.15,"renders":100,"mutations":467},{"n":100,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq =","us":70.679,"us-layout":917.86,"renders":100,"mutations":467},{"n":100,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"simple-seq","us":12.883,"us-layout":13.28,"renders":100,"mutations":0},{"n":100,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq :id","us":25.524,"us-layout":27.05,"renders":100,"mutations":0},{"n":100,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq new","us":14.698,"us-layout":16.76,"renders":100,"mutations":0},{"n":100,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq","us":21.189,"us-layout":22.33,"renders":100,"mutations":0},{"n":100,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq =","us":8.929,"us-layout":9.71,"renders":0,"mutations":0},{"n":100,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"simple-seq","us":72.137,"us-layout":923.08,"renders":99.5,"mutations":464},{"n":100,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq :id","us":27.799,"us-layout":125.93,"renders":99.5,"mutations":2},{"n":100,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq new","us":16.76,"us-layout":113.22,"renders":99.5,"mutations":2},{"n":100,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq","us":81.513,"us-layout":903.85,"renders":99.5,"mutations":464},{"n":100,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq =","us":10.93,"us-layout":108.79,"renders":0.5,"mutations":2},{"n":100,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"simple-seq","us":10.618,"us-layout":309.76,"renders":99.5,"mutations":101},{"n":100,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq","us":1.376,"us-layout":51.13,"renders":0.5,"mutations":2},{"n":100,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq =","us":1.424,"us-layout":56.08,"renders":0.5,"mutations":2},{"n":100,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"simple-seq","us":72.671,"us-layout":1000,"renders":99.5,"mutations":464},{"n":100,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq :id","us":26.226,"us-layout":136.93,"renders":99.5,"mutations":2},{"n":100,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq new","us":14.015,"us-layout":121.35,"renders":99.5,"mutations":2},{"n":100,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq","us":13.892,"us-layout":117.71,"renders":99.5,"mutations":2},{"n":100,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq =","us":13.925,"us-layout":118.5,"renders":99.5,"mutations":2},{"n":100,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"simple-seq","us":12.5,"us-layout":120.53,"renders":100,"mutations":8},{"n":100,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"keyed-seq :id","us":25.884,"us-layout":162.03,"renders":100,"mutations":8},{"n":100,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"keyed-seq new","us":13.403,"us-layout":138.24,"renders":100,"mutations":8},{"n":100,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"diff-seq","us":13.702,"us-layout":144.58,"renders":100,"mutations":8},{"n":100,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"diff-seq =","us":14.137,"us-layout":137.35,"renders":100,"mutations":8},{"n":1000,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"simple-seq","us":682.353,"us-layout":10400.0,"renders":999.5,"mutations":4664},{"n":1000,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq :id","us":157.971,"us-layout":1021.43,"renders":0.5,"mutations":2},{"n":1000,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"keyed-seq new","us":10.193,"us-layout":838.89,"renders":0.5,"mutations":2},{"n":1000,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq","us":10.77,"us-layout":818.75,"renders":0.5,"mutations":2},{"n":1000,"scenario":"remove first ⇄ insert first","scenario-id":"remove-first","impl":"diff-seq =","us":10.508,"us-layout":831.25,"renders":0.5,"mutations":2},{"n":1000,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"simple-seq","us":341.429,"us-layout":5700.0,"renders":499.5,"mutations":2331},{"n":1000,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"keyed-seq :id","us":160.127,"us-layout":1064.29,"renders":0.5,"mutations":2},{"n":1000,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"keyed-seq new","us":10.117,"us-layout":816.67,"renders":0.5,"mutations":2},{"n":1000,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"diff-seq","us":10.565,"us-layout":862.5,"renders":0.5,"mutations":2},{"n":1000,"scenario":"remove middle ⇄ insert middle","scenario-id":"remove-middle","impl":"diff-seq =","us":10.506,"us-layout":850.0,"renders":0.5,"mutations":2},{"n":1000,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"simple-seq","us":6.202,"us-layout":827.78,"renders":0.5,"mutations":2},{"n":1000,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq :id","us":154.938,"us-layout":1057.14,"renders":0.5,"mutations":2},{"n":1000,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"keyed-seq new","us":8.404,"us-layout":868.75,"renders":0.5,"mutations":2},{"n":1000,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq","us":8.932,"us-layout":893.75,"renders":0.5,"mutations":2},{"n":1000,"scenario":"remove last ⇄ append","scenario-id":"remove-last","impl":"diff-seq =","us":9.366,"us-layout":956.25,"renders":0.5,"mutations":2},{"n":1000,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"simple-seq","us":6.595,"us-layout":806.25,"renders":2,"mutations":8},{"n":1000,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"keyed-seq :id","us":155.921,"us-layout":1164.29,"renders":0,"mutations":8},{"n":1000,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"keyed-seq new","us":8.457,"us-layout":887.5,"renders":0,"mutations":8},{"n":1000,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"diff-seq","us":8.685,"us-layout":887.5,"renders":0,"mutations":8},{"n":1000,"scenario":"swap rows 1 and n-2","scenario-id":"swap","impl":"diff-seq =","us":8.691,"us-layout":881.25,"renders":0,"mutations":8},{"n":1000,"scenario":"update 1 row","scenario-id":"update-1","impl":"simple-seq","us":5.603,"us-layout":811.11,"renders":1,"mutations":1},{"n":1000,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq :id","us":155.0,"us-layout":1035.71,"renders":1,"mutations":1},{"n":1000,"scenario":"update 1 row","scenario-id":"update-1","impl":"keyed-seq new","us":7.152,"us-layout":827.78,"renders":1,"mutations":1},{"n":1000,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq","us":8.658,"us-layout":825.0,"renders":1,"mutations":1},{"n":1000,"scenario":"update 1 row","scenario-id":"update-1","impl":"diff-seq =","us":8.758,"us-layout":800.0,"renders":1,"mutations":1},{"n":1000,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"simple-seq","us":27.938,"us-layout":1250,"renders":100,"mutations":100},{"n":1000,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"keyed-seq :id","us":188.028,"us-layout":1540.0,"renders":100,"mutations":100},{"n":1000,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"keyed-seq new","us":33.42,"us-layout":1275.0,"renders":100,"mutations":100},{"n":1000,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"diff-seq","us":35.352,"us-layout":1258.33,"renders":100,"mutations":100},{"n":1000,"scenario":"update every 10th row","scenario-id":"update-10th","impl":"diff-seq =","us":52.311,"us-layout":1266.67,"renders":100,"mutations":100},{"n":1000,"scenario":"reverse","scenario-id":"reverse","impl":"simple-seq","us":576.19,"us-layout":10150.0,"renders":1000,"mutations":4000},{"n":1000,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq :id","us":810.0,"us-layout":14025.0,"renders":0,"mutations":4000},{"n":1000,"scenario":"reverse","scenario-id":"reverse","impl":"keyed-seq new","us":685.294,"us-layout":14100.0,"renders":0,"mutations":3996},{"n":1000,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq","us":655.556,"us-layout":14825.0,"renders":0,"mutations":3996},{"n":1000,"scenario":"reverse","scenario-id":"reverse","impl":"diff-seq =","us":708.824,"us-layout":14800.0,"renders":0,"mutations":3996},{"n":1000,"scenario":"shuffle","scenario-id":"shuffle","impl":"simple-seq","us":679.412,"us-layout":10350.0,"renders":999,"mutations":4422},{"n":1000,"scenario":"shuffle","scenario-id":"shuffle","impl":"keyed-seq :id","us":850.0,"us-layout":14825.0,"renders":0,"mutations":3996},{"n":1000,"scenario":"shuffle","scenario-id":"shuffle","impl":"keyed-seq new","us":702.941,"us-layout":14400.0,"renders":0,"mutations":3788},{"n":1000,"scenario":"shuffle","scenario-id":"shuffle","impl":"diff-seq","us":632.5,"us-layout":13525.0,"renders":0,"mutations":3788},{"n":1000,"scenario":"shuffle","scenario-id":"shuffle","impl":"diff-seq =","us":703.125,"us-layout":13325.0,"renders":0,"mutations":3788},{"n":1000,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"simple-seq","us":658.824,"us-layout":11275.0,"renders":1000,"mutations":4667},{"n":1000,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq :id","us":3225.0,"us-layout":18675.0,"renders":1000,"mutations":4000},{"n":1000,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"keyed-seq new","us":2912.5,"us-layout":17625,"renders":1000,"mutations":4000},{"n":1000,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq","us":750,"us-layout":10600.0,"renders":1000,"mutations":4667},{"n":1000,"scenario":"replace all (no overlap)","scenario-id":"replace-all","impl":"diff-seq =","us":833.333,"us-layout":11225.0,"renders":1000,"mutations":4667},{"n":1000,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"simple-seq","us":129.487,"us-layout":133.33,"renders":1000,"mutations":0},{"n":1000,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq :id","us":294.231,"us-layout":319.23,"renders":1000,"mutations":0},{"n":1000,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"keyed-seq new","us":150.0,"us-layout":161.76,"renders":1000,"mutations":0},{"n":1000,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq","us":186.765,"us-layout":203.12,"renders":1000,"mutations":0},{"n":1000,"scenario":"fresh equal maps, no change","scenario-id":"fresh-nochange","impl":"diff-seq =","us":86.957,"us-layout":95.24,"renders":0,"mutations":0},{"n":1000,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"simple-seq","us":732.143,"us-layout":10650.0,"renders":999.5,"mutations":4664},{"n":1000,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq :id","us":303.846,"us-layout":1300.0,"renders":999.5,"mutations":2},{"n":1000,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"keyed-seq new","us":153.846,"us-layout":1041.67,"renders":999.5,"mutations":2},{"n":1000,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq","us":776.923,"us-layout":9675.0,"renders":999.5,"mutations":4664},{"n":1000,"scenario":"fresh equal maps, remove first ⇄ insert first","scenario-id":"fresh-remove-first","impl":"diff-seq =","us":90.0,"us-layout":916.67,"renders":0.5,"mutations":2},{"n":1000,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"simple-seq","us":104.839,"us-layout":3212.5,"renders":999.5,"mutations":1001},{"n":1000,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq","us":9.081,"us-layout":388.0,"renders":0.5,"mutations":2},{"n":1000,"scenario":"strings w/ duplicates, remove first ⇄ insert first","scenario-id":"dup-strings-remove-first","impl":"diff-seq =","us":8.992,"us-layout":390.74,"renders":0.5,"mutations":2},{"n":1000,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"simple-seq","us":665.789,"us-layout":9800.0,"renders":999.5,"mutations":4664},{"n":1000,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq :id","us":276.087,"us-layout":1164.29,"renders":999.5,"mutations":2},{"n":1000,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"keyed-seq new","us":121.495,"us-layout":964.29,"renders":999.5,"mutations":2},{"n":1000,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq","us":122.17,"us-layout":978.57,"renders":999.5,"mutations":2},{"n":1000,"scenario":"inline render fn, remove first ⇄ insert first","scenario-id":"inline-remove-first","impl":"diff-seq =","us":121.296,"us-layout":1012.5,"renders":999.5,"mutations":2},{"n":1000,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"simple-seq","us":119.725,"us-layout":1007.14,"renders":1000,"mutations":8},{"n":1000,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"keyed-seq :id","us":293.478,"us-layout":1370.0,"renders":1000,"mutations":8},{"n":1000,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"keyed-seq new","us":122.277,"us-layout":1064.29,"renders":1000,"mutations":8},{"n":1000,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"diff-seq","us":120.093,"us-layout":1021.43,"renders":1000,"mutations":8},{"n":1000,"scenario":"inline render fn, swap rows 1 and n-2","scenario-id":"inline-swap","impl":"diff-seq =","us":126.667,"us-layout":1007.14,"renders":1000,"mutations":8}],"matching":[{"n":10,"data":"maps, shuffled (same instances)","strategy":"cljs map → js/Set (proposal)","us":2.649,"matched":10},{"n":10,"data":"maps, shuffled (same instances)","strategy":"js Map identity → js/Set","us":0.717,"matched":10},{"n":10,"data":"maps, shuffled (same instances)","strategy":"js Map identity → Int32 chain (diff-seq)","us":0.402,"matched":10},{"n":10,"data":"maps, shuffled (same instances)","strategy":"js Map hash → chain + = (diff-seq =)","us":0.52,"matched":10},{"n":10,"data":"maps, shuffled, fresh equal copies","strategy":"cljs map → js/Set (proposal)","us":8.084,"matched":10},{"n":10,"data":"maps, shuffled, fresh equal copies","strategy":"js Map identity → js/Set","us":0.417,"matched":0},{"n":10,"data":"maps, shuffled, fresh equal copies","strategy":"js Map identity → Int32 chain (diff-seq)","us":0.285,"matched":0},{"n":10,"data":"maps, shuffled, fresh equal copies","strategy":"js Map hash → chain + = (diff-seq =)","us":5.33,"matched":10},{"n":10,"data":"strings w/ duplicates, shuffled","strategy":"cljs map → js/Set (proposal)","us":0.733,"matched":10},{"n":10,"data":"strings w/ duplicates, shuffled","strategy":"js Map identity → js/Set","us":0.568,"matched":10},{"n":10,"data":"strings w/ duplicates, shuffled","strategy":"js Map identity → Int32 chain (diff-seq)","us":0.327,"matched":10},{"n":10,"data":"strings w/ duplicates, shuffled","strategy":"js Map hash → chain + = (diff-seq =)","us":0.706,"matched":10},{"n":100,"data":"maps, shuffled (same instances)","strategy":"cljs map → js/Set (proposal)","us":18.103,"matched":100},{"n":100,"data":"maps, shuffled (same instances)","strategy":"js Map identity → js/Set","us":7.511,"matched":100},{"n":100,"data":"maps, shuffled (same instances)","strategy":"js Map identity → Int32 chain (diff-seq)","us":3.834,"matched":100},{"n":100,"data":"maps, shuffled (same instances)","strategy":"js Map hash → chain + = (diff-seq =)","us":5.767,"matched":100},{"n":100,"data":"maps, shuffled, fresh equal copies","strategy":"cljs map → js/Set (proposal)","us":76.829,"matched":100},{"n":100,"data":"maps, shuffled, fresh equal copies","strategy":"js Map identity → js/Set","us":4.33,"matched":0},{"n":100,"data":"maps, shuffled, fresh equal copies","strategy":"js Map identity → Int32 chain (diff-seq)","us":2.946,"matched":0},{"n":100,"data":"maps, shuffled, fresh equal copies","strategy":"js Map hash → chain + = (diff-seq =)","us":62.903,"matched":100},{"n":100,"data":"strings w/ duplicates, shuffled","strategy":"cljs map → js/Set (proposal)","us":5.853,"matched":100},{"n":100,"data":"strings w/ duplicates, shuffled","strategy":"js Map identity → js/Set","us":4.259,"matched":100},{"n":100,"data":"strings w/ duplicates, shuffled","strategy":"js Map identity → Int32 chain (diff-seq)","us":3.148,"matched":100},{"n":100,"data":"strings w/ duplicates, shuffled","strategy":"js Map hash → chain + = (diff-seq =)","us":7.781,"matched":100},{"n":1000,"data":"maps, shuffled (same instances)","strategy":"cljs map → js/Set (proposal)","us":242.157,"matched":1000},{"n":1000,"data":"maps, shuffled (same instances)","strategy":"js Map identity → js/Set","us":88.722,"matched":1000},{"n":1000,"data":"maps, shuffled (same instances)","strategy":"js Map identity → Int32 chain (diff-seq)","us":36.937,"matched":1000},{"n":1000,"data":"maps, shuffled (same instances)","strategy":"js Map hash → chain + = (diff-seq =)","us":60.286,"matched":1000},{"n":1000,"data":"maps, shuffled, fresh equal copies","strategy":"cljs map → js/Set (proposal)","us":1140.0,"matched":1000},{"n":1000,"data":"maps, shuffled, fresh equal copies","strategy":"js Map identity → js/Set","us":50.0,"matched":0},{"n":1000,"data":"maps, shuffled, fresh equal copies","strategy":"js Map identity → Int32 chain (diff-seq)","us":29.839,"matched":0},{"n":1000,"data":"maps, shuffled, fresh equal copies","strategy":"js Map hash → chain + = (diff-seq =)","us":900.0,"matched":1000},{"n":1000,"data":"strings w/ duplicates, shuffled","strategy":"cljs map → js/Set (proposal)","us":73.75,"matched":1000},{"n":1000,"data":"strings w/ duplicates, shuffled","strategy":"js Map identity → js/Set","us":53.419,"matched":1000},{"n":1000,"data":"strings w/ duplicates, shuffled","strategy":"js Map identity → Int32 chain (diff-seq)","us":30.238,"matched":1000},{"n":1000,"data":"strings w/ duplicates, shuffled","strategy":"js Map hash → chain + = (diff-seq =)","us":78.387,"matched":1000}]}</script>
+<script>
+(() => {
+  const DATA = JSON.parse(document.getElementById("bench-data").textContent);
+  const IMPLS = ["simple-seq", "keyed-seq :id", "keyed-seq new", "diff-seq", "diff-seq ="];
+  const LABEL = { "simple-seq": "simple-seq", "keyed-seq :id": "keyed-seq", "keyed-seq new": "keyed-seq new", "diff-seq": "diff-seq", "diff-seq =": "diff-seq =" };
+  const COLOR = { "simple-seq": "var(--s1)", "keyed-seq :id": "var(--s2)", "keyed-seq new": "var(--s3)", "diff-seq": "var(--s4)", "diff-seq =": "var(--s5)" };
+  const SIZES = [...new Set(DATA.dom.map(r => r.n))].sort((a, b) => a - b);
+  const SCENARIOS = [];
+  for (const r of DATA.dom) if (!SCENARIOS.find(s => s.id === r["scenario-id"])) SCENARIOS.push({ id: r["scenario-id"], label: r.scenario });
+  const IDX = new Map(DATA.dom.map(r => [`${r.impl}|${r["scenario-id"]}|${r.n}`, r]));
+  const get = (impl, sid, n) => IDX.get(`${impl}|${sid}|${n}`);
+
+  const state = { metric: "us-layout", lineScn: "remove-first", tableN: 100, matchN: 1000, cand: "diff-seq =", base: "diff-seq" };
+
+  const fmtUs = (x) => x >= 10000 ? (x / 1000).toFixed(1) + " ms" : x >= 1000 ? (x / 1000).toFixed(2) + " ms" : x >= 100 ? x.toFixed(0) + " µs" : x >= 10 ? x.toFixed(1) + " µs" : x.toFixed(2) + " µs";
+  const fmtNum = (x) => Number.isInteger(x) ? String(x) : x.toFixed(1);
+  const fmtRatio = (r) => r >= 10 ? Math.round(r) + "×" : r >= 1 ? r.toFixed(1) + "×" : r.toFixed(2) + "×";
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+  // tooltip
+  const tip = document.getElementById("tip");
+  function showTip(build, x, y) {
+    tip.replaceChildren();
+    build(tip);
+    tip.hidden = false;
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    let left = x + 14, top = y + 14;
+    if (left + w > window.innerWidth - 8) left = Math.max(8, x - w - 14);
+    if (top + h > window.innerHeight - 8) top = Math.max(8, y - h - 14);
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+  }
+  const hideTip = () => { tip.hidden = true; };
+  function tipRow(parent, color, label, value) {
+    const row = el("div", "t-row");
+    const key = el("i"); key.style.background = color || "transparent";
+    row.append(key, el("span", null, label), el("b", null, value));
+    parent.append(row);
+  }
+  function bindTip(node, build) {
+    node.addEventListener("pointermove", (e) => showTip(build, e.clientX, e.clientY));
+    node.addEventListener("pointerleave", hideTip);
+    node.addEventListener("focus", () => { const r = node.getBoundingClientRect(); showTip(build, r.right, r.top); });
+    node.addEventListener("blur", hideTip);
+  }
+
+  function seg(container, values, current, label, onPick) {
+    container.replaceChildren();
+    for (const v of values) {
+      const b = el("button", null, label(v));
+      b.type = "button";
+      b.setAttribute("aria-pressed", String(v === current));
+      b.addEventListener("click", () => { onPick(v); for (const c of container.children) c.setAttribute("aria-pressed", String(c === b)); });
+      container.append(b);
+    }
+  }
+
+  // matching bars
+  function renderMatching() {
+    const box = document.getElementById("match-bars");
+    box.replaceChildren();
+    const rows = DATA.matching.filter(r => r.n === state.matchN);
+    const max = Math.max(...rows.map(r => r.us));
+    const datas = [...new Set(rows.map(r => r.data))];
+    for (const d of datas) {
+      const g = el("div", "bar-group");
+      g.append(el("h4", null, d));
+      for (const r of rows.filter(r => r.data === d)) {
+        const row = el("div", "bar-row" + (/diff-seq/.test(r.strategy) ? " chosen" : ""));
+        row.tabIndex = 0;
+        row.append(el("div", "lab", r.strategy));
+        const track = el("div", "track");
+        const bar = el("div", "bar");
+        bar.style.width = `calc((100% - 12rem) * ${r.us / max})`;
+        bar.style.minWidth = "2px";
+        const val = el("span", "val", fmtUs(r.us) + " ");
+        val.append(el("small", null, `${r.matched}/${r.n} matched`));
+        track.append(bar, val);
+        row.append(track);
+        bindTip(row, (t) => { t.append(el("div", "t-title", `${d} · n=${r.n}`)); t.append(el("div", "t-big", fmtUs(r.us))); t.append(el("div", null, r.strategy)); t.append(el("div", "t-title", `${r.matched} of ${r.n} items matched`)); });
+        g.append(row);
+      }
+      box.append(g);
+    }
+  }
+  seg(document.getElementById("match-n"), [...new Set(DATA.matching.map(r => r.n))], state.matchN, n => "n=" + n, v => { state.matchN = v; renderMatching(); });
+
+  // heatmap
+  function bin(r) {
+    const x = Math.log2(r), a = Math.abs(x);
+    if (a < 0.2) return "mid";
+    const step = a < 0.585 ? 1 : a < 1.32 ? 2 : a < 2.32 ? 3 : a < 3.32 ? 4 : 5;
+    return (x > 0 ? "b" : "r") + step;
+  }
+  function renderHeatmap(table, cand, base) {
+    table.replaceChildren();
+    const thead = el("thead"), hr = el("tr");
+    hr.append(el("th", null, "n ="));
+    for (const n of SIZES) hr.append(el("th", null, String(n)));
+    thead.append(hr);
+    const tbody = el("tbody");
+    for (const s of SCENARIOS) {
+      const tr = el("tr");
+      tr.append(el("th", null, s.label));
+      for (const n of SIZES) {
+        const a = get(cand, s.id, n), b = get(base, s.id, n);
+        if (!a || !b) { const td = el("td", "na", "–"); td.title = "not measured at this size or not applicable"; tr.append(td); continue; }
+        const r = b[state.metric] / a[state.metric];
+        const td = el("td", bin(r), fmtRatio(r));
+        td.tabIndex = 0;
+        td.setAttribute("aria-label", `${s.label}, n=${n}: ${LABEL[cand]} ${fmtUs(a[state.metric])}, ${LABEL[base]} ${fmtUs(b[state.metric])}, ratio ${fmtRatio(r)}`);
+        bindTip(td, (t) => {
+          t.append(el("div", "t-title", `${s.label} · n=${n} · ${state.metric === "us" ? "script only" : "incl. layout"}`));
+          t.append(el("div", "t-big", `${fmtRatio(r)} ${r >= 1 ? "faster" : "slower"}`));
+          for (const [impl, rec] of [[cand, a], [base, b]]) {
+            tipRow(t, COLOR[impl], LABEL[impl], fmtUs(rec[state.metric]));
+            tipRow(t, null, "renders · mutations", `${fmtNum(rec.renders)} · ${fmtNum(rec.mutations)}`);
+          }
+        });
+        tr.append(td);
+      }
+      tbody.append(tr);
+    }
+    table.append(thead, tbody);
+  }
+  function renderHeatmaps() {
+    renderHeatmap(document.getElementById("hm-diff"), "diff-seq", "simple-seq");
+    renderHeatmap(document.getElementById("hm-keyed"), "keyed-seq new", "keyed-seq :id");
+    renderHeatmap(document.getElementById("hm-custom"), state.cand, state.base);
+  }
+  for (const [id, key] of [["cmp-cand", "cand"], ["cmp-base", "base"]]) {
+    const sel = document.getElementById(id);
+    for (const impl of IMPLS) { const o = el("option", null, LABEL[impl]); o.value = impl; sel.append(o); }
+    sel.value = state[key];
+    sel.addEventListener("change", () => { state[key] = sel.value; renderHeatmap(document.getElementById("hm-custom"), state.cand, state.base); });
+  }
+
+  // line chart, log-log
+  const lineSel = document.getElementById("line-scn");
+  for (const s of SCENARIOS) { const o = el("option", null, s.label); o.value = s.id; lineSel.append(o); }
+  lineSel.value = state.lineScn;
+  lineSel.addEventListener("change", () => { state.lineScn = lineSel.value; renderLine(); });
+  const legend = document.getElementById("line-legend");
+  for (const impl of IMPLS) { const s = el("span"); const i = el("i"); i.style.background = COLOR[impl]; s.append(i, document.createTextNode(LABEL[impl])); legend.append(s); }
+
+  const NS = "http://www.w3.org/2000/svg";
+  const svgEl = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+  function renderLine() {
+    const box = document.getElementById("line-chart");
+    box.replaceChildren();
+    const sid = state.lineScn, m = state.metric;
+    const scn = SCENARIOS.find(s => s.id === sid);
+    document.getElementById("line-title").textContent = `${scn.label}: µs per update by list size (${m === "us" ? "script only" : "incl. layout"})`;
+    const series = IMPLS.map(impl => ({ impl, pts: SIZES.map(n => ({ n, r: get(impl, sid, n) })).filter(p => p.r) })).filter(s => s.pts.length);
+    const ns = [...new Set(series.flatMap(s => s.pts.map(p => p.n)))].sort((a, b) => a - b);
+    const vals = series.flatMap(s => s.pts.map(p => p.r[m]));
+    const W = 760, H = 340, ml = 64, mr = 18, mt = 12, mb = 40;
+    // fit the data with a little log padding, ticks at 1-2-5 steps when the range is narrow
+    const vMin = Math.min(...vals), vMax = Math.max(...vals);
+    const lo = vMin / 1.4, hi = vMax * 1.4;
+    let ticks = [];
+    for (let d = Math.floor(Math.log10(lo)); d <= Math.ceil(Math.log10(hi)); d++)
+      for (const k of [1, 2, 5]) { const v = k * Math.pow(10, d); if (v >= lo && v <= hi) ticks.push(v); }
+    if (ticks.length > 7) ticks = ticks.filter(v => Math.abs(Math.log10(v) - Math.round(Math.log10(v))) < 1e-9);
+    const xLo = Math.log10(ns[0]), xHi = Math.log10(ns[ns.length - 1]) || 1;
+    const x = (n) => ml + (xHi === xLo ? 0.5 : (Math.log10(n) - xLo) / (xHi - xLo)) * (W - ml - mr);
+    const y = (v) => mt + (1 - (Math.log10(v) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo))) * (H - mt - mb);
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `${scn.label}, µs per update by list size, log scale` });
+    for (const v of ticks) {
+      const yy = y(v);
+      svg.append(svgEl("line", { x1: ml, x2: W - mr, y1: yy, y2: yy, stroke: "var(--grid)", "stroke-width": 1 }));
+      const t = svgEl("text", { x: ml - 8, y: yy + 4, "text-anchor": "end", "font-size": 12, fill: "var(--muted)" });
+      t.textContent = v >= 1000 ? +(v / 1000).toPrecision(3) + " ms" : +v.toPrecision(3) + " µs";
+      svg.append(t);
+    }
+    svg.append(svgEl("line", { x1: ml, x2: W - mr, y1: H - mb, y2: H - mb, stroke: "var(--axis)", "stroke-width": 1 }));
+    for (const n of ns) {
+      const t = svgEl("text", { x: x(n), y: H - mb + 18, "text-anchor": "middle", "font-size": 12, fill: "var(--muted)" });
+      t.textContent = n;
+      svg.append(t);
+    }
+    const xl = svgEl("text", { x: (ml + W - mr) / 2, y: H - 4, "text-anchor": "middle", "font-size": 12, fill: "var(--muted)" });
+    xl.textContent = "items in list";
+    svg.append(xl);
+    for (const s of series) {
+      const d = s.pts.map((p, i) => `${i ? "L" : "M"}${x(p.n).toFixed(1)},${y(p.r[m]).toFixed(1)}`).join("");
+      svg.append(svgEl("path", { d, fill: "none", stroke: COLOR[s.impl], "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    }
+    for (const s of series) for (const p of s.pts)
+      svg.append(svgEl("circle", { cx: x(p.n), cy: y(p.r[m]), r: 4, fill: COLOR[s.impl], stroke: "var(--surface)", "stroke-width": 2 }));
+    const cross = svgEl("line", { y1: mt, y2: H - mb, stroke: "var(--axis)", "stroke-width": 1, visibility: "hidden" });
+    svg.append(cross);
+    const hit = svgEl("rect", { x: ml, y: mt, width: W - ml - mr, height: H - mt - mb, fill: "transparent" });
+    svg.append(hit);
+    hit.addEventListener("pointermove", (e) => {
+      const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+      const loc = pt.matrixTransform(svg.getScreenCTM().inverse());
+      let best = ns[0];
+      for (const n of ns) if (Math.abs(x(n) - loc.x) < Math.abs(x(best) - loc.x)) best = n;
+      cross.setAttribute("x1", x(best)); cross.setAttribute("x2", x(best)); cross.setAttribute("visibility", "visible");
+      showTip((t) => {
+        t.append(el("div", "t-title", `n=${best} · ${scn.label}`));
+        for (const s of series) { const p = s.pts.find(p => p.n === best); if (p) tipRow(t, COLOR[s.impl], LABEL[s.impl], fmtUs(p.r[m])); }
+      }, e.clientX, e.clientY);
+    });
+    hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+    box.append(svg);
+  }
+
+  // results table
+  function renderTable() {
+    const t = document.getElementById("results-table");
+    t.replaceChildren();
+    const m = state.metric, n = state.tableN;
+    const thead = el("thead"), hr = el("tr");
+    hr.append(el("th", null, `Scenario, n=${n}`));
+    for (const impl of IMPLS) hr.append(el("th", null, LABEL[impl]));
+    thead.append(hr);
+    const tbody = el("tbody");
+    for (const s of SCENARIOS) {
+      const recs = IMPLS.map(impl => get(impl, s.id, n));
+      if (recs.every(r => !r)) continue;
+      const best = Math.min(...recs.filter(Boolean).map(r => r[m]));
+      const tr = el("tr");
+      tr.append(el("td", null, s.label));
+      recs.forEach((r) => {
+        if (!r) { tr.append(el("td", null, "n/a")); return; }
+        const td = el("td", r[m] === best ? "best" : null, fmtUs(r[m]));
+        td.append(el("small", null, `${fmtNum(r.renders)} · ${fmtNum(r.mutations)}`));
+        tr.append(td);
+      });
+      tbody.append(tr);
+    }
+    t.append(thead, tbody);
+  }
+  seg(document.getElementById("table-n"), SIZES, state.tableN, n => String(n), v => { state.tableN = v; renderTable(); });
+
+  const metricBox = document.getElementById("metric");
+  for (const b of metricBox.querySelectorAll("button")) {
+    b.addEventListener("click", () => {
+      state.metric = b.dataset.v;
+      for (const c of metricBox.querySelectorAll("button")) c.setAttribute("aria-pressed", String(c === b));
+      renderHeatmaps(); renderLine(); renderTable();
+    });
+  }
+
+  renderMatching(); renderHeatmaps(); renderLine(); renderTable();
+})();
+</script>
+
+</body>
+</html>
