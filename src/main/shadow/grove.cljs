@@ -383,6 +383,7 @@
            (fn [env ev origin ex]
              ;; re-throwing is total shit in JS, so instead just use console
              ;; if users want to handle this differently they can replace this fn
+             (tap> [::event-error-handler ev ex env origin])
              (js/console.error "--- FAILED TO PROCESS EVENT ---" ev)
              (js/console.error ex)
              ::failed!)

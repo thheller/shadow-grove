@@ -17,61 +17,120 @@
 ;; would make env a dependency of some-hook although it isn't
 ;; should be rather unlikely though so doesn't matter for now
 
-(defn get-map-destructure-names [m]
-  (reduce-kv
-    (fn [names key val]
-      (cond
-        (symbol? key)
-        (conj names key)
+(defn destructure-keys-key?
+  "true for the :keys/:syms/:strs (and ns/keys etc) keys in a map destructure"
+  [k]
+  (and (keyword? k)
+       (contains? #{"keys" "syms" "strs"} (name k))))
 
-        (= :as key)
-        (conj names val)
+(defn binding-syms
+  "returns a vector of all symbols bound by a destructuring binding form
+   in the order they appear. _ is never included."
+  [form]
+  (cond
+    (symbol? form)
+    (if (= '_ form) [] [form])
 
-        (vector? val)
-        (into names val)
+    (vector? form)
+    (loop [syms []
+           s (seq form)]
+      (if-not s
+        syms
+        (let [[x & more] s]
+          (if (or (= '& x) (= :as x))
+            (recur (into syms (binding-syms (first more))) (next more))
+            (recur (into syms (binding-syms x)) more)))))
 
-        :else
-        names))
-    #{}
-    m))
+    (map? form)
+    (reduce-kv
+      (fn [syms k v]
+        (cond
+          (= :as k)
+          (into syms (binding-syms v))
 
-(defn get-vec-destructure-names [v]
-  (reduce
-    (fn [names val]
-      (cond
-        (= '& val)
-        names
+          (= :or k)
+          syms
 
-        (symbol? val)
-        (conj names val)
+          (destructure-keys-key? k)
+          (into syms
+            (comp (map #(with-meta (symbol (name %)) (meta %)))
+                  (remove #(= '_ %)))
+            v)
 
-        :else
-        names))
-    #{}
-    v))
+          ;; {binding-form lookup-key}
+          :else
+          (into syms (binding-syms k))))
+      []
+      form)
+
+    :else
+    (throw (ex-info "invalid binding form" {:form form}))))
+
+(declare find-used-bindings)
+
+(defn find-binding-form-deps
+  "returns the set of bindings used by a destructuring binding form.
+   only the parts evaluated at runtime can use bindings, :or defaults and map lookup keys.
+   the symbols being bound are not uses, even if they have the same name as an existing binding."
+  [bindings form]
+  (cond
+    (vector? form)
+    (into #{} (mapcat #(find-binding-form-deps bindings %)) form)
+
+    (map? form)
+    (reduce-kv
+      (fn [used k v]
+        (cond
+          (= :as k)
+          used
+
+          ;; whether the default is actually used is only known at runtime
+          ;; so the destructure always depends on it
+          (= :or k)
+          (find-used-bindings used bindings (vec (vals v)))
+
+          (destructure-keys-key? k)
+          used
+
+          ;; {binding-form lookup-key}
+          :else
+          (-> used
+              (set/union (find-binding-form-deps bindings k))
+              (find-used-bindings bindings v))))
+      #{}
+      form)
+
+    :else
+    #{}))
+
+(defn binding-top-level-as
+  "returns the :as symbol of a map or vector binding form, only checks the top level"
+  [form]
+  (let [as
+        (cond
+          (map? form)
+          (get form :as)
+
+          (vector? form)
+          (second (drop-while #(not= :as %) form)))]
+
+    (when (and (some? as) (not (simple-symbol? as)))
+      (throw (ex-info "invalid :as in binding" {:form form :as as})))
+
+    as))
 
 (comment
-  (get-map-destructure-names '{:keys [foo] ::keys [bar] baz :baz :as x})
-  (get-vec-destructure-names '[a b c & d :as x]))
+  (binding-syms '{:keys [foo] :or {foo 1}})
+  (binding-syms '{:keys [foo ::bar] ::keys [baz] :strs [s] qux :qux :as x})
+  (binding-syms '{{:keys [nested] :as inner} :foo [a _ & more :as all] :bar})
+  (find-binding-form-deps
+    '{default-a {} some-key {} nested {} unused {}}
+    '{{:keys [nested] :or {nested default-a}} some-key :or {x 1}})
+  (binding-top-level-as '[a b :as x]))
 
 (defn find-fn-args [args]
   {:pre [(vector? args)]}
-  (reduce
-    (fn [names arg]
-      (cond
-        (symbol? arg)
-        (conj names arg)
-
-        (map? arg)
-        (set/union names (get-map-destructure-names arg))
-
-        (vector? arg)
-        (set/union names (get-vec-destructure-names arg))
-
-        :else
-        names))
-    #{}
-    args))
+  (set (binding-syms args)))
 
 (defn find-used-bindings [used bindings form]
   (cond
@@ -144,175 +203,197 @@
     state
     deps))
 
-(defn add-destructure-binding
-  ([state ref-name binding-name key defaults]
-   (add-destructure-binding
-     state ref-name binding-name
-     [:lookup key (get defaults binding-name)]))
+;; destructuring is handled by letting the regular let do the work
+;;
+;; (bind {:keys [foo baz] :as bar} (something))
+;;
+;; becomes one slot running (something), whose own value is bar
+;; followed by one value cell for every other symbol bound (foo, baz)
+;; value cells do not run, they only hold the value, its affects and debug info
+;; the check fn generated for the slot (see make-check-fn) does the destructure
+;; and then checks each bound value individually, so only dependents of values
+;; that actually changed get dirty. without :as the full value is never compared.
+;;
+;; the slot always holds the value its run fn produced (or the :as value)
+;; so rt/*slot-value* and sg/suspend! keep working as before
 
-  ([{:keys [bindings slot-idx] :as state} ref-name binding-name access-type]
-   (-> state
-       (update-affects #{ref-name} slot-idx)
-       (assoc-in [:bindings binding-name]
-         {:type :slot
-          :idx slot-idx
-          :name binding-name
-          :deps #{ref-name}})
+(defn add-destructure-slot
+  "adds a slot running run-form whose result is destructured via binding-form.
+   own-sym if set is bound to the slot value itself.
+   every symbol bound by binding-form except skip-sym gets a value cell."
+  [{:keys [slot-idx bindings] :as state}
+   {:keys [binding-form own-sym skip-sym run-deps run-form debug-info]}]
 
-       (update :slots conj
-         {:depends-on
-          (let [{:keys [type idx] :as ref} (get-in state [:bindings ref-name])]
-            (if (not= type :slot)
-              #{} ;; args are tracked elsewhere, this is only for slots depending on other slots
-              #{idx}))
-          :debug-info {:type :destructure
-                       :name (str binding-name)
-                       :from (str ref-name)
-                       :column (:column (meta binding-name))
-                       :line (:line (meta binding-name))}
-          :provides binding-name
-          :run
-          (case (first access-type)
-            :lookup
-            (let [[_ key default] access-type
-                  {:keys [type idx] :as src} (get bindings ref-name)]
-              (case type
-                :arg `(arg-destructure ~idx ~key ~default)
-                :slot `(slot-destructure ~idx ~key ~default)))
+  (let [all-syms
+        (binding-syms binding-form)
 
-            :rest
-            (let [[_ drop] access-type
-                  {:keys [type idx] :as src} (get bindings ref-name)]
-              (case type
-                :arg `(arg-destructure-tail ~idx ~drop)
-                :slot `(slot-destructure-tail ~idx ~drop))))
+        _ (when-not (apply distinct? nil all-syms)
+            (throw (ex-info "duplicate symbol in binding" {:form binding-form :syms all-syms})))
 
-          #_(fn [~comp-sym]
-              (let ~(let-bindings state #{ref-name})
-                ~accessor))})
-       (update :slot-idx inc))))
+        cell-syms
+        (->> all-syms
+             (remove #(= skip-sym %))
+             (vec))
 
-(defn slot-destructure-map
-  [state
-   ref-name
-   {defaults :or :as map}]
+        ;; :or defaults or lookup keys may use other bindings
+        ;; they are evaluated in the check fn, not the run fn
+        expr-deps
+        (find-binding-form-deps bindings binding-form)
 
-  (loop [state state
-         [entry & more] (dissoc map :or :as)]
-    (if-not entry
-      state
-      (let [[key val] entry]
-        (cond
-          ;; {foo :bar}
-          (and (symbol? key)
-               (keyword? val))
-          (-> state
-              (add-destructure-binding ref-name key val defaults)
-              (recur more))
+        deps
+        (set/union run-deps expr-deps)
 
-          ;; {:keys [bar] ::keys [foo]}
-          (and (= "keys" (name key))
-               (vector? val))
-          (let [ns (namespace key)]
+        own-idx
+        slot-idx
+
+        cells
+        (->> cell-syms
+             (map-indexed (fn [i sym] [sym (+ own-idx 1 i)]))
+             (vec))
+
+        own-name
+        (or own-sym (symbol (str "__slot$" own-idx)))]
+
+    (-> state
+        ;; must be done first, otherwise shadowed bindings affect themselves
+        (update-affects deps own-idx)
+
+        (update :slots conj
+          {:depends-on (bindings-indexes-of-type state deps :slot)
+           :provides own-name
+           :debug-info debug-info
+           :run run-form
+           :check
+           {:form binding-form
+            ;; must be generated now, names may be shadowed by later bindings
+            :or-let (let-bindings state expr-deps)
+            :own-sym own-sym
+            :cells cells}})
+
+        (cond->
+          own-sym
+          (assoc-in [:bindings own-sym]
+            {:type :slot
+             :idx own-idx
+             :name own-sym}))
+
+        (r->
+          (fn [state [sym idx]]
             (-> state
-                (r->
-                  (fn [state sym]
-                    (assert (simple-symbol? sym) "don't support keywords in destructure yet")
-                    (let [kw (keyword ns (name sym))]
-                      (add-destructure-binding state ref-name sym kw defaults)))
-                  val)
-                (recur more)))
+                (assoc-in [:bindings sym]
+                  {:type :slot
+                   :idx idx
+                   :name sym})
+                (update :slots conj
+                  {:depends-on #{own-idx}
+                   :provides sym
+                   :debug-info {:type :destructure
+                                :name (str sym)
+                                :from (str own-name)
+                                :column (:column (meta sym))
+                                :line (:line (meta sym))}})))
+          cells)
 
-          :else
-          (throw (ex-info "unknown destructure" {:entry entry}))
-          )))))
+        (update :slot-idx + 1 (count cells)))))
 
-(defn slot-destructure-vec
-  [state
-   ref-name
-   v]
+(defn make-check-fn
+  "generates the fn checking the destructured values of a slot.
+   called with the value the slot produced, either via running or gp/provide-new-value!
+   must be generated after all slots are analyzed, since it needs to know who uses which values"
+  [{:keys [comp-sym slots] :as state} render-deps own-idx {:keys [form or-let own-sym cells]}]
+  (let [val-sym
+        (gensym "val")
 
-  (let [idx-syms
-        (into []
-          (take-while #(and (simple-symbol? %)
-                            (not= '& %)))
-          v)
+        ;; nil when nothing depends on the value, otherwise [affects-bits render?]
+        consumers
+        (fn [idx]
+          (let [affects (reduce bit-set 0 (get-in slots [idx :affects]))
+                render? (contains? render-deps idx)]
+            (when (or (pos? affects) render?)
+              [affects render?])))
 
-        kv
-        (loop [kv {}
-               s (drop (count idx-syms) v)]
-          (if-not (seq s)
-            kv
-            (let [[k v & more] s]
-              (when-not v
-                (throw (ex-info "invalid vector destructure" {:k k :v v})))
-              (recur
-                (assoc kv k v)
-                more))))
+        own-consumers
+        (when own-sym
+          (consumers own-idx))
 
+        checks
+        (->> cells
+             (map (fn [[sym idx]]
+                    (if-some [[affects render?] (consumers idx)]
+                      {:form `(slot-check! ~comp-sym ~idx ~sym ~affects ~render?)
+                       ;; only need to remember the result if the :as value can use it
+                       :changed (when own-consumers
+                                  (gensym (str sym "-changed")))}
+                      ;; nothing depends on this, but events may still access it
+                      {:form `(slot-store! ~comp-sym ~idx ~sym)})))
+             (vec))
 
-        ;; add index arguments
-        state
-        (reduce-kv
-          (fn [state idx sym]
-            (add-destructure-binding state ref-name sym idx {}))
-          state
-          idx-syms)]
+        changed-syms
+        (into [] (keep :changed) checks)
 
-    ;; handle remaining kv pairs
-    ;; [... :as X]
-    ;; [... & more]
-    ;; FIXME: are there others?
-    (reduce-kv
-      (fn [state k v]
-        (case k
-          :as state ;; handled earlier, no need to do anything
-          & (add-destructure-binding state ref-name v
-              [:tail (count idx-syms)])
-          (throw (ex-info "invalid vector destructure" {:k k :v v}))))
-      state
-      kv)))
+        own-val
+        (or own-sym val-sym)
+
+        own-form
+        (if-some [[affects render?] own-consumers]
+          (if (seq changed-syms)
+            ;; all other values are derived from this one, so if any of those changed so did this
+            ;; no need to compare, which saves comparing the whole :as value most of the time
+            `(if (or ~@changed-syms)
+               (slot-force! ~comp-sym ~own-idx ~own-val ~affects ~render?)
+               (slot-check! ~comp-sym ~own-idx ~own-val ~affects ~render?))
+            `(slot-check! ~comp-sym ~own-idx ~own-val ~affects ~render?))
+          `(slot-store! ~comp-sym ~own-idx ~own-val))]
+
+    `(fn [~comp-sym ~val-sym]
+       (let [~@or-let
+             ~form ~val-sym
+             ~@(->> checks
+                    (filter :changed)
+                    (mapcat (juxt :changed :form)))]
+         ~@(->> checks
+                (remove :changed)
+                (map :form))
+         ~own-form
+         nil))))
 
 (defmulti analyze-slot (fn [state slot] (:name slot)))
 
 (defn analyze-arg
-  [state idx binding]
+  [{:keys [comp-sym] :as state} idx binding]
   (cond
     (symbol? binding)
     (-> state
         (assoc-in [:args idx] {:name binding :idx idx :stable (:stable (meta binding))})
         (assoc-in [:bindings binding] {:type :arg :name binding :idx idx}))
 
-    (map? binding)
-    (let [{:keys [as]} binding
-          arg-name (or as (symbol (str "__arg$" idx)))
+    (or (map? binding) (vector? binding))
+    (let [as
+          (binding-top-level-as binding)
+
+          arg-name
+          (or as (symbol (str "__arg$" idx)))
+
           ;; allow both?
           ;; ^:stable {:keys [foo bar] :as x}
           ;; {:keys [foo bar] :as ^:stable x}
-          stable (or (:stable (meta binding))
-                     (:stable (meta as)))]
+          stable
+          (or (:stable (meta binding))
+              (:stable (meta as)))]
+
       (-> state
           (assoc-in [:args idx] {:name arg-name :idx idx :stable stable})
           (assoc-in [:bindings arg-name] {:type :arg :name arg-name :idx idx})
-          (slot-destructure-map arg-name binding)))
-
-    (vector? binding)
-    (let [[_as sym :as v] (drop-while #(not= :as %) binding)
-
-          arg-name
-          (if-not (seq v)
-            (symbol (str "__arg$" idx))
-            ;; :as followed by symbol only
-            (do (when-not (simple-symbol? sym)
-                  (throw (ex-info "invalid data binding" {:binding binding})))
-                sym))
-
-          stable (or (:stable (meta binding))
-                     (:stable (meta arg-name)))]
-      (-> state
-          (assoc-in [:args idx] {:name arg-name :idx idx :stable stable})
-          (assoc-in [:bindings arg-name] {:type :arg :name arg-name :idx idx})
-          (slot-destructure-vec arg-name binding)))
+          ;; :as is the arg itself, the slot only provides the destructured values
+          (add-destructure-slot
+            {:binding-form binding
+             :skip-sym as
+             :run-deps #{arg-name}
+             :run-form `(fn [~comp-sym] (get-arg ~comp-sym ~idx))
+             :debug-info {:type :destructure-arg
+                          :name (str arg-name)
+                          :column (:column (meta binding))
+                          :line (:line (meta binding))}})))
 
     :else
     (throw (ex-info "unsupported form for component arg" {:binding binding :idx idx}))))
@@ -321,70 +402,58 @@
   [{:keys [comp-sym slot-idx bindings] :as state}
    [binding & body]]
 
-  (let [binding-name
-        (cond
-          (simple-symbol? binding)
-          binding
+  (let [deps
+        (find-used-bindings #{} bindings body)
 
-          (map? binding)
-          (or (get binding :as)
-              (symbol (str "__slot$" slot-idx)))
+        run-form
+        (if (empty? deps)
+          `(fn [~comp-sym]
+             ~@body)
+          `(fn [~comp-sym]
+             (let ~(let-bindings state deps)
+               ~@body)))]
 
-          (vector? binding)
-          (let [[_as sym :as v] (drop-while #(not= :as %) binding)]
-            (if-not (seq v)
-              (symbol (str "__slot$" slot-idx))
-              ;; :as followed by symbol only
-              (do (when-not (simple-symbol? sym)
-                    (throw (ex-info "invalid data binding" {:binding binding})))
-                  sym)))
+    (cond
+      (simple-symbol? binding)
+      (-> state
+          ;; must be done first, otherwise shadowed bindings affect themselves
+          ;; must track these here by id since names may be shadowed later
+          (update-affects deps slot-idx)
 
-          :else
-          (throw (ex-info "invalid data binding" {:binding binding})))
+          (cond->
+            ;; don't make _ an accessible name when using (bind _ "something")
+            ;; should be convention for unused name, accessing it should be an error
+            (not= '_ binding)
+            (assoc-in [:bindings binding]
+              {:type :slot
+               :idx slot-idx
+               :name binding}))
 
-        deps
-        (find-used-bindings #{} bindings body)]
+          (update :slots conj
+            {:depends-on (bindings-indexes-of-type state deps :slot)
+             :provides binding
+             :debug-info {:type :bind
+                          :name (str binding)
+                          :column (:column (meta binding))
+                          :line (:line (meta binding))}
+             :run run-form})
+          (update :slot-idx inc))
 
-    (-> state
-        ;; must be done first, otherwise shadowed bindings affect themselves
-        ;; must track these here by id since names may be shadowed later
-        (update-affects deps slot-idx)
-
-        (cond->
-          ;; don't make _ an accessible name when using (bind _ "something")
-          ;; should be convention for unused name, accessing it should be an error
-          (not= '_ binding-name)
-          (assoc-in [:bindings binding-name]
-            {:type :slot
-             :idx slot-idx
-             :name binding-name
-             :deps deps}))
-
-        (update :slots conj
-          {:all-deps deps
-           :depends-on (bindings-indexes-of-type state deps :slot)
-           :provides binding-name
+      (or (map? binding) (vector? binding))
+      (let [as (binding-top-level-as binding)]
+        (add-destructure-slot state
+          {:binding-form binding
+           :own-sym as
+           :skip-sym as
+           :run-deps deps
+           :run-form run-form
            :debug-info {:type :bind
-                        :name (str binding-name)
+                        :name (str (or as (symbol (str "__slot$" slot-idx))))
                         :column (:column (meta binding))
-                        :line (:line (meta binding))}
-           :run
-           (if (empty? deps)
-             `(fn [~comp-sym]
-                ~@body)
-             `(fn [~comp-sym]
-                (let ~(let-bindings state deps)
-                  ~@body)))})
-        (update :slot-idx inc)
+                        :line (:line (meta binding))}}))
 
-        (cond->
-          ;; FIXME: vector destructure
-          (map? binding)
-          (slot-destructure-map binding-name binding)
-
-          (vector? binding)
-          (slot-destructure-vec binding-name binding)
-          ))))
+      :else
+      (throw (ex-info "invalid data binding" {:binding binding})))))
 
 (defmethod analyze-slot 'bind [state {:keys [body]}]
   ;; (bind some-name (something-producing-a-value-or-slot))
@@ -458,24 +527,7 @@
       ;; removing [env e] from bindings since they would otherwise override the actual args
       (vector? ev-args)
       (let [inner-bindings
-            (reduce
-              (fn [bindings arg]
-                (cond
-                  (symbol? arg)
-                  (dissoc bindings arg)
-
-                  (and (map? arg) (:as arg))
-                  (dissoc bindings (:as arg))
-
-                  ;; FIXME: should support [a b :as x], should remove x.
-                  (vector? arg)
-                  (throw (ex-info "vector destructure not yet supported" {}))
-
-                  :else
-                  bindings))
-
-              bindings
-              ev-args)
+            (reduce dissoc bindings (binding-syms ev-args))
 
             ;; need to rebind arguments since we need the first arg but it may not have a "name"
             ;; (event :something [{:keys [foo]} data e] ...)
@@ -529,13 +581,6 @@
     :slots (s/+ (s/spec ::defc-slot))))
 
 (s/fdef defc :args ::defc-args)
-
-(defn make-dirty-bits [mask n]
-  (if (zero? n)
-    mask
-    (recur
-      (bit-or (bit-shift-left mask 1) 1)
-      (dec n))))
 
 (defmacro defc [& args]
   (let [{:keys [comp-name args slots opts] :as c}
@@ -592,14 +637,20 @@
          ~(str *ns* "/" comp-name)
          (cljs.core/array
            ~@(->> (:slots state)
-                  (map (fn [{:keys [depends-on affects run debug-info]}]
-                         `(make-slot-config
-                            ~(reduce bit-set 0 depends-on)
-                            ~(reduce bit-set 0 affects)
-                            ~run
-                            ~(when include-debug-info?
-                               debug-info))))))
-         ~(make-dirty-bits 0 (count (:slots state)))
+                  (map-indexed
+                    (fn [idx {:keys [depends-on affects run check debug-info]}]
+                      `(make-slot-config
+                         ~(reduce bit-set 0 depends-on)
+                         ~(reduce bit-set 0 affects)
+                         ~run
+                         ~(when check
+                            (make-check-fn state render-deps idx check))
+                         ~(when include-debug-info?
+                            debug-info))))))
+         ;; initially all slots that run are dirty, value cells never run
+         ~(->> (:slots state)
+               (keep-indexed (fn [idx {:keys [run]}] (when run idx)))
+               (reduce bit-set 0))
          ~(or opts {})
          ;; fn that checks args and invalidates slots or sets render-required
          (fn [~comp-sym ~old-args-sym ~new-args-sym]

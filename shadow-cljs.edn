@@ -109,6 +109,13 @@
    :test-dir "out/browser-test"
    :compiler-options {:output-feature-set :es-next}}
 
+  ;; tests that run in node using jsdom
+  ;; node out/node-test/test.js
+  :node-test
+  {:target :node-test
+   :output-to "out/node-test/test.js"
+   :ns-regexp "components-test$"}
+
   :todo
   {:target :browser
    :output-dir "../grove-todo/public/js"

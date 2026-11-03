@@ -387,18 +387,22 @@
 
   (-provide-new-value! [this idx new]
     (when-not destroyed?
-      (let [old (aget slot-values idx)]
-        (aset slot-values idx new)
+      (let [dirty-before dirty-slots
+            render-before needs-render?]
 
-        ;; FIXME: maybe not compare? trust that things triggering this already did?
-        (when (not= old new)
-          (let [slot-config (-> (.-slots config) (aget idx))]
-            (.mark-slots-dirty! this (.-affects slot-config))
+        ;; same check as if the slot had run and produced this value
+        ;; so destructured values are handled properly
+        (.check-slot-value! this idx (-> (.-slots config) (aget idx)) new)
 
-            (when (bit-test (.-render-deps config) idx)
-              (.set-render-required! this))
+        (when-not (and (identical? dirty-before dirty-slots)
+                       (identical? render-before needs-render?))
+          (when (pos? dirty-slots)
+            (set! current-idx (find-first-set-bit-idx dirty-slots)))
 
-            (.schedule! this ::slot-provided-new-value!))))))
+          (when needs-render?
+            (set! current-idx (js/Math.min current-idx (alength (.-slots config)))))
+
+          (.schedule! this ::slot-provided-new-value!)))))
 
   ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
@@ -454,27 +458,54 @@
 
           (let [val (.run slot-config this)]
 
-            (aset slot-values idx val)
-
             (if-not rt/*ready*
+              ;; values are kept as they were, so they match what dependents last saw
               (.suspend! this idx)
               ;; clear dirty bit
               (do (set! dirty-slots (bit-clear dirty-slots idx))
 
-                  ;; make others dirty if actually updated
-                  (when (not= val prev-val)
-                    (set! updated-slots (bit-set updated-slots idx))
-
-                    (set! dirty-slots (bit-or dirty-slots (.-affects slot-config)))
-
-                    (when (bit-test (.-render-deps config) idx)
-                      (set! needs-render? true)))
+                  ;; stores value(s) and makes others dirty if actually updated
+                  (.check-slot-value! this idx slot-config val)
 
                   (set! current-idx (inc current-idx))))
 
             (trace/component-run-slot-done this idx t)
             ))))
 
+    js/undefined)
+
+  (check-slot-value! [this idx slot-config val]
+    (if-some [check (.-check slot-config)]
+      ;; destructuring slot, generated fn checks each value individually
+      (check this val)
+
+      (let [affects (.-affects slot-config)
+            render? (bit-test (.-render-deps config) idx)]
+        (if (or render? (pos? affects))
+          (.slot-check! this idx val affects render?)
+          ;; nothing depends on this, no need to compare
+          (aset slot-values idx val))))
+
+    js/undefined)
+
+  (slot-check! [this idx val affects ^boolean render?]
+    (let [prev (aget slot-values idx)]
+      (aset slot-values idx val)
+      (if (= prev val)
+        false
+        (do (.slot-changed! this idx affects render?)
+            true))))
+
+  (slot-force! [this idx val affects ^boolean render?]
+    (aset slot-values idx val)
+    (.slot-changed! this idx affects render?)
+    true)
+
+  (slot-changed! [this idx affects ^boolean render?]
+    (set! updated-slots (bit-set updated-slots idx))
+    (set! dirty-slots (bit-or dirty-slots affects))
+    (when render?
+      (set! needs-render? true))
     js/undefined)
 
   (run-next! [^not-native this]
@@ -629,15 +660,18 @@
 (defn component-init? [x]
   (instance? ComponentInit x))
 
-(deftype SlotConfig [depends-on affects run debug-info])
+;; run is nil for value cells of destructured slots, they never run
+;; check is nil for regular slots, set for destructuring slots
+(deftype SlotConfig [depends-on affects run check debug-info])
 
 (defn make-slot-config
   "used by defc macro, do not use directly"
-  [depends-on affects run debug-info]
+  [depends-on affects run check debug-info]
   {:pre [(nat-int? depends-on)
          (nat-int? affects)
-         (fn? run)]}
-  (SlotConfig. depends-on affects run debug-info))
+         (or (nil? run) (fn? run))
+         (or (nil? check) (fn? check))]}
+  (SlotConfig. depends-on affects run check debug-info))
 
 (defn make-component-config
   "used by defc macro, do not use directly"
@@ -694,26 +728,23 @@
 (defn get-slot-value [^ManagedComponent comp idx]
   (.get-slot-value comp idx))
 
-(defn arg-destructure [arg-idx lookup default]
-  (fn [comp]
-    (let [val (get-arg comp arg-idx)]
-      (get val lookup default))))
+;; used by the check fns generated for destructuring slots
+;; affects and render? are constants computed by the macro
 
-(defn arg-destructure-tail [arg-idx n-to-drop]
-  (fn [comp]
-    (let [val (get-arg comp arg-idx)]
-      ;; forcing a vec, just in case something lazy creeps into this
-      (vec (drop n-to-drop val)))))
+(defn ^boolean slot-check!
+  "stores value, marks dependents dirty if it changed. returns true if changed."
+  [^ManagedComponent comp idx val affects ^boolean render?]
+  (.slot-check! comp idx val affects render?))
 
-(defn slot-destructure [slot-idx lookup default]
-  (fn [comp]
-    (let [val (get-slot-value comp slot-idx)]
-      (get val lookup default))))
+(defn ^boolean slot-force!
+  "stores value, marks dependents dirty without comparing"
+  [^ManagedComponent comp idx val affects ^boolean render?]
+  (.slot-force! comp idx val affects render?))
 
-(defn slot-destructure-tail [slot-idx n-to-drop]
-  (fn [comp]
-    (let [val (get-slot-value comp slot-idx)]
-      (vec (drop n-to-drop val)))))
+(defn slot-store!
+  "stores value, for values nothing depends on (only accessed by events)"
+  [^ManagedComponent comp idx val]
+  (aset (.-slot-values comp) idx val))
 
 (defn get-events [^ManagedComponent comp]
   ;; FIXME: ... loses typehints?
