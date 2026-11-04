@@ -383,7 +383,7 @@
         (throw (ex-info "cannot construct non-hiccup lazy seq" {:seq the-seq}))
         (if (get-dom-key head)
           ;; first item has key, assume all do
-          (coll/construct-keyed-seq env (vec the-seq) get-dom-key identity)
+          (coll/construct-diff-seq env (vec the-seq) identity get-dom-key)
           ;; no key, assume simple-seq
           (coll/construct-simple-seq env (vec the-seq) identity)
           )))))

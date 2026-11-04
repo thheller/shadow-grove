@@ -128,9 +128,10 @@
           (map #(dp/snapshot (.-managed %) ctx))
           (vec))})
 
-  shadow.arborist.collections/KeyedCollection
+  shadow.arborist.collections/DiffCollection
   (snapshot [this ctx]
-    {:type 'shadow.arborist.collections/KeyedCollection
+    {:type 'shadow.arborist.collections/DiffCollection
+     :keyed? (some? (.-key-fn this))
      :children
      (->> (.-items this)
           (array-seq)

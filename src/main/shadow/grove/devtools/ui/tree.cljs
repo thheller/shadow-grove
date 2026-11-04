@@ -127,8 +127,8 @@
             [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
              (ui-node-children ctx item)])
 
-        shadow.arborist.collections/KeyedCollection
-        (<< [:div (str "keyed-seq [" (count (:children item)) "]")]
+        shadow.arborist.collections/DiffCollection
+        (<< [:div (str (if (:keyed? item) "keyed-seq [" "diff-seq [") (count (:children item)) "]")]
             [:div {:class (css :pl-2 {:border-left "1px solid #eee"})}
              (ui-node-children ctx item)])
 

@@ -1,8 +1,13 @@
 # diff-seq: findings
 
 Exploration of a `simple-seq` alternative that needs no key-fn, plus a
-`keyed-seq` rebuilt on the same algorithm. Nothing here is wired into
-`shadow.grove`; `simple-seq` and `keyed-seq` are unchanged.
+`keyed-seq` rebuilt on the same algorithm. `keyed-seq` (and `sg/keyed-seq`)
+now uses the new implementation and the old `KeyedCollection` is gone.
+`simple-seq` is unchanged. `diff-seq` and `diff-seq-by-value` live in
+`shadow.arborist.collections` but aren't exposed in `shadow.grove` yet.
+
+The tables below were measured before the switch: "keyed-seq :id" is the old
+implementation, "keyed-seq new" is today's `keyed-seq`.
 
 `report.html` in this directory is the full interactive report (heatmaps for
 every scenario and size, cost-by-size chart, tables). Open it in a browser.
@@ -15,7 +20,7 @@ every scenario and size, cost-by-size chart, tables). Open it in a browser.
 |---|---|---|---|
 | `diff-seq` | the item | `identical?` (strings/numbers by value) | yes, like `simple-seq` |
 | `diff-seq-by-value` | the item | `=`, looked up by `hash` | yes, like `simple-seq` |
-| `diff-keyed-seq` | `(key-fn item)` | `=`, looked up by `hash` | never |
+| `keyed-seq` | `(key-fn item)` | `=`, looked up by `hash` | never |
 
 Sync steps, looping on the still unresolved part of old/new:
 
@@ -83,12 +88,11 @@ so "remove first" averages one removal and one insertion.
 
 ## Open decisions
 
-- **Replace the keyed-seq implementation?** `diff-keyed-seq` keeps the contract
+- **Replace the keyed-seq implementation?** Done. The new one keeps the contract
   (same args, render-fn gets `[item idx key]`, never renders across keys,
   identical data skips rendering). Behavior change: duplicate keys throw only in
   dev builds, since checking them in release needs the full key set on every
-  update, which is most of the current cost. Suggestion: put it behind
-  `sg/keyed-seq` after trying it in a real app.
+  update, which is most of the old cost.
 - **Default matching for the unkeyed version:** `identical?` is cheapest for
   shared items; `=` also catches freshly built maps and costs little elsewhere
   because `=` returns early for identical items. Risk of `=`: large fresh items
@@ -98,7 +102,7 @@ so "remove first" averages one removal and one insertion.
   the unkeyed render fn with just the item; keep `[item idx key]` for keyed.
 - **simple-seq stays** for append-only and in-place lists, and for full reorders
   where layout matters.
-- **Names:** `diff-seq`, `diff-seq-by-value`, `diff-keyed-seq` are working names.
+- **Names:** `diff-seq`, `diff-seq-by-value` are working names.
 
 ## Correctness
 

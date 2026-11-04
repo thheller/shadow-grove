@@ -5,7 +5,8 @@
     [clojure.string :as str]
     [shadow.grove :refer (<<)]
     [shadow.arborist :as sa]
-    [shadow.arborist.collections :as coll]))
+    [shadow.arborist.collections :as coll]
+    [shadow.arborist.interpreted]))
 
 (defonce dom
   (let [dom (JSDOM. "<!DOCTYPE html>")]
@@ -277,7 +278,17 @@
           (is (= "9" (.getAttribute m9 "data-k")))))))))
 
 (deftest keyed-duplicate-keys-throw-in-dev
-  (is (thrown? js/Error (coll/diff-keyed-seq [(kv 1 "a") (kv 1 "b")] :id keyed-item))))
+  (is (thrown? js/Error (coll/keyed-seq [(kv 1 "a") (kv 1 "b")] :id keyed-item))))
+
+(deftest interpreted-hiccup-seq-with-dom-key
+  ;; lazy seqs of hiccup with :dom/key construct a keyed-seq
+  (with-test-node
+    (fn [node root]
+      (sa/update! root (for [x [1 2 3]] [:b {:dom/key x} (str x)]))
+      (is (= "1,2,3" (text node)))
+      (is (instance? coll/DiffCollection (.-node (.-root root))))
+      (sa/update! root (for [x [3 1 4]] [:b {:dom/key x} (str x)]))
+      (is (= "3,1,4" (text node))))))
 
 (defn keyed-mutate [xs pool]
   (let [n (count xs)

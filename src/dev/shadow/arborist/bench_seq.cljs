@@ -127,8 +127,7 @@
 
 (def impls
   [{:id "simple-seq" :make (fn [xs rfn] (coll/simple-seq xs rfn))}
-   {:id "keyed-seq :id" :keyed true :make (fn [xs rfn] (coll/keyed-seq xs :id rfn))}
-   {:id "keyed-seq new" :keyed true :make (fn [xs rfn] (coll/diff-keyed-seq xs :id rfn))}
+   {:id "keyed-seq" :keyed true :make (fn [xs rfn] (coll/keyed-seq xs :id rfn))}
    {:id "diff-seq" :make (fn [xs rfn] (coll/diff-seq xs rfn))}
    {:id "diff-seq =" :make (fn [xs rfn] (coll/diff-seq-by-value xs rfn))}])
 
