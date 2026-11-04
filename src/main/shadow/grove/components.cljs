@@ -629,15 +629,17 @@
       (set! updated-slots (int 0))
       (set! dirty-from-args (int 0))
 
+      ;; must keep this for work scheduling so it knows its done
+      (set! current-idx (inc current-idx))
+
+      (gp/did-finish! scheduler this)
+      (.unschedule! this)
+
       ;; only trigger dom effects when mounted
+      ;; must be last, effects may invalidate this component again (e.g. swap! a watched atom)
+      ;; doing the bookkeeping above after that would skip the dirty slot and drop the scheduled work
       (when dom-entered?
-        (.did-update! this did-render?)))
-
-    ;; must keep this for work scheduling so it knows its done
-    (set! current-idx (inc current-idx))
-
-    (gp/did-finish! scheduler this)
-    (.unschedule! this))
+        (.did-update! this did-render?))))
 
   (did-update! [this did-render?]
     ;; FIXME: trace for these?

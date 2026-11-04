@@ -448,3 +448,29 @@
 
          (fn []
            (is (= [[:mounted "SPAN"]] (take-log! log-ref))))]))))
+
+;; effects running after an update render may invalidate their own component
+(defc ui-effect-invalidates [^:stable state-ref label]
+  (bind n (sg/watch state-ref))
+  (effect :auto [env]
+    ;; label changes after mount, effect runs from the update render this time
+    (when (= label "b")
+      (swap! state-ref inc)))
+  (render (str label n)))
+
+(deftest test-effect-invalidates-own-component
+  (let [{:keys [root rt-ref]} (make-env ::effect-invalidates)
+        state-ref (atom 0)]
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root (ui-effect-invalidates state-ref "a"))
+           (is (= "a0" (.-textContent root))))
+
+         (fn []
+           (sg/render rt-ref root (ui-effect-invalidates state-ref "b")))
+
+         (fn []
+           (is (= 1 @state-ref))
+           (is (= "b1" (.-textContent root))))]))))
