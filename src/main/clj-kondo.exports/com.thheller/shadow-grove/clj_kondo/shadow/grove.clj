@@ -4,7 +4,7 @@
 
 (def valid-hook-names
   "Return if the provided `name` is a valid hook name"
-  #{'render 'bind 'event 'hook 'effect '<<})
+  #{'render 'bind 'ref 'event 'hook 'effect '<<})
 
 (defn- -hook-node->name
   "Return the provided name of the `node`, or `nil`
@@ -54,6 +54,17 @@
         (list*
           (api/token-node 'let)
           (api/vector-node [bindings expr])
+          (rewrite-hooks! hooks))))))
+
+(defmethod rewrite-hooks! 'ref
+  [[hook & hooks]]
+  ;; (ref name) or (ref name init), same scoping as bind. the macro checks what init may use
+  (list
+    (let [[_ binding expr] (:children hook)]
+      (api/list-node
+        (list*
+          (api/token-node 'let)
+          (api/vector-node [binding (or expr (api/token-node nil))])
           (rewrite-hooks! hooks))))))
 
 (defmethod rewrite-hooks! 'hook

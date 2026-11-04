@@ -180,6 +180,14 @@
            (conj v {:name arg-name :value (as-embedded-value ctx (nth args idx))}))
          []
          args-config))
+     :refs
+     (let [values (.-ref-values this)
+           names (-> this .-config .-debug-info (:refs))]
+       (reduce-kv
+         (fn [v idx ref-name]
+           (conj v {:name ref-name :value (as-embedded-value ctx (aget values idx))}))
+         []
+         (or names [])))
      :slots
      (let [slots (-> this .-config .-slots)]
        (->> (range (alength slots))

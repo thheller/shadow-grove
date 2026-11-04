@@ -3,6 +3,7 @@
     ["jsdom" :refer (JSDOM)]
     [cljs.test :as ct :refer (deftest is async)]
     [shadow.grove :as sg :refer (defc <<)]
+    [shadow.grove.components :as comp]
     [shadow.grove.protocols :as gp]
     [shadow.grove.runtime :as rt]))
 
@@ -279,3 +280,171 @@
 
          (fn []
            (is (= [[:mount 2]] (take-log! log-ref))))]))))
+
+;; ref
+
+(defn ref-probe [log-ref label]
+  ;; init value, constructed once with the component env
+  (reify
+    gp/IRefInit
+    (-ref-init [_ env]
+      (swap! log-ref conj [:init label (some? (::comp/component env))])
+      (reify
+        gp/IRefRender
+        (-ref-before-render! [_ env]
+          (swap! log-ref conj [:before label]))
+        (-ref-after-render! [_ env]
+          (swap! log-ref conj [:after label]))
+        gp/IRefDestroy
+        (-ref-destroy! [_]
+          (swap! log-ref conj [:destroy label]))))))
+
+(defc ui-ref [^:stable id ^:stable log-ref ^:stable holder label]
+  (ref counter
+    (doto (atom 0) (->> (vreset! holder))))
+  (ref probe
+    (ref-probe log-ref id))
+  ;; later refs may use earlier ones
+  (ref prefix
+    (str "#" id "/" @counter))
+  (bind n
+    (sg/watch counter))
+  (bind big?
+    (> n 5))
+  (bind same
+    ;; only uses refs, so never runs again
+    (swap! log-ref conj :same)
+    counter)
+  (render
+    (str prefix ":" label ":" big?)))
+
+(deftest test-ref-lifecycle
+  (let [{:keys [root rt-ref]} (make-env ::ref-lifecycle)
+        log-ref (atom [])
+        holder (volatile! nil)]
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root (ui-ref 1 log-ref holder "a"))
+           (is (= [[:init 1 true] :same [:before 1] [:after 1]] (take-log! log-ref)))
+           (is (= "#1/0:a:false" (.-textContent root))))
+
+         ;; non-stable arg changes, refs stay
+         (fn []
+           (sg/render rt-ref root (ui-ref 1 log-ref holder "b"))
+           (is (= [[:before 1] [:after 1]] (take-log! log-ref)))
+           (is (= "#1/0:b:false" (.-textContent root))))
+
+         ;; big? stays false, render skipped, so no notification
+         (fn [] (swap! @holder inc))
+         (fn []
+           (is (= [] (take-log! log-ref)))
+           (is (= "#1/0:b:false" (.-textContent root))))
+
+         (fn [] (swap! @holder + 10))
+         (fn []
+           (is (= [[:before 1] [:after 1]] (take-log! log-ref)))
+           (is (= "#1/0:b:true" (.-textContent root))))
+
+         ;; stable arg changes, remounts with new refs, old ones destroyed after
+         (fn []
+           (sg/render rt-ref root (ui-ref 2 log-ref holder "b"))
+           (is (= [[:init 2 true] :same [:before 2] [:after 2] [:destroy 1]] (take-log! log-ref)))
+           (is (= "#2/0:b:false" (.-textContent root))))
+
+         (fn []
+           (sg/render rt-ref root "done")
+           (is (= [[:destroy 2]] (take-log! log-ref)))
+           (is (= "done" (.-textContent root))))]))))
+
+(defc ui-ref-field [edits field log-ref]
+  (bind value
+    (sg/watch edits #(get % field)))
+  (render
+    (swap! log-ref conj [:field field])
+    (str (name field) "=" value ";")))
+
+(defc ui-ref-form [^:stable holder log-ref]
+  (ref edits
+    (doto (atom {}) (->> (vreset! holder))))
+  (render
+    (swap! log-ref conj :form)
+    (<< (ui-ref-field edits :a log-ref)
+        (ui-ref-field edits :b log-ref))))
+
+(deftest test-ref-passed-to-children
+  ;; ref never changes, so children only update from their own reads
+  (let [{:keys [root rt-ref]} (make-env ::ref-children)
+        log-ref (atom [])
+        holder (volatile! nil)]
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root (ui-ref-form holder log-ref))
+           (is (= [:form [:field :a] [:field :b]] (take-log! log-ref)))
+           (is (= "a=;b=;" (.-textContent root))))
+
+         (fn [] (swap! @holder assoc :a 1))
+         (fn []
+           (is (= [[:field :a]] (take-log! log-ref)))
+           (is (= "a=1;b=;" (.-textContent root))))
+
+         (fn [] (swap! @holder assoc :b 2))
+         (fn []
+           (is (= [[:field :b]] (take-log! log-ref)))
+           (is (= "a=1;b=2;" (.-textContent root))))]))))
+
+;; opts must survive without any ^:stable args
+(defc ui-custom-supports
+  {:supports? (fn [old new] (= (quot (first old) 10) (quot (first new) 10)))}
+  [id log-ref]
+  (effect :mount [env]
+    (swap! log-ref conj [:mount id]))
+  (render (str id)))
+
+(deftest test-custom-supports-without-stable
+  (let [{:keys [root rt-ref]} (make-env ::custom-supports)
+        log-ref (atom [])]
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root (ui-custom-supports 1 log-ref))
+           (is (= "1" (.-textContent root))))
+
+         (fn []
+           (is (= [[:mount 1]] (take-log! log-ref)))
+           ;; supports? true, updates in place
+           (sg/render rt-ref root (ui-custom-supports 2 log-ref))
+           (is (= "2" (.-textContent root))))
+
+         (fn []
+           (is (= [] (take-log! log-ref)))
+           ;; supports? false, remounts
+           (sg/render rt-ref root (ui-custom-supports 12 log-ref))
+           (is (= "12" (.-textContent root))))
+
+         (fn []
+           (is (= [[:mount 12]] (take-log! log-ref))))]))))
+
+(defc ui-ref-dom [log-ref]
+  ;; same as (bind el (sg/ref)), filled by :dom/ref
+  (ref el)
+  (effect :mount [env]
+    (swap! log-ref conj [:mounted (.-tagName @el)]))
+  (render
+    (<< [:span {:dom/ref el} "x"])))
+
+(deftest test-ref-default-dom-ref
+  (let [{:keys [root rt-ref]} (make-env ::ref-dom)
+        log-ref (atom [])]
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root (ui-ref-dom log-ref)))
+
+         (fn []
+           (is (= [[:mounted "SPAN"]] (take-log! log-ref))))]))))

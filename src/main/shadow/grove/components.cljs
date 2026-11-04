@@ -147,6 +147,11 @@
 
   (field ^array slot-values)
 
+  ;; (ref name init) values, created once in constructor, never change
+  (field ^array ref-values nil)
+  ;; subset of ref-values implementing gp/IRefRender, nil when none do
+  (field ^array ref-render nil)
+
   ;; using maps here since not all slots are going to have refs/cleanup
   (field ^not-native slot-refs {})
 
@@ -195,6 +200,21 @@
       (set! (.-marker-after this)
         (doto (js/document.createComment (str "/component: " (.-component-name config)))
           (set! -shadow$instance this))))
+
+    ;; refs are created before root, so they could be provided to children env later
+    (when-some [ref-fns (.-refs config)]
+      (set! ref-values (js/Array. (alength ref-fns)))
+      (dotimes [idx (alength ref-fns)]
+        ;; init fn may access args and previously created refs via this
+        (let [init ((aget ref-fns idx) this)
+              val (if (satisfies? gp/IRefInit init)
+                    (gp/-ref-init init component-env)
+                    init)]
+          (aset ref-values idx val)
+          (when (satisfies? gp/IRefRender val)
+            (when (nil? ref-render)
+              (set! ref-render (array)))
+            (.push ref-render val)))))
 
     (set! root (common/managed-root component-env))
     ;; marking everything dirty to ensure all slots run
@@ -313,6 +333,16 @@
     (let [t (trace/component-destroy this)]
       (ap/destroy! root dom-remove?)
       (trace/component-destroy-done this t))
+
+    ;; after root, so children are gone and their cleanups could still use refs
+    ;; reverse order, later refs may use earlier ones
+    (when-not (nil? ref-values)
+      (loop [idx (dec (alength ref-values))]
+        (when (>= idx 0)
+          (let [val (aget ref-values idx)]
+            (when (satisfies? gp/IRefDestroy val)
+              (gp/-ref-destroy! val)))
+          (recur (dec idx)))))
 
     js/undefined)
 
@@ -580,12 +610,19 @@
     (let [did-render? needs-render?]
       (when needs-render?
         (let [t (trace/component-render this updated-slots)
+              _ (when-not (nil? ref-render)
+                  (dotimes [idx (alength ref-render)]
+                    (gp/-ref-before-render! (aget ref-render idx) component-env)))
               frag (. config (render-fn this))]
 
           (set! rendered-args args)
           (set! needs-render? false)
 
           (ap/update! root frag)
+
+          (when-not (nil? ref-render)
+            (dotimes [idx (alength ref-render)]
+              (gp/-ref-after-render! (aget ref-render idx) component-env)))
 
           (trace/component-render-done this t)))
 
@@ -689,6 +726,7 @@
    min-args
    args-fn
    slots
+   refs
    slot-dirty-bits
    opts
    check-args-fn
@@ -701,6 +739,7 @@
          (fn? args-fn)
          (array? slots)
          (every? #(instance? SlotConfig %) slots)
+         (or (nil? refs) (and (array? refs) (every? fn? refs)))
          (map? opts)
          (fn? check-args-fn)
          (nat-int? render-deps)
@@ -713,6 +752,7 @@
           min-args
           args-fn
           slots
+          refs
           slot-dirty-bits
           opts
           check-args-fn
@@ -740,6 +780,9 @@
 
 (defn get-slot-value [^ManagedComponent comp idx]
   (.get-slot-value comp idx))
+
+(defn get-ref [^ManagedComponent comp idx]
+  (aget (.-ref-values comp) idx))
 
 ;; used by the check fns generated for destructuring slots
 ;; affects and render? are constants computed by the macro

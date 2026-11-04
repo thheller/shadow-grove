@@ -2,7 +2,8 @@
   (:require
     [cljs.core :as cljs]
     [clojure.spec.alpha :as s]
-    [clojure.set :as set]))
+    [clojure.set :as set]
+    [clojure.string :as str]))
 
 (defn r-> [init rfn coll]
   (reduce rfn init coll))
@@ -144,6 +145,9 @@
 
                     :slot
                     `(get-slot-value ~comp-sym ~idx)
+
+                    :ref
+                    `(get-ref ~comp-sym ~idx)
                     )]))
        (vec)))
 
@@ -158,7 +162,11 @@
   (reduce
     (fn [state dep-sym]
       (let [{:keys [type idx] :as binding} (get bindings dep-sym)]
-        (update-in state [(case type :slot :slots :arg :args) idx :affects] set-conj slot-idx)))
+        (case type
+          :slot (update-in state [:slots idx :affects] set-conj slot-idx)
+          :arg (update-in state [:args idx :affects] set-conj slot-idx)
+          ;; refs never change, so they never make anything dirty
+          :ref state)))
     state
     deps))
 
@@ -435,6 +443,72 @@
   ;; purely for side effects where the slot may slot into the lifecycle of the component
   (add-data-binding state (into ['_] body)))
 
+;; (ref name) or (ref name init)
+;;
+;; init is evaluated once when the component is constructed, the name is a constant after that.
+;; (ref name) is (ref name (volatile! nil)), same as (sg/ref) and meant for :dom/ref.
+;; init may only use things that never change during the lifetime of the instance:
+;; ^:stable args (changing those remounts) and previously declared refs.
+;; anything that changes over time is combined with refs in a bind instead.
+;;
+;; refs are not slots. they have no dirty bits and don't count against the slot limit,
+;; binds using them only re-run because of their other deps.
+;; may appear anywhere in defc, uses follow the usual rule of only seeing earlier names.
+
+(defmethod analyze-slot 'ref
+  [{:keys [comp-sym bindings refs] :as state} {:keys [body] :as slot}]
+  (let [[sym init] body]
+    (when-not (and (<= 1 (count body) 2) (simple-symbol? sym))
+      (throw (ex-info "ref expects (ref name) or (ref name init), with name being a plain symbol or _" {:body body})))
+
+    (let [init
+          (if (= 1 (count body))
+            `(cljs.core/volatile! nil)
+            init)
+
+          deps
+          (find-used-bindings #{} bindings init)
+
+          invalid
+          (->> deps
+               (remove
+                 (fn [dep]
+                   (let [{:keys [type idx]} (get bindings dep)]
+                     (case type
+                       :ref true
+                       :arg (get-in state [:args idx :stable])
+                       false))))
+               (sort)
+               (vec))
+
+          idx
+          (count refs)]
+
+      (when (seq invalid)
+        (throw
+          (ex-info
+            (str "ref " sym " can only use ^:stable args and previously declared refs in its init, but uses: "
+                 (str/join ", " invalid)
+                 ". init only runs once, use a bind to combine the ref with things that change.")
+            {:ref sym :invalid invalid})))
+
+      (-> state
+          (update :refs conj
+            {:name sym
+             :init
+             (if (empty? deps)
+               `(fn [~comp-sym] ~init)
+               `(fn [~comp-sym]
+                  (let ~(let-bindings state deps)
+                    ~init)))})
+          (cond->
+            ;; (ref _ (something-with-lifecycle)) is valid, but _ is never accessible
+            (not= '_ sym)
+            (assoc-in [:bindings sym]
+              {:type :ref
+               :idx idx
+               :name sym}))))))
+
 (defmethod analyze-slot 'render
   [{:keys [comp-sym bindings] :as state} {:keys [body] :as slot}]
   ;; (render something)
@@ -546,6 +620,7 @@
              :new-args-sym (with-meta (gensym "new") {:tag 'not-native})
              :args []
              :slots []
+             :refs []
              :events {}
              :opts opts
              :effect-idx 0
@@ -565,8 +640,10 @@
                     (conj acc idx)))
                 []
                 (:args state))]
-          (when (seq stable-args)
-            (assoc opts ::stable-args stable-args)))
+          ;; must keep user opts (e.g. :supports?) when there are no stable args
+          (cond-> opts
+            (seq stable-args)
+            (assoc ::stable-args stable-args)))
 
         render-deps
         (bindings-indexes-of-type state render-used :slot)
@@ -602,6 +679,9 @@
                             (make-check-fn state render-deps idx check))
                          ~(when include-debug-info?
                             debug-info))))))
+         ;; ref init fns, in declaration order. nil when there are none
+         ~(when (seq (:refs state))
+            `(cljs.core/array ~@(map :init (:refs state))))
          ;; initially all slots that run are dirty, value cells never run
          ~(->> (:slots state)
                (keep-indexed (fn [idx {:keys [run]}] (when run idx)))
@@ -631,6 +711,7 @@
          ~(when include-debug-info?
             (let [m (meta comp-name)]
               {:args (->> (:args state) (map :name) (mapv str))
+               :refs (->> (:refs state) (map :name) (mapv str))
                :file (:file m)
                :line (:line m)
                :column (:column m)}))

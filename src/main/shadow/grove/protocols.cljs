@@ -39,6 +39,27 @@
   (-provide-new-value! [this idx new-value])
   (-init-slot-ref [this idx]))
 
+;; (ref name) or (ref name init) in defc
+;; init is evaluated once, when the component is constructed. (ref name) uses (volatile! nil),
+;; same as sg/ref, for :dom/ref. if the init value implements IRefInit, -ref-init is called
+;; with the component env and the name is bound to what it returns instead.
+;; values not implementing it are used as is (atoms, volatiles, ...)
+(defprotocol IRefInit
+  (-ref-init [this env]))
+
+;; ref values implementing this are destroyed with the component
+;; called after the component subtree was destroyed, in reverse declaration order
+(defprotocol IRefDestroy
+  (-ref-destroy! [this]))
+
+;; ref values implementing this are notified around component renders
+;; only called when the component actually renders, not when render was skipped
+;; after-render is called right after the DOM update, which may still be offscreen (suspense)
+;; use effects for things that need the DOM to be in the document
+(defprotocol IRefRender
+  (-ref-before-render! [this env])
+  (-ref-after-render! [this env]))
+
 ;; just here so that working on components file doesn't cause hot-reload issues
 ;; with already constructed components
 (deftype ComponentConfig
@@ -46,6 +67,8 @@
    min-args
    args-fn
    slots
+   ;; array of (fn [comp] init-value) or nil, one per (ref ...) in declaration order
+   refs
    slot-init-bits
    opts
    check-args-fn
