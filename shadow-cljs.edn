@@ -114,7 +114,7 @@
   :node-test
   {:target :node-test
    :output-to "out/node-test/test.js"
-   :ns-regexp "(components|diff-seq)-test$"}
+   :ns-regexp "(components|diff-seq|vlist3)-test$"}
 
   :todo
   {:target :browser
