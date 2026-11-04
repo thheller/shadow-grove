@@ -160,6 +160,12 @@
 (defn keyed-seq [coll key-fn render-fn]
   (sc/keyed-seq coll key-fn render-fn))
 
+(defn diff-seq [coll render-fn]
+  (sc/diff-seq coll render-fn))
+
+(defn diff-seq-by-value [coll render-fn]
+  (sc/diff-seq-by-value coll render-fn))
+
 (defn track-change
   "(bind x
      (sg/track-change val
