@@ -21,9 +21,9 @@
 
 (def renders (atom 0))
 
-(defn item [x]
+(defn item [x idx]
   (swap! renders inc)
-  (<< [:b (if (map? x) (:v x) (str x))]))
+  (<< [:b {:data-idx idx} (if (map? x) (:v x) (str x))]))
 
 (defn init
   "bypasses the empty check in diff-seq so syncing to/from empty is covered"
@@ -38,6 +38,14 @@
 
 (defn expected [xs]
   (->> xs (map #(if (map? %) (:v %) %)) (str/join ",")))
+
+(defn stale-idx
+  "first [position rendered-idx] where a row shows an idx other than its position"
+  [node]
+  (->> (array-seq (.querySelectorAll node "b"))
+       (map-indexed (fn [i el] [i (.getAttribute el "data-idx")]))
+       (remove (fn [[i idx]] (= (str i) idx)))
+       (first)))
 
 (def transitions
   [[[1 2 3] [3 2 1]]
@@ -68,26 +76,40 @@
         (sa/update! root (init from item by-value?))
         (is (= (expected from) (text node)))
         (sa/update! root (init to item by-value?))
-        (is (= (expected to) (text node)) (pr-str [:by-value by-value? from :-> to]))))))
+        (is (= (expected to) (text node)) (pr-str [:by-value by-value? from :-> to]))
+        (is (nil? (stale-idx node)) (pr-str [:by-value by-value? from :-> to]))))))
 
-(deftest remove-first-keeps-dom-and-skips-render
+(deftest remove-first-keeps-dom-and-renders-new-idx
   (with-test-node
     (fn [node root]
       (sa/update! root (init ["a" "b" "c" "d"]))
       (let [[_ b c d] (array-seq (.querySelectorAll node "b"))]
         (reset! renders 0)
         (sa/update! root (init ["b" "c" "d"]))
-        (is (= 0 @renders))
+        ;; every remaining item moved up one idx
+        (is (= 3 @renders))
+        (is (nil? (stale-idx node)))
         (is (= [b c d] (array-seq (.querySelectorAll node "b"))))))))
 
-(deftest swap-moves-without-render
+(deftest remove-last-skips-render
+  (with-test-node
+    (fn [node root]
+      (sa/update! root (init ["a" "b" "c" "d"]))
+      (let [[a b c _] (array-seq (.querySelectorAll node "b"))]
+        (reset! renders 0)
+        (sa/update! root (init ["a" "b" "c"]))
+        (is (= 0 @renders))
+        (is (= [a b c] (array-seq (.querySelectorAll node "b"))))))))
+
+(deftest swap-moves-and-renders-only-moved
   (with-test-node
     (fn [node root]
       (sa/update! root (init [1 2 3 4 5 6]))
       (let [[n1 n2 n3 n4 n5 n6] (array-seq (.querySelectorAll node "b"))]
         (reset! renders 0)
         (sa/update! root (init [1 5 3 4 2 6]))
-        (is (= 0 @renders))
+        (is (= 2 @renders))
+        (is (nil? (stale-idx node)))
         (is (= [n1 n5 n3 n4 n2 n6] (array-seq (.querySelectorAll node "b"))))))))
 
 (deftest update-in-place-renders-once
@@ -109,10 +131,17 @@
             fresh (mapv #(into {} %) xs)]
         (sa/update! root (init xs item true))
         (let [nodes (vec (array-seq (.querySelectorAll node "b")))]
+          ;; fresh but equal maps, same order
           (reset! renders 0)
-          ;; fresh but equal maps, first removed
-          (sa/update! root (init (subvec fresh 1) item true))
+          (sa/update! root (init fresh item true))
           (is (= 0 @renders))
+          (is (= nodes (vec (array-seq (.querySelectorAll node "b")))))
+
+          ;; fresh but equal maps, first removed. DOM kept, moved items render their new idx
+          (reset! renders 0)
+          (sa/update! root (init (subvec fresh 1) item true))
+          (is (= 4 @renders))
+          (is (nil? (stale-idx node)))
           (is (= (subvec nodes 1) (vec (array-seq (.querySelectorAll node "b")))))
 
           ;; identity mode must re-render them
@@ -121,17 +150,20 @@
           (is (= 4 @renders))
           (is (= "i1,i2,i3,i4" (text node))))))))
 
-(deftest rotate-moves-one-without-render
+(deftest rotate-keeps-dom-and-renders-new-idx
   (with-test-node
     (fn [node root]
       (sa/update! root (init [1 2 3 4 5]))
       (let [[n1 n2 n3 n4 n5] (array-seq (.querySelectorAll node "b"))]
         (reset! renders 0)
         (sa/update! root (init [2 3 4 5 1]))
-        (is (= 0 @renders))
+        (is (= 5 @renders))
+        (is (nil? (stale-idx node)))
         (is (= [n2 n3 n4 n5 n1] (array-seq (.querySelectorAll node "b"))))
+        (reset! renders 0)
         (sa/update! root (init [1 2 3 4 5]))
-        (is (= 0 @renders))
+        (is (= 5 @renders))
+        (is (nil? (stale-idx node)))
         (is (= [n1 n2 n3 n4 n5] (array-seq (.querySelectorAll node "b"))))))))
 
 (deftest scattered-updates-render-in-place
@@ -180,11 +212,17 @@
           (let [next (mutate xs alphabet max-len)
                 next (if fresh-copies? (mapv #(if (and (map? %) (zero? (rand-int 2))) (into {} %) %) next) next)
                 ;; inline fn every other round, forces render of everything
-                rfn (if (even? i) item (fn [x idx] (item x)))]
+                rfn (if (even? i) item (fn [x idx] (item x idx)))]
             (sa/update! root (init next rfn by-value?))
-            (if (= (expected next) (text node))
-              (recur (inc i) next)
-              (is false (pr-str {:by-value by-value? :from xs :to next :got (text node)})))))))))
+            (cond
+              (not= (expected next) (text node))
+              (is false (pr-str {:by-value by-value? :from xs :to next :got (text node)}))
+
+              (stale-idx node)
+              (is false (pr-str {:by-value by-value? :from xs :to next :stale-idx (stale-idx node)}))
+
+              :else
+              (recur (inc i) next))))))))
 
 (deftest fuzz-identity
   (fuzz [1 2 3 4 5 "a" "b" :k] 12 false false))
@@ -206,7 +244,7 @@
 
 (defn keyed-item [x idx key]
   (swap! renders inc)
-  (<< [:b {:data-k (str key)} (:v x)]))
+  (<< [:b {:data-k (str key) :data-idx idx} (:v x)]))
 
 (defn keyed-init
   ([xs] (keyed-init xs keyed-item))
@@ -241,7 +279,32 @@
           (sa/update! root (keyed-init from))
           (is (= (kexpected from) (text node)))
           (sa/update! root (keyed-init to))
-          (is (= (kexpected to) (text node)) (pr-str [from :-> to])))))))
+          (is (= (kexpected to) (text node)) (pr-str [from :-> to]))
+          (is (nil? (stale-idx node)) (pr-str [from :-> to])))))))
+
+(deftest keyed-moved-item-renders-new-idx
+  (with-test-node
+    (fn [node root]
+      (let [xs (mapv #(kv % (str "v" %)) [1 2 3])]
+        (sa/update! root (keyed-init xs))
+        (let [nodes (array-seq (.querySelectorAll node "b"))]
+          (reset! renders 0)
+          ;; prepend: 3 identical items shift by one, plus one created
+          (sa/update! root (keyed-init (into [(kv 0 "v0")] xs)))
+          (is (= 4 @renders))
+          (is (nil? (stale-idx node)))
+          (is (= nodes (rest (array-seq (.querySelectorAll node "b")))))
+
+          ;; back to the old positions
+          (reset! renders 0)
+          (sa/update! root (keyed-init xs))
+          (is (= 3 @renders))
+          (is (nil? (stale-idx node)))
+
+          ;; nothing moved, nothing renders
+          (reset! renders 0)
+          (sa/update! root (keyed-init xs))
+          (is (= 0 @renders)))))))
 
 (deftest keyed-update-renders-in-place
   (with-test-node
@@ -335,6 +398,9 @@
 
                   bad-node
                   (is false (pr-str {:rendered-over bad-node :from xs :to next}))
+
+                  (stale-idx node)
+                  (is false (pr-str {:from xs :to next :stale-idx (stale-idx node)}))
 
                   :else
                   (recur (inc i) next))))))))))

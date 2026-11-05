@@ -7,10 +7,19 @@ export default async (t) => {
   const rows = (col) => t.evaluate(`[...document.querySelectorAll("#${col} [data-label]")].map((r) => [
     r.dataset.label, r.querySelector("[data-instance]").dataset.instance, r.querySelector("[data-idx]").dataset.idx, r.querySelector("input").value])`);
 
+  // every row shows its current position, whatever moved
+  const idxCurrent = async (action) => {
+    for (const col of cols) {
+      const stale = (await rows(col)).map((r, i) => [r[0], r[2], i]).filter(([, idx, i]) => idx !== String(i));
+      t.assert(stale.length === 0, `${col}: idx current after ${action}, stale: ${JSON.stringify(stale)}`);
+    }
+  };
+
   for (const col of cols) {
     await t.evaluate(`(() => { const i = document.querySelector("#${col} [data-label='item 1'] input"); i.value = "typed"; })()`);
   }
   await t.click({ text: "remove first", selector: "button" });
+  await idxCurrent("remove first");
   const typedOn = async (col) => (await rows(col)).filter((r) => r[3] === "typed").map((r) => r[0]);
   t.assert(JSON.stringify(await typedOn("simple")) === '["item 2"]', "simple-seq renders item 2 over item 1's DOM, the input text moves to it");
   for (const col of ["diff", "diff-value", "keyed"]) {
@@ -25,7 +34,12 @@ export default async (t) => {
   for (const col of ["diff", "diff-value", "keyed"]) {
     t.assert(after[col][0][1] === before[col].at(-1)[1], `${col}: the last row's instance moved to the top`);
   }
-  t.assert(after.keyed[0][2] !== "0", "keyed-seq: a moved item with identical data keeps its stale idx");
+  await idxCurrent("reverse");
+
+  await t.click({ text: "shuffle", selector: "button" });
+  await idxCurrent("shuffle");
+  await t.click({ text: "insert at top", selector: "button" });
+  await idxCurrent("insert at top");
 
   // fresh equal maps: diff-seq can't match them, by-value can
   const b2 = Object.fromEntries(await Promise.all(cols.map(async (c) => [c, await rows(c)])));
@@ -33,6 +47,7 @@ export default async (t) => {
   const a2 = Object.fromEntries(await Promise.all(cols.map(async (c) => [c, await rows(c)])));
   t.assert(a2.diff[0][1] === b2.diff[0][1], "diff-seq: fresh maps don't match, rendered over in place");
   t.assert(a2["diff-value"][0][1] === b2["diff-value"].at(-1)[1], "diff-seq-by-value: fresh equal maps still match");
+  await idxCurrent("reverse as fresh maps");
 
   t.expectConsoleError(/duplicate|key/i);
   await t.click({ text: "duplicate a key", selector: "button" });

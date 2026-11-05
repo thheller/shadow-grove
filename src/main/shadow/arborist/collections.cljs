@@ -179,9 +179,11 @@
 ;; keyed mode never renders one key over another key's DOM, so per item DOM
 ;; state stays with its key.
 ;;
-;; matched items skip rendering when render-fn is identical and the data is
-;; identical (or = in by-value mode). the idx passed to render-fn may be stale
-;; for such items.
+;; matched items skip rendering when render-fn is identical, the data is
+;; identical (or = in by-value mode) and the idx is unchanged. an item that
+;; moved always renders again, so the idx it last rendered with is current.
+;; items array positions are coll positions, so an old item's idx is its
+;; position in the old items array.
 
 (declare DiffCollectionInit)
 
@@ -218,8 +220,10 @@
     (rfn data idx)))
 
 (defn- diff-item-sync!
-  [env ^DiffItem item key data idx ^function rfn ^boolean keyed? ^boolean skip-render? ^boolean dom-entered?]
-  (when-not skip-render?
+  "renders item at idx, unless unchanged? (render-fn and data match what it
+   last rendered) and old-idx is the idx it last rendered with"
+  [env ^DiffItem item key data old-idx idx ^function rfn ^boolean keyed? ^boolean unchanged? ^boolean dom-entered?]
+  (when-not (and unchanged? (== old-idx idx))
     (let [^not-native managed (.-managed item)
           rendered (diff-render rfn keyed? data idx key)]
       (if (p/supports? managed rendered)
@@ -398,7 +402,7 @@
 
               (let [^DiffItem item (aget old-items (+ os k))
                     stays? (and (>= stay-pos 0) (== j (aget stay stay-pos)))]
-                (diff-item-sync! env item key data idx rfn keyed?
+                (diff-item-sync! env item key data (+ os k) idx rfn keyed?
                   (and rfn-identical?
                        (== 1 (aget matched j))
                        (or skip-equiv? (identical? data (.-data item))))
@@ -483,15 +487,15 @@
                             (let [^DiffItem item (aget old-items o)
                                   data (-nth new-coll n)]
                               (cond
-                                ;; hot path, no key work needed
+                                ;; hot path, no key work needed. item stays unless its idx changed
                                 (identical? (.-data item) data)
-                                (do (when-not rfn-identical?
-                                      (diff-item-sync! env item (.-key item) data n rfn keyed? false dom-entered?))
+                                (do (when-not (and rfn-identical? (== o n))
+                                      (diff-item-sync! env item (.-key item) data o n rfn keyed? false dom-entered?))
                                     (aset new-items n item)
                                     (recur (inc h)))
 
                                 (and equiv? (= (.-key item) (if keyed? (diff-new-key kfn new-keys new-coll n) data)))
-                                (do (diff-item-sync! env item (if keyed? (diff-new-key kfn new-keys new-coll n) data) data n rfn keyed?
+                                (do (diff-item-sync! env item (if keyed? (diff-new-key kfn new-keys new-coll n) data) data o n rfn keyed?
                                       (and rfn-identical? skip-equiv?) dom-entered?)
                                     (aset new-items n item)
                                     (recur (inc h)))
@@ -510,15 +514,15 @@
                             (let [^DiffItem item (aget old-items o)
                                   data (-nth new-coll n)]
                               (cond
-                                ;; hot path, no key work needed
+                                ;; hot path, no key work needed. item stays unless its idx changed
                                 (identical? (.-data item) data)
-                                (do (when-not rfn-identical?
-                                      (diff-item-sync! env item (.-key item) data n rfn keyed? false dom-entered?))
+                                (do (when-not (and rfn-identical? (== o n))
+                                      (diff-item-sync! env item (.-key item) data o n rfn keyed? false dom-entered?))
                                     (aset new-items n item)
                                     (recur (inc t)))
 
                                 (and equiv? (= (.-key item) (if keyed? (diff-new-key kfn new-keys new-coll n) data)))
-                                (do (diff-item-sync! env item (if keyed? (diff-new-key kfn new-keys new-coll n) data) data n rfn keyed?
+                                (do (diff-item-sync! env item (if keyed? (diff-new-key kfn new-keys new-coll n) data) data o n rfn keyed?
                                       (and rfn-identical? skip-equiv?) dom-entered?)
                                     (aset new-items n item)
                                     (recur (inc t)))
@@ -558,7 +562,7 @@
                       ;; 3. old head moved to tail
                       (diff-match? equiv? kfn new-keys os-item new-coll ne)
                       (let [data (-nth new-coll ne)]
-                        (diff-item-sync! env os-item (diff-new-key kfn new-keys new-coll ne) data ne rfn keyed?
+                        (diff-item-sync! env os-item (diff-new-key kfn new-keys new-coll ne) data os ne rfn keyed?
                           (and rfn-identical? (or skip-equiv? (identical? data (.-data os-item))))
                           dom-entered?)
                         (p/dom-insert ^not-native (.-managed os-item) dom-parent
@@ -569,7 +573,7 @@
                       ;; 3. old tail moved to head, goes before first remaining old
                       (diff-match? equiv? kfn new-keys oe-item new-coll ns)
                       (let [data (-nth new-coll ns)]
-                        (diff-item-sync! env oe-item (diff-new-key kfn new-keys new-coll ns) data ns rfn keyed?
+                        (diff-item-sync! env oe-item (diff-new-key kfn new-keys new-coll ns) data oe ns rfn keyed?
                           (and rfn-identical? (or skip-equiv? (identical? data (.-data oe-item))))
                           dom-entered?)
                         (p/dom-insert ^not-native (.-managed oe-item) dom-parent
@@ -583,7 +587,7 @@
                                (and (< os oe) (< ns ne)
                                     (diff-match? equiv? kfn new-keys (aget old-items (inc os)) new-coll (inc ns)))))
                       (let [data (-nth new-coll ns)]
-                        (diff-item-sync! env os-item data data ns rfn false false dom-entered?)
+                        (diff-item-sync! env os-item data data os ns rfn false false dom-entered?)
                         (aset new-items ns os-item)
                         (recur (inc os) oe (inc ns) ne))
 
@@ -592,7 +596,7 @@
                            (< os oe) (< ns ne)
                            (diff-match? equiv? kfn new-keys (aget old-items (dec oe)) new-coll (dec ne)))
                       (let [data (-nth new-coll ne)]
-                        (diff-item-sync! env oe-item data data ne rfn false false dom-entered?)
+                        (diff-item-sync! env oe-item data data oe ne rfn false false dom-entered?)
                         (aset new-items ne oe-item)
                         (recur os (dec oe) ns (dec ne)))
 

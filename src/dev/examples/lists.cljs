@@ -26,15 +26,16 @@
 ;; What to look for:
 ;;
 ;; - **remove first**: `simple-seq` renders item 2 over item 1's row, so the typed text
-;;   moves to item 2. The others remove that one row's DOM and render nothing else.
+;;   moves to item 2. The others remove that one row's DOM. The rows after it keep their
+;;   DOM and render again only to show their new `idx`.
 ;; - **reverse**: `simple-seq` keeps every row in place and renders new data into it. The
 ;;   others move rows, the instance numbers travel with the items.
 ;; - **reverse as fresh maps**: equal maps that aren't identical, what a query building
 ;;   new maps on every run returns. `diff-seq` can't match them and renders over in place,
 ;;   `diff-seq-by-value` still matches.
-;; - **idx after a move**: `diff-seq` and `keyed-seq` skip a moved item whose data is
-;;   identical, so an `idx` it displays goes stale. If the output shows `idx` (row numbers,
-;;   odd/even classes), use `simple-seq` or CSS `:nth-child`.
+;; - **idx after a move**: an item whose `idx` changed always renders again, even when its
+;;   data is identical, so a displayed `idx` (row numbers, odd/even classes) is always
+;;   current. Only an item with the same data at the same `idx` skips rendering.
 ;; - **duplicate a key**: keys must be unique. `keyed-seq` throws in dev builds, release
 ;;   builds don't check.
 
@@ -77,15 +78,17 @@
 ;;   `[item idx key]`. A one-arg fn is fine. Return a fragment or a component call.
 ;; - The render fn can be a `defc` directly, no wrapper fn needed unless it closes over
 ;;   other locals.
-;; - An item renders again only when its data or the render fn changed. An inline
-;;   `(fn ...)` is new on every render of the parent, so every item renders again on
-;;   every invalidation of the parent. That is still correct, keep the fn cheap.
+;; - An item renders again only when its data, its `idx` or the render fn changed. An
+;;   inline `(fn ...)` is new on every render of the parent, so every item renders again
+;;   on every invalidation of the parent. That is still correct, keep the fn cheap.
 
 ;; ## picking one
 ;;
-;; - `simple-seq` is the default. Removing the first of 100 rows makes it render the 99
-;;   after it again; `diff-seq` and `keyed-seq` remove that row's DOM and render nothing
-;;   else, about 9x faster at 100 rows and 13x at 1000.
+;; - `simple-seq` is the default. Removing the first of 100 rows makes it render the next
+;;   item's data into each of the 99 rows after it. `diff-seq` and `keyed-seq` remove that
+;;   row's DOM and call the render fn for the 99 with their new `idx`. If a row doesn't
+;;   show `idx`, that call changes no DOM: about 8x faster at 100 rows and 10x at 1000.
+;;   If it does, every shifted row writes its new `idx`.
 ;; - `diff-seq` needs items that keep their identity across updates: unchanged entity maps
 ;;   from KV tables, strings, numbers. Keywords, UUIDs and vectors match by instance, not
 ;;   value. A query building fresh maps (`(map #(assoc % ...))`) defeats it, it then costs

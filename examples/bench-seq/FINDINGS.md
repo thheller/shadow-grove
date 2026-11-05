@@ -37,9 +37,11 @@ Sync steps, looping on the still unresolved part of old/new:
    created or destroyed. The longest increasing subsequence of reused items stays,
    everything else moves.
 
-Matched items skip rendering when the render-fn is identical and the data is
-identical (or `=` in by-value mode). The `idx` passed to the render-fn can be
-stale for items that moved without re-rendering, same as `keyed-seq` today.
+Matched items skip rendering when the render-fn is identical, the data is
+identical (or `=` in by-value mode) and the item kept its `idx`. An item that
+moved always renders again, so the `idx` it shows is current. (Originally moved
+items skipped rendering too and kept a stale `idx`; the numbers below are from
+then.)
 
 ## Findings
 
@@ -51,7 +53,10 @@ so "remove first" averages one removal and one insertion.
 - **Removing/inserting near the front, 100 rows:** 104 µs instead of 935 µs
   incl. layout, 0.5 renders and 2 DOM mutations per update instead of 99.5 and
   464. The gain starts at 2 items (1.4×) and reaches 13× at 1000 rows. Removing
-  from the middle is 4.8× faster at 100 rows.
+  from the middle is 4.8× faster at 100 rows. Since shifted items render again
+  for their new `idx` it's 99.5 renders but still 2 DOM mutations (the bench row
+  doesn't show `idx`): 114 µs vs 992 µs at 100 rows (8.7×), 993 µs vs 10.2 ms at
+  1000 (10×).
 - **New keyed-seq vs current keyed-seq:** 1.0–22× faster in script time in every
   scenario and size. The only cells below 1× are a few at 1–3 items
   (0.94–0.99×), within noise. The current one rebuilds a persistent map of all
