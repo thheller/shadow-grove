@@ -17,15 +17,19 @@
 ;; replacing and `dom-entered!` for whatever it holds. `portal`, `dnd_sortable` and `defc`
 ;; itself host their children this way.
 ;;
-;; `FrameNode` just forwards every lifecycle call to its root. Children that live in a
+;; `FrameNode` forwards every lifecycle call to its root. Its `supports?` also compares
+;; the theme: it went into the children's env at `as-managed` time and can't change in
+;; place, so another theme atom makes a new frame. Children that live in a
 ;; different DOM parent than the node (`portal` renders into `document.body`) must always
 ;; remove their DOM on `destroy!`: `portal` passes `true` regardless of `dom-remove?`.
 
 (declare FrameSeed)
 
-(deftype FrameNode [env root]
+(deftype FrameNode [env theme root]
   ap/IManaged
-  (supports? [this next] (instance? FrameSeed next))
+  (supports? [this next]
+    (and (instance? FrameSeed next)
+         (identical? theme (.-theme ^FrameSeed next))))
   (dom-sync! [this ^FrameSeed next] (ap/update! root (.-body next)))
   (dom-insert [this parent anchor] (ap/dom-insert root parent anchor))
   (dom-first [this] (ap/dom-first root))
@@ -65,7 +69,7 @@
   ap/IConstruct
   (as-managed [this env]
     (let [child-env (assoc env ::frame-theme theme)]
-      (FrameNode. env (doto (common/managed-root child-env) (ap/update! body))))))
+      (FrameNode. env theme (doto (common/managed-root child-env) (ap/update! body))))))
 
 (defn frame
   "theme is an atom, so descendants can watch it with sg/env-watch"

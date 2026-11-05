@@ -1,8 +1,9 @@
 (ns examples.http-fx
   "`shadow.grove.http-fx` is an fx handler around `XMLHttpRequest`. A transaction queues
    a request like any other fx ([fx](/fx/)), and the response comes back as a new
-   transaction. It is the tool for **user actions**: login, save, publish. Data a screen
-   needs before it can render is a pull instead ([http-pull](/http-pull/)).
+   transaction. Use it for **user actions** (login, save, publish), and for the data a
+   page needs, queued from `:ui/route!` ([auth-gate](/auth-gate/)). Reading requests
+   from a `bind` instead is the experimental [http-pull](/http-pull/).
 
    The server side of this example is `src/dev/examples/server.clj`, it adds some latency
    so you can see what is in flight."
@@ -26,7 +27,9 @@
 ;;   `::sg/transit-read` on the runtime; setting those yourself is the same thing, if
 ;;   something else already owns the reader.
 ;; - `(http-fx/make-handler config)` returns the fx handler, register it under any id
-;;   with `reg-fx`. The id is yours, there is no built-in `:http`. Don't hand-roll one.
+;;   with `reg-fx`. The id is yours, there is no built-in `:http`. It is a convenience,
+;;   not the only way: an fx (or a query, [vlist-remote](/vlist-remote/)) calling
+;;   `js/fetch` itself is fine too.
 ;; - The config: `:base-url` (prepended to every `:uri`, which is relative to it, not to
 ;;   the history path prefix), `:request-format` (`:edn`, `:transit` or a fn) and a shared
 ;;   `:on-error`. A request with a `:body` needs a request format, else it throws "no
@@ -48,7 +51,11 @@
     (http-fx/make-handler
       {:base-url "/http-fx/api"
        :request-format :transit
-       :on-error (request-error!)})))
+       :on-error (request-error!)}))
+
+  (sg/reg-fx app ::reset-form
+    (fn [fx-env ^js form]
+      (.reset form))))
 
 ;; ## requests and results
 ;;
@@ -70,7 +77,8 @@
 ;; error handler at all there is a `console.warn` and no tx.
 ;;
 ;; The create form is **pessimistic**: the item is written in the success tx, so a
-;; rejected request (labels starting with `!`) has nothing to undo.
+;; rejected request (labels starting with `!`) has nothing to undo. Resetting the form is
+;; a side effect too, so the handler queues it as a second fx ([fx](/fx/)).
 
 (deftx items-loaded! []
   [tx-env {:keys [result]} e]
@@ -96,10 +104,11 @@
   [tx-env ev e]
   (let [form (.-target e)
         label (.-value (.. form -elements -label))]
-    (.reset form)
-    (sg/queue-fx tx-env :api
-      {:request {:uri "/items" :body {:label label}}
-       :on-success (item-created!)})))
+    (-> tx-env
+        (sg/queue-fx :api
+          {:request {:uri "/items" :body {:label label}}
+           :on-success (item-created!)})
+        (sg/queue-fx ::reset-form form))))
 
 (deftx status! [code]
   [tx-env ev e]

@@ -194,8 +194,9 @@
   ap/IManaged
   (supports? [this next] (ap/identical-creator? opts next))
   (dom-sync! [this next]
-    (set! opts next)
-    (set! (.-textContent el) (:text next)))
+    (when (not= (:text opts) (:text next))
+      (set! (.-textContent el) (:text next)))
+    (set! opts next))
   (dom-insert [this parent anchor] (.insertBefore parent el anchor))
   (dom-first [this] el)
   (dom-entered! [this])

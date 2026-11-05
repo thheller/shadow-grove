@@ -135,20 +135,22 @@
 ;; `ui-tabs` only gets `(:tab page)`, which is `:items` for the list and both item pages,
 ;; so moving between them doesn't render the tabs (watch its `×`).
 ;;
-;; Wrapping the `case` in `sg/suspense` lets pages that load data suspend before they
-;; swap in ([suspense](/suspense/)).
+;; The `case` sits directly in a `sg/suspense`, so a page that loads data keeps the
+;; previous page up until it is ready ([suspense](/suspense/)). The pages here don't
+;; suspend, they swap in at once. The tabs go beside the boundary, they stay put.
 
 (defc ui-app []
   (bind page (sg/kv-lookup :ui :current-page))
   (render
     (<< (ui-tabs (:tab page))
         [:main
-         (case (:id page)
-           :items (ui-items)
-           :item (ui-item (:item-id page))
-           :item-edit (ui-item-edit (:item-id page))
-           :about (ui-about)
-           nil)])))
+         (sg/suspense {:fallback "Loading ..."}
+           (case (:id page)
+             :items (ui-items)
+             :item (ui-item (:item-id page))
+             :item-edit (ui-item-edit (:item-id page))
+             :about (ui-about)
+             nil))])))
 
 (defc ui-tabs [tab]
   (render

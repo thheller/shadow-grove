@@ -73,6 +73,12 @@
 ;; redirects to `/login` so the URL says what is shown. It doesn't render a half-routed
 ;; app, and it doesn't drop the URL the user asked for. Logged-in users don't need
 ;; `/login` and go home.
+;;
+;; The route handler also loads the data a page needs. `/secret` sets `[:ui :secret]` to
+;; `:db/loading` and queues the request ([http-fx](/http-fx/)). `ui-secret` suspends on
+;; the sentinel ([loading-sentinel](/loading-sentinel/)), and the `sg/suspense` around
+;; the page `case` keeps the previous page up until the secret is there
+;; ([suspense](/suspense/)).
 
 (defn route! [tx-env {:keys [token tokens]}]
   (let [user (get-in tx-env [:ui :current-user])]
@@ -92,6 +98,12 @@
 (deftx secret-loaded! []
   [tx-env {:keys [result]} e]
   (assoc-in tx-env [:ui :secret] (:secret result)))
+
+(defc ui-secret []
+  (bind secret (sg/kv-lookup :ui :secret))
+  (hook (when (= :db/loading secret) (sg/suspend!)))
+  (render
+    (<< [:p#secret secret])))
 
 ;; ## logging in
 ;;
@@ -165,11 +177,6 @@
 
 ;; # page
 
-(defc ui-secret []
-  (bind secret (sg/kv-lookup :ui :secret))
-  (render
-    (<< [:p#secret (if (= :db/loading secret) "loading ..." secret)])))
-
 (defc ui-app []
   (bind user (sg/kv-lookup :ui :current-user))
   (bind page (sg/kv-lookup :ui :current-page))
@@ -181,11 +188,12 @@
                [:a {:class c/$btn :ui/href "/secret"} "secret"]
                [:button {:class c/$btn :on-click (expire-session!)} "expire session on the server"]
                [:button {:class c/$btn :on-click (logout!)} "log out"]]))
-        (case (:id page)
-          :login (ui-login)
-          :home (<< [:p#home "home page"])
-          :secret (ui-secret)
-          nil))))
+        (sg/suspense {:fallback (<< [:p "loading ..."])}
+          (case (:id page)
+            :login (ui-login)
+            :home (<< [:p#home "home page"])
+            :secret (ui-secret)
+            nil)))))
 
 (defc ui-root []
   (render

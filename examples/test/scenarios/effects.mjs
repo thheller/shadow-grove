@@ -1,4 +1,4 @@
-// effect deps, cleanup, fn forms, dom scheduler, track-change
+// effect deps, cleanup, dom scheduler, track-change
 export default async (t) => {
   await t.goto("/effects/");
   await t.waitText("a = 0, b = 0");
@@ -9,7 +9,6 @@ export default async (t) => {
   t.assert(log.includes("effect :render ran") && log.includes("effect :auto ran") && log.includes("effect [a] ran"), `a + 1:\n${log}`);
   t.assert(log.includes("cleanup :render") && log.includes("cleanup :auto") && log.includes("cleanup [a]"), "cleanup before the next run");
   t.assert(!log.includes("effect :mount ran"), ":mount only once");
-  t.assert(log.includes("sg/render-effect ran, n = 1"), "fn form re-runs on render");
 
   log = await t.logOf(() => t.click({ text: "b + 1", selector: "button" }));
   t.assert(log.includes("effect :render ran"), ":render runs on every render");

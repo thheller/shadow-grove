@@ -51,25 +51,25 @@
   (render
     (<< [:div {:class c/$row} "a = " a ", b = " b (c/render-count ::effect-kinds)])))
 
-;; ## sg/mount-effect, sg/render-effect and hook
+;; ## hook, and the deprecated fn forms
 ;;
-;; `sg/mount-effect` and `sg/render-effect` are the function forms, callable inside a
-;; `bind` or `hook`. They claim the slot. Like other claims, a `when` that turns false
-;; later doesn't stop one that already registered, it stays until unmount
-;; ([bind-helpers](/bind-helpers/)).
+;; `hook` is a step without a usable value. It runs during the computation, before
+;; `render`, and again when something it uses changed. What it is for:
 ;;
-;; `hook` is the older step form: it runs during the computation and its value isn't
-;; usable. The remaining legitimate uses are subscriptions like the `sg/effect` below,
-;; and gating a subtree on a flag: `(hook (when-not ready? (sg/suspend!)))`
-;; ([suspense](/suspense/)).
+;; - gating a subtree on a flag: `(hook (when-not ready? (sg/suspend!)))`
+;;   ([suspense](/suspense/)).
+;; - pushing changing values into a `ref` handle before it renders:
+;;   `(hook (vlist3/set-query! items ?window text))` ([vlist](/vlist/)).
 ;;
-;; `a + 1` in the first demo also renders this one.
-
-(defc ui-effect-fns [n]
-  (hook (sg/mount-effect (fn [env] (c/log! "sg/mount-effect ran"))))
-  (hook (sg/render-effect (fn [env] (c/log! "sg/render-effect ran, n =" n))))
-  (render
-    (<< [:div "n = " n])))
+;; Anything that should happen after render is an `effect`. `sg/mount-effect`,
+;; `sg/render-effect` and `sg/effect` are the older function forms, called from a
+;; `hook`. The `effect` step compiles to the same thing, don't use them in new code:
+;;
+;; ```
+;; (hook (sg/mount-effect (fn [env] ...)))   ;; (effect :mount [env] ...)
+;; (hook (sg/render-effect (fn [env] ...)))  ;; (effect :render [env] ...)
+;; (hook (sg/effect deps (fn [env] ...)))    ;; (effect deps [env] ...)
+;; ```
 
 ;; ## measuring with ds/read! and ds/write!
 ;;
@@ -91,12 +91,13 @@
          [:span {:dom/ref box :class (css :inline-block :px-2 :bg-yellow-100)} text]
          [:span {:dom/ref label :class c/$muted}]])))
 
-;; ## track-change and sg/effect: keep the active item in view
+;; ## track-change and effect deps: keep the active item in view
 ;;
 ;; `(sg/track-change val (fn [env old new prev-result] ...))` runs the fn when `val`
-;; changes and gives it the previous value and result. `(sg/effect val f)` in a hook runs
-;; `f` after render whenever `val` changed. Together: "scroll the active item into view
-;; when it changes", with the read batched through the dom scheduler.
+;; changes and gives it the previous value and result. `(effect active [env] ...)` runs
+;; after render when `active` changed (or another bind its body uses, see the first
+;; chapter, here there is none). Together: "scroll the active item into view when it
+;; changes", with the read batched through the dom scheduler.
 
 (def items (vec (for [i (range 40)] (str "item " i))))
 
@@ -109,12 +110,10 @@
         (c/log! "track-change: active" old "->" new)
         new)))
 
-  (hook
-    (sg/effect active
-      (fn [env]
-        (ds/read!
-          (when-some [el (.querySelector @container "[data-active]")]
-            (.scrollIntoView el #js {:block "nearest"}))))))
+  (effect active [env]
+    (ds/read!
+      (when-some [el (.querySelector @container "[data-active]")]
+        (.scrollIntoView el #js {:block "nearest"}))))
 
   (render
     (<< [:div {:dom/ref container :class (css :h-32 :overflow-y-auto :border :border-gray-200 :rounded)}
@@ -146,14 +145,11 @@
             [:button {:class c/$btn :on-click ::b!} "b + 1"]
             [:button {:class c/$btn :on-click ::show!} (if show? "unmount" "mount")]])
 
-       "sg/mount-effect, sg/render-effect and hook"
-       (ui-effect-fns a)
-
        "measuring with ds/read! and ds/write!"
        (<< (ui-measure text)
            [:button {:class [c/$btn (css :mt-2)] :on-click ::text!} "longer text"])
 
-       "track-change and sg/effect: keep the active item in view"
+       "track-change and effect deps: keep the active item in view"
        (<< (ui-scroll-active active)
            [:div {:class [c/$row (css :mt-2)]}
             [:button {:class c/$btn :on-click {:e ::active! :by -1}} "up"]

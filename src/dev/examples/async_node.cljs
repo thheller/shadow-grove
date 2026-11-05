@@ -26,8 +26,9 @@
 ;; - When the content arrives, create it with `ap/as-managed` and the node's env, and
 ;;   insert it after the marker if the node is already in the document. Call
 ;;   `dom-entered!` on it if the node already entered.
-;; - `dom-sync!` updates the content in place when it supports the new body, or replaces
-;;   it with `common/replace-managed`.
+;; - `dom-sync!` keeps the new body, so content that arrives later uses the latest one.
+;;   Once the content exists, it updates it in place when it supports the new body, or
+;;   replaces it with `common/replace-managed`.
 ;;
 ;; Two delayed nodes share one boundary. The fallback stays until both finished, the
 ;; 300ms node waits for the 900ms one. "again" starts a new round under a new boundary.
@@ -35,7 +36,8 @@
 (declare DelayedSeed)
 
 (deftype DelayedNode
-  [env scheduler marker ms body
+  [env scheduler marker ms
+   ^:mutable body
    ^:mutable managed
    ^:mutable timeout
    ^:mutable dom-entered?]
@@ -46,10 +48,12 @@
     (and (instance? DelayedSeed next) (= ms (.-ms ^DelayedSeed next))))
 
   (dom-sync! [this ^DelayedSeed next]
+    ;; before the content arrived there is nothing to update, start! uses the latest body
+    (set! body (.-body next))
     (when managed
-      (if (ap/supports? managed (.-body next))
-        (ap/dom-sync! managed (.-body next))
-        (let [new (common/replace-managed env managed (.-body next))]
+      (if (ap/supports? managed body)
+        (ap/dom-sync! managed body)
+        (let [new (common/replace-managed env managed body)]
           (set! managed new)
           (when dom-entered? (ap/dom-entered! new))))))
 

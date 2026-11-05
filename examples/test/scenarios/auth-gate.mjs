@@ -18,6 +18,12 @@ export default async (t) => {
   await t.goto("/auth-gate/home");
   await t.waitText("home page");
   await t.assertText("logged in as Demo User");
+  await t.click({ text: "secret", selector: "nav a" });
+  t.assert(await t.exists("#home"), "the home page stays up while the secret page suspends");
+  t.assert(!(await t.exists("#secret")), "the secret page isn't shown before its data");
+  await t.waitText("only Demo User can read this");
+  await t.click({ text: "home", selector: "nav a" });
+  await t.waitText("home page");
 
   await t.click({ text: "expire session on the server", selector: "button" });
   await t.sleep(500);

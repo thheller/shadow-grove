@@ -11,30 +11,20 @@
 
 ;; ## a dialog in document.body
 ;;
-;; The dialog renders conditionally, `(when open? (sg/portal ...))`, so opening and
-;; closing is just a flag. Open it and look at the DOM: the overlay is a child of
-;; `<body>`, not of this page.
+;; The dialog renders conditionally, `(when open? (sg/portal ...))`. Only the owner cares
+;; whether it is open, so the flag is an atom in a `ref` ([local-state](/local-state/)).
+;; Open it and look at the DOM: the overlay is a child of `<body>`, not of this page.
 ;;
 ;; - `n + 1` runs a tx, and the read inside the portal updates like any other.
-;; - "ping the owner" is a `::local-ping!` map. The component that renders the portal has
-;;   a slot for it, and the event finds it although the button isn't inside its DOM.
-;; - "close" transacts the flag off. A flag that only the owner cares about could just as
-;;   well be an atom in a `ref`, closed from a slot without a tx
-;;   ([local-state](/local-state/)).
+;; - "close" is a `::close!` map. The component that renders the portal has a slot for
+;;   it, and the event finds it although the button isn't inside its DOM. The slot resets
+;;   the atom, no tx runs.
 
 (def $overlay
   (css :fixed :inset-0 :flex :items-center :justify-center :z-50 {:background "rgba(0,0,0,0.3)"}))
 
 (def $dialog
   (css :bg-white :rounded-lg :shadow-xl :p-4 {:width "24rem"}))
-
-(deftx dialog-open! []
-  [tx-env ev e]
-  (assoc-in tx-env [:ui :dialog?] true))
-
-(deftx dialog-close! []
-  [tx-env ev e]
-  (assoc-in tx-env [:ui :dialog?] false))
 
 (deftx bump! []
   [tx-env ev e]
@@ -46,17 +36,21 @@
     (<< [:p "n from KV, read inside the portal: " [:b#portal-n n]]
         [:div {:class [c/$row (css :mt-4)]}
          [:button {:class c/$btn :on-click (bump!)} "n + 1"]
-         [:button {:class c/$btn :on-click ::local-ping!} "ping the owner"]
-         [:button {:class [c/$btn c/$btn-primary] :on-click (dialog-close!)} "close"]])))
+         [:button {:class [c/$btn c/$btn-primary] :on-click ::close!} "close"]])))
 
 (defc ui-with-dialog []
-  (bind open? (sg/kv-lookup :ui :dialog?))
+  (ref open-ref (atom false))
+  (bind open? (sg/watch open-ref))
 
-  (event ::local-ping! [env ev e]
-    (c/log! "owner slot handled ::local-ping! from inside the portal"))
+  (event ::open! [env ev e]
+    (reset! open-ref true))
+
+  (event ::close! [env ev e]
+    (c/log! "owner slot handled ::close! from inside the portal, no tx")
+    (reset! open-ref false))
 
   (render
-    (<< [:button {:class c/$btn :on-click (dialog-open!)} "open dialog"]
+    (<< [:button {:class c/$btn :on-click ::open!} "open dialog"]
         (when open?
           (sg/portal
             (<< [:div#overlay {:class $overlay}
@@ -92,7 +86,7 @@
 
 (defn init []
   (.append js/document.body side-el)
-  (sg/add-kv-table app :ui {} {:dialog? false :n 0})
+  (sg/add-kv-table app :ui {} {:n 0})
   (c/render! app (ui-root)))
 
 (defn ^:dev/after-load reload! []

@@ -1,5 +1,6 @@
 (ns examples.lazy-loading.heavy
-  "lives in the :heavy module (shadow-cljs.edn :ex-lazy-loading), loaded on first use.
+  "lives in the :lazy-loading-heavy module of the :examples build (shadow-cljs.edn),
+   loaded on first use.
    examples.lazy-loading never requires this namespace."
   (:require
     [examples.common :as c]

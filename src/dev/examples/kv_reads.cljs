@@ -127,8 +127,8 @@
 ;;
 ;; - No untracked reads of table data. There is no supported "deref the runtime" in
 ;;   render, it would never update. A table that is still empty because nothing fetched
-;;   it is not a tracking bug: the fetch is a pull in an earlier bind
-;;   ([http-pull](/http-pull/)), or a tx that hasn't committed.
+;;   it is not a tracking bug: the request wasn't started (from a tx, or a pull in an
+;;   earlier bind, [http-pull](/http-pull/)), or its tx hasn't committed.
 ;; - No writes outside tx handlers. `bind`, `render` and queries compute, they never
 ;;   `swap!` or `assoc` tables.
 ;; - No whole-table iteration in render for big tables. Put the `vals` / `filter` /

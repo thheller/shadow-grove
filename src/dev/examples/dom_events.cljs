@@ -79,7 +79,8 @@
 ;; - The three DOM-control keys run synchronously when the event fires, even when the
 ;;   handler itself is debounced or throttled.
 ;; - They only apply when the map is bound to an `:on-*` attribute.
-;;   `(sg/run-tx! app (search!))` runs the handler directly, without wrappers.
+;;   `(sg/run-tx! app (assoc (clicked! :code) :e/throttle 1000))` runs the handler at
+;;   once, every time, the throttle is ignored.
 ;; - When preventing is conditional (only for Enter), call `(.preventDefault e)` in the
 ;;   handler instead.
 ;; - `:e/signal` exists in the source but sets `signal: true`, which is not an

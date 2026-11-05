@@ -19,7 +19,11 @@ export default async (t) => {
   t.assert(log.includes("tx count! ran from dispatch-up , DOM event: nil"), `dispatch-up! drops e:\n${log}`);
   await t.waitText("count (written by the count! tx): 3");
 
-  await t.click({ text: "red", selector: "button" });
+  await t.evaluate(`(() => {
+    const el = document.querySelector("select[aria-label=color]");
+    el.value = "red";
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
   await t.waitText("picked: :red");
 
   t.expectConsoleError(/Unhandled Event|nobody-handles-this/);

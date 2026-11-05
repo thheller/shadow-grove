@@ -144,10 +144,12 @@
 ;; - URLs and navigation: `history/init!` and `:ui/route!` ([routing](/routing/)).
 ;; - A user action that hits the server: `queue-fx` an http-fx request, the success
 ;;   re-enters as a deftx ([http-fx](/http-fx/)).
-;; - Data a screen needs before it can render: an `http-pull` in a `bind` plus
-;;   `sg/suspense` ([http-pull](/http-pull/)). Data that arrives from outside (embedded
-;;   session, push): a `:db/loading` sentinel and `sg/suspend!`
-;;   ([loading-sentinel](/loading-sentinel/), [external-events](/external-events/)).
+;; - Data a screen needs before it can render: `:ui/route!` queues an http-fx request, the
+;;   page suspends on a `:db/loading` sentinel until it lands, `sg/suspense` above it
+;;   ([auth-gate](/auth-gate/), [loading-sentinel](/loading-sentinel/)). Data that
+;;   arrives from outside (embedded session, push) the same way
+;;   ([external-events](/external-events/)). An `http-pull` in a `bind` is the
+;;   experimental alternative ([http-pull](/http-pull/)). Neither is a settled design.
 ;; - The built-ins don't fit (a specialized list, a widget that owns its DOM, subtree
 ;;   context): your own managed node ([widget-node](/widget-node/)).
 

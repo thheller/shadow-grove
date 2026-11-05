@@ -11,7 +11,7 @@
    | `sg/use-state` | `sg/swap-state!` on it ([local-state](/local-state/)) |
    | a `http-pull` | the request completes, suspends while pending ([http-pull](/http-pull/)) |
    | `http-fx/trace-state` | request progress changes ([http-fx](/http-fx/)) |
-   | `sg/track-change`, `sg/mount-effect`, `sg/render-effect` | see [effects](/effects/) |
+   | `sg/track-change` | its value changed, see [effects](/effects/) |
    | your own helper using `rt/claim-slot!` | whatever it decides, below |
 
    `(ref name)` and `(sg/ref)` don't claim, they are plain volatiles for `:dom/ref`."

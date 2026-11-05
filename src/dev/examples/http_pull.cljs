@@ -1,8 +1,12 @@
 (ns examples.http-pull
   "`shadow.grove.http-pull`: a request read from a `bind`. The pull claims the bind,
    shares in-flight requests between everyone asking for the same arg, and suspends while
-   pending. It is the tool for **data a screen needs before it can render**. User actions
-   (save, login) are [http-fx](/http-fx/) requests from a tx.
+   pending, for data a screen needs before it can render.
+
+   **Experimental.** The design has known holes and will change, this is the best attempt
+   so far, not the settled way to load data. The stable path is an [http-fx](/http-fx/)
+   request queued from a tx: for user actions (save, login), and for page data from
+   `:ui/route!` ([auth-gate](/auth-gate/)).
 
    The server side is `src/dev/examples/server.clj`, with some latency added."
   (:require
@@ -98,20 +102,25 @@
 
 ;; ## refreshing after a mutation
 ;;
-;; "rename (server)" in the detail above saves through http-fx. The success tx calls `pull/invalidate!` for what is on
-;; screen: `(pull/invalidate! pull)` or `(pull/invalidate! pull arg)`. Mounted instances
-;; refetch at once and **keep the previous result** meanwhile, so they don't suspend
-;; again. Unmounted instances just drop their cached result.
+;; "rename (server)" in the detail above saves through http-fx. Afterwards the pulls on
+;; screen refetch with `(pull/invalidate! pull)` or `(pull/invalidate! pull arg)`.
+;; Mounted instances refetch at once and **keep the previous result** meanwhile, so they
+;; don't suspend again. Unmounted instances just drop their cached result.
 ;;
-;; `invalidate!` is a side effect called from the success tx. It doesn't return the env
-;; and it isn't an fx. It refetches, it doesn't write KV by itself, that is still the
-;; pull's `:on-success`.
+;; `invalidate!` is a side effect, so the success tx doesn't call it, it queues an fx
+;; that does ([fx](/fx/)). It refetches, it doesn't write KV by itself, that is still
+;; the pull's `:on-success`.
+
+(defn register-invalidate! []
+  (sg/reg-fx app ::invalidate
+    (fn [fx-env [pull & args]]
+      (apply pull/invalidate! pull args))))
 
 (deftx renamed! [id]
   [tx-env {:keys [result]} e]
-  (pull/invalidate! pull-item id)
-  (pull/invalidate! pull-items)
-  tx-env)
+  (-> tx-env
+      (sg/queue-fx ::invalidate [pull-item id])
+      (sg/queue-fx ::invalidate [pull-items])))
 
 (deftx rename! [id label]
   [tx-env ev e]
@@ -190,13 +199,14 @@
 ;; - Clicked save, login, publish: `queue-fx` an http-fx request with an `:on-success`
 ;;   deftx ([http-fx](/http-fx/)).
 ;; - The page can't render until this payload exists: a pull in a bind, `sg/suspense`
-;;   above the page.
+;;   above the page. Or, without a pull, `:ui/route!` queues an http-fx request and the
+;;   page suspends on a `:db/loading` sentinel until it lands ([auth-gate](/auth-gate/)).
 ;; - The payload is an entity or a list of them: the pull's `:on-success` writes KV, the
 ;;   component reads it with `kv-lookup` / `query`.
 ;; - The payload is a one-off projection (a report, file metadata): `:transform` and read
 ;;   `:value`. Don't invent a table.
-;; - A mutation should refresh a pull already on screen: `pull/invalidate!` from the
-;;   success tx, not a second manual request.
+;; - A mutation should refresh a pull already on screen: `pull/invalidate!` from an fx
+;;   the success tx queues, not a second manual request.
 ;; - Data that arrives from outside a component (embedded page data, a push message) is
 ;;   neither: a `:db/loading` sentinel ([loading-sentinel](/loading-sentinel/)).
 
@@ -225,6 +235,7 @@
   (edn/init! app {})
   (sg/reg-fx app :api
     (http-fx/make-handler {:base-url "/http-pull/api" :request-format :edn}))
+  (register-invalidate!)
   (c/render! app (ui-root)))
 
 (defn ^:dev/after-load reload! []

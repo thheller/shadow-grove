@@ -4,9 +4,12 @@
    and suspend on it. A missing value and a loaded-empty one are different problems,
    don't overload `nil` for both.
 
-   This is for data that arrives from outside any component: page data embedded by the
-   server, a session check, a push message. Data a screen fetches for itself is a pull,
-   which suspends on its own ([http-pull](/http-pull/))."
+   This is for data no component fetches itself: page data embedded by the server, a
+   session check, a push message, a request `:ui/route!` queued for the page
+   ([auth-gate](/auth-gate/)). A pull suspends on its own ([http-pull](/http-pull/)).
+
+   `:db/loading` is a convention, nothing in the library knows the keyword. It works,
+   but it is a workaround, not a settled design."
   (:require
     [examples.common :as c]
     [shadow.grove :as sg :refer (defc deftx << css)]))

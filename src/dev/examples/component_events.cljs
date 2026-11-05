@@ -92,19 +92,22 @@
 
 ;; ## components extract, transactions decide
 ;;
-;; A component can turn DOM specifics into data and send a new map up. The picker
-;; doesn't know what picking means: it reports `{:e ::picked! :value v}`, and whoever
-;; holds it decides. Here the host keeps the value in local state. A caller can also pass
-;; a deftx map in as an arg and the component `assoc`s the extracted value onto it before
-;; `run-tx`, e.g. the selected option of a `<select>`.
+;; A component can turn DOM specifics into data and send a new map up. The picker's
+;; slot reads the selected option from the DOM event and reports
+;; `{:e ::picked! :value v}`. It doesn't know what picking means, whoever holds it
+;; decides. Here the host keeps the value in local state. A caller can also pass a deftx
+;; map in as an arg, and the component `assoc`s the extracted value onto it before
+;; `run-tx`.
 
 (defc ui-picker []
-  (event ::picked! [env {:keys [value]} e]
-    (sg/dispatch-up! env {:e ::picked! :value value}))
+  (event ::changed! [env ev e]
+    (let [value (keyword (.. e -target -value))]
+      (sg/dispatch-up! env {:e ::picked! :value value})))
   (render
-    (<< [:div {:class c/$row}
-         [:button {:class c/$btn :on-click {:e ::picked! :value :red}} "red"]
-         [:button {:class c/$btn :on-click {:e ::picked! :value :blue}} "blue"]])))
+    (<< [:select {:class c/$input :on-change ::changed! :aria-label "color"}
+         [:option {:value ""} "pick a color"]
+         [:option {:value "red"} "red"]
+         [:option {:value "blue"} "blue"]])))
 
 (defc ui-picker-host []
   (ref picked (atom nil))

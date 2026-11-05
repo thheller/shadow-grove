@@ -47,12 +47,16 @@
 ;; `js/FormData`, or `(.. e -target -elements)`.
 ;;
 ;; Validation errors are data: the "failing" handler returns the env with the error set
-;; instead of the change. Side effects that aren't KV writes (`localStorage`, focus) go
-;; into an fx so the handler stays testable ([fx](/fx/)). Resetting the form here is a
-;; small exception.
+;; instead of the change. Side effects that aren't KV writes (resetting the form,
+;; `localStorage`, focus) go into an fx so the handler stays testable ([fx](/fx/)).
 
 (defn form-value [form field]
   (str/trim (str (.get (js/FormData. form) field))))
+
+(defn register-reset-form! []
+  (sg/reg-fx app ::reset-form
+    (fn [fx-env ^js form]
+      (.reset form))))
 
 (deftx add-tag! []
   {:e/prevent-default true}
@@ -61,10 +65,10 @@
         tag (form-value form "tag")]
     (if (str/blank? tag)
       (assoc-in tx-env [:ui :tag-error] "a tag can't be blank")
-      (do (.reset form)
-          (-> tx-env
-              (update-in [:ui :tags] conj tag)
-              (assoc-in [:ui :tag-error] nil))))))
+      (-> tx-env
+          (update-in [:ui :tags] conj tag)
+          (assoc-in [:ui :tag-error] nil)
+          (sg/queue-fx ::reset-form form)))))
 
 (defc ui-submit []
   (bind {:keys [tags tag-error]} (sg/kv-lookup :ui))
@@ -158,6 +162,7 @@
 
 (defn init []
   (sg/add-kv-table app :ui {} {:search "" :tags []})
+  (register-reset-form!)
   (sg/add-kv-table app :person {:primary-key :id}
     {1 {:id 1 :name "Ada" :email "ada@example.com"}
      2 {:id 2 :name "Grace" :email "grace@example.com"}})
