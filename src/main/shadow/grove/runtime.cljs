@@ -82,3 +82,33 @@
     (throw (ex-info "slot already claimed" {:idx *slot-idx* :claimed *claimed* :attempt claim-id})))
 
   (gp/-init-slot-ref *slot-provider* *slot-idx*))
+
+;; for slot providers other than components (custom managed nodes running user code)
+
+(defn slot-ref
+  "creates the ref a slot provider returns from gp/-init-slot-ref for slot idx"
+  [provider idx]
+  (SlotRef. provider idx nil nil))
+
+(defn run-slot
+  "calls (f) as slot idx of provider, the way a component runs a bind, so claiming
+   helpers (sg/kv-lookup, sg/query, ...) work inside it. prev-value is what sg/suspend!
+   returns. returns the result of (f), or ::suspended if it called sg/suspend!"
+  [provider idx env prev-value f]
+  (binding [*slot-provider* provider
+            *env* env
+            *slot-idx* idx
+            *slot-value* prev-value
+            *claimed* false
+            *ready* true]
+    (let [result (f)]
+      ;; read after the call, sg/suspend! sets it to false
+      (if *ready* result ::suspended))))
+
+(defn cleanup-slot-ref!
+  "runs the cleanup registered for ref (comp/set-cleanup!) with its value, once.
+   slot providers call it when they are destroyed, so claims release what they hold"
+  [^SlotRef ref]
+  (when-some [cleanup (.-cleanup ref)]
+    (set! (.-cleanup ref) nil)
+    (cleanup (.-state ref))))

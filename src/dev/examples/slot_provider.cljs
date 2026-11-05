@@ -17,23 +17,26 @@
 
 ;; ## a node that runs a tracked read
 ;;
-;; `(live-read read-fn render-fn)` calls `read-fn` with the same dynamic bindings a `defc`
-;; uses for a bind, and renders `(render-fn result)` into a `managed-root`.
+;; `(live-read read-fn render-fn)` runs `read-fn` the way a `defc` runs a bind, and
+;; renders `(render-fn result)` into a `managed-root`. The functions for this are in
+;; `shadow.grove.runtime`: `rt/slot-ref`, `rt/run-slot` and `rt/cleanup-slot-ref!`.
 ;;
-;; - The node implements `gp/IProvideSlot`. `-init-slot-ref` returns the one
-;;   `rt/SlotRef` it owns: that is what `rt/claim-slot!` hands the helper.
+;; - The node implements `gp/IProvideSlot`. `-init-slot-ref` returns the one ref it
+;;   owns, made with `(rt/slot-ref node idx)`: that is what `rt/claim-slot!` hands the
+;;   helper.
 ;;   `-invalidate-slot!` is called when tracked data changed: run the read again.
 ;;   `-provide-new-value!` only matters for helpers that use it (`vgrid` does). The
-;;   `rt/SlotRef` implements `gp/IInvalidateSlot` (`invalidate!`, `provide-new-value!`),
-;;   which is what claiming helpers call, and forwards to these.
+;;   ref implements `gp/IInvalidateSlot` (`invalidate!`, `provide-new-value!`), which is
+;;   what claiming helpers call, and forwards to these.
 ;; - One ref means one claim per run, the rule of a `bind`. The read here does one
 ;;   `kv-lookup`. Several values come from one query.
-;; - `rt/*ready*` is read **after** the call. `sg/suspend!` sets it to false, and the node
-;;   then keeps its previous result until the next invalidation. `rt/*slot-value*` is what
-;;   `suspend!` returns, the previous result. (`vlist2` reads `rt/*ready*` before calling
-;;   its read fn, so it never sees a suspend. Don't copy that part.)
-;; - `destroy!` runs the slot ref's cleanup, which unsubscribes the read. Without it the
-;;   subscription leaks.
+;; - `(rt/run-slot node idx env prev-value f)` calls `f` with the slot bound. It returns
+;;   `::rt/suspended` when `f` called `sg/suspend!`, and the node then keeps its previous
+;;   result until the next invalidation. `prev-value` is what `suspend!` returns, here the
+;;   previous result. (`vlist2` predates this and checks for a suspend before calling its
+;;   read fn, so it never sees one. Don't copy that part.)
+;; - `destroy!` calls `rt/cleanup-slot-ref!`, which runs the cleanup the claiming helper
+;;   registered and unsubscribes the read. Without it the subscription leaks.
 ;;
 ;; Try it: "n + 1" runs the read again (the log says so), "other + 1" changes a key the
 ;; read didn't touch and runs nothing. The read suspends while `n` is odd: the node keeps
@@ -43,7 +46,7 @@
 
 (deftype ReadNode
   [env
-   ^rt/SlotRef ^:mutable slot-ref
+   ^:mutable slot-ref
    root
    ^:mutable read-fn
    ^:mutable render-fn
@@ -74,24 +77,14 @@
   (dom-entered! [this] (ap/dom-entered! root))
   (destroy! [this dom-remove?]
     (set! destroyed? true)
-    (when-some [cleanup (.-cleanup slot-ref)]
-      (cleanup @slot-ref))
+    (rt/cleanup-slot-ref! slot-ref)
     (ap/destroy! root dom-remove?))
 
   Object
   (run-read! [this]
     (when-not destroyed?
-      (let [[ready? result]
-            (binding [rt/*slot-provider* this
-                      rt/*env* env
-                      rt/*slot-idx* 0
-                      rt/*slot-value* last-result
-                      rt/*claimed* false
-                      rt/*ready* true]
-              (let [result (read-fn)]
-                ;; after the call, suspend! sets it to false
-                [rt/*ready* result]))]
-        (when ready?
+      (let [result (rt/run-slot this 0 env last-result read-fn)]
+        (when (not= ::rt/suspended result)
           (set! last-result result)
           (ap/update! root (render-fn result)))))))
 
@@ -99,7 +92,7 @@
   ap/IConstruct
   (as-managed [this env]
     (let [node (ReadNode. env nil (common/managed-root env) read-fn render-fn nil false)]
-      (set! (.-slot-ref node) (rt/SlotRef. node 0 nil nil))
+      (set! (.-slot-ref node) (rt/slot-ref node 0))
       (.run-read! node)
       node)))
 
