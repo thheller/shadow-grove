@@ -30,7 +30,12 @@
   3013 "examples/ui"
   3014 "examples/dummy"
   3015 "examples/flex"
-  3016 "examples/replicant"}
+  3016 "examples/replicant"
+
+  ;; all examples in examples/public, see examples/README.md
+  ;; the handler serves each example's index.html for pushState routes and fakes their APIs
+  3020 {:root "examples/public"
+        :handler examples.server/handler}}
 
  :build-defaults
  {:compiler-options
@@ -154,4 +159,59 @@
    :asset-path "js"
    :modules {:main {:init-fn shadow.arborist.bench-seq/init}}
    :devtools {:enabled false}}
+
+  ;; examples, see examples/README.md. one module per example, each page loads only its
+  ;; /js/<name>.js. served by the dev-http on port 3020 at /<name>/
+  :examples
+  {:target :esm
+   :output-dir "examples/public/js"
+   :asset-path "/js"
+   :modules
+   {:shared {:entries [examples.common]}
+    :defc-basics {:init-fn examples.defc-basics/init :depends-on #{:shared}}
+    :stable-args {:init-fn examples.stable-args/init :depends-on #{:shared}}
+    :local-state {:init-fn examples.local-state/init :depends-on #{:shared}}
+    :refs {:init-fn examples.refs/init :depends-on #{:shared}}
+    :effects {:init-fn examples.effects/init :depends-on #{:shared}}
+    :bind-helpers {:init-fn examples.bind-helpers/init :depends-on #{:shared}}
+    :animations {:init-fn examples.animations/init :depends-on #{:shared}}
+    :component-events {:init-fn examples.component-events/init :depends-on #{:shared}}
+    :markup {:init-fn examples.markup/init :depends-on #{:shared}}
+    :dom-events {:init-fn examples.dom-events/init :depends-on #{:shared}}
+    :lists {:init-fn examples.lists/init :depends-on #{:shared}}
+    :suspense {:init-fn examples.suspense/init :depends-on #{:shared}}
+    :portal {:init-fn examples.portal/init :depends-on #{:shared}}
+    :edn-view {:init-fn examples.edn-view/init :depends-on #{:shared}}
+    :kv-reads {:init-fn examples.kv-reads/init :depends-on #{:shared}}
+    :kv-writes {:init-fn examples.kv-writes/init :depends-on #{:shared}}
+    :loading-sentinel {:init-fn examples.loading-sentinel/init :depends-on #{:shared}}
+    :transactions {:init-fn examples.transactions/init :depends-on #{:shared}}
+    :fx {:init-fn examples.fx/init :depends-on #{:shared}}
+    :forms {:init-fn examples.forms/init :depends-on #{:shared}}
+    :keyboard {:init-fn examples.keyboard/init :depends-on #{:shared}}
+    :external-events {:init-fn examples.external-events/init :depends-on #{:shared}}
+    :routing {:init-fn examples.routing/init :depends-on #{:shared}}
+    :hash-routing {:init-fn examples.hash-routing/init :depends-on #{:shared}}
+    :auth-gate {:init-fn examples.auth-gate/init :depends-on #{:shared}}
+    :http-fx {:init-fn examples.http-fx/init :depends-on #{:shared}}
+    :http-pull {:init-fn examples.http-pull/init :depends-on #{:shared}}
+    :vlist {:init-fn examples.vlist/init :depends-on #{:shared}}
+    :vlist-remote {:init-fn examples.vlist-remote/init :depends-on #{:shared}}
+    :widget-node {:init-fn examples.widget-node/init :depends-on #{:shared}}
+    :child-host {:init-fn examples.child-host/init :depends-on #{:shared}}
+    :async-node {:init-fn examples.async-node/init :depends-on #{:shared}}
+    :custom-attributes {:init-fn examples.custom-attributes/init :depends-on #{:shared}}
+    :slot-provider {:init-fn examples.slot-provider/init :depends-on #{:shared}}
+    :overview {:init-fn examples.overview/init :depends-on #{:shared}}
+    :lazy-loading {:init-fn examples.lazy-loading/init :depends-on #{:shared}}
+    ;; loaded on demand by lazy/use
+    :lazy-loading-heavy {:entries [examples.lazy-loading.heavy] :depends-on #{:lazy-loading}}}
+   :devtools {:preloads [shadow.grove.preload]}}
+
+  ;; tx handlers and queries of the examples, tested without a DOM
+  ;; node out/examples-test/test.js
+  :examples-test
+  {:target :node-test
+   :output-to "out/examples-test/test.js"
+   :ns-regexp "^examples\\..+-test$"}
   }}

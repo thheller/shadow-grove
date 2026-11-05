@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>shadow-grove examples</title>
+  <style>
+    :root { --fg: #111827; --muted: #6b7280; --line: #e5e7eb; --link: #1d4ed8; --bg: #fff; }
+    @media (prefers-color-scheme: dark) {
+      :root { --fg: #e5e7eb; --muted: #9ca3af; --line: #374151; --link: #93c5fd; --bg: #111827; }
+    }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+    main { max-width: 56rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+    h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
+    h2 { font-size: 1rem; margin: 2rem 0 .5rem; padding-bottom: .25rem; border-bottom: 1px solid var(--line); }
+    p { color: var(--muted); margin: 0 0 1rem; }
+    code { font-size: .9em; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { display: flex; gap: 1rem; padding: .3rem 0; }
+    li a { flex: 0 0 11rem; color: var(--link); text-decoration: none; font-weight: 600; }
+    li a:hover { text-decoration: underline; }
+    li span { color: var(--muted); }
+    @media (max-width: 600px) { li { flex-direction: column; gap: 0; } li a { flex: none; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>shadow-grove examples</h1>
+  <p>Every concept of shadow-grove, explained next to a live demo and the code that runs it. Each page is
+    built from its example's source file in <code>src/dev/examples/</code>, so the text, the code and the
+    demo can't drift apart. A browser scenario in <code>examples/test/scenarios/</code> checks what the text
+    says. See <code>examples/README.md</code>.</p>
+
+  <h2>start here</h2>
+  <ul>
+    <li><a href="/overview/">overview</a><span>the five pieces, one interaction end to end, bootstrap, where things belong, namespaces, setup</span></li>
+  </ul>
+
+  <h2>components</h2>
+  <ul>
+    <li><a href="/defc-basics/">defc-basics</a><span>args, bind, render, the equality short-circuit, seeds and instances, the rules, troubleshooting</span></li>
+    <li><a href="/stable-args/">stable-args</a><span>^:stable args remount, :mount-filled editors, ^:stable in destructures, :supports?</span></li>
+    <li><a href="/refs/">refs</a><span>(ref name) for :dom/ref, (ref name init), IRefInit, IRefDestroy, IRefRender</span></li>
+    <li><a href="/local-state/">local-state</a><span>an atom in a ref read with sg/watch (paths, fns, outside atoms), use-state</span></li>
+    <li><a href="/effects/">effects</a><span>:mount, :render, :auto and value deps, cleanup, fn forms, hook, dom-scheduler, track-change</span></li>
+    <li><a href="/bind-helpers/">bind-helpers</a><span>claimed binds, one claim per bind, custom watchable sources, claim-slot!, claims under a when</span></li>
+    <li><a href="/component-events/">component-events</a><span>event slots, bubbling, swallowing, run-tx vs dispatch-up!, unhandled events</span></li>
+    <li><a href="/animations/">animations</a><span>prepare-animation, animate, leave animations that hold the tx back with dispatch-up!</span></li>
+  </ul>
+
+  <h2>markup</h2>
+  <ul>
+    <li><a href="/markup/">markup</a><span>the &lt;&lt; compiler, css placement, :class, :style, attributes and props, svg, re-entering &lt;&lt;</span></li>
+    <li><a href="/dom-events/">dom-events</a><span>what :on-* accepts and the :e/* listener options</span></li>
+    <li><a href="/lists/">lists</a><span>simple-seq, diff-seq, diff-seq-by-value and keyed-seq side by side, picking one</span></li>
+    <li><a href="/suspense/">suspense</a><span>offscreen vs in place, :timeout, placing boundaries, suspend! defaults, no boundary</span></li>
+    <li><a href="/portal/">portal</a><span>dialogs in document.body, portals into a given node, events and reads inside</span></li>
+    <li><a href="/lazy-loading/">lazy-loading</a><span>lazy/use with a module loaded on demand</span></li>
+    <li><a href="/edn-view/">edn-view</a><span>render-edn, render-edn-str, edn-diff</span></li>
+  </ul>
+
+  <h2>data</h2>
+  <ul>
+    <li><a href="/kv-reads/">kv-reads</a><span>kv-lookup, kv-lookups, queries, composing queries, precise reads</span></li>
+    <li><a href="/kv-writes/">kv-writes</a><span>tables and their config, kv/add, kv/merge-seq, :joins, kv/set, replacing tables, failing writes</span></li>
+    <li><a href="/loading-sentinel/">loading-sentinel</a><span>:db/loading + suspend vs nil for "not loaded yet"</span></li>
+  </ul>
+
+  <h2>changing data</h2>
+  <ul>
+    <li><a href="/transactions/">transactions</a><span>deftx, base maps, sg/run, reg-event, results, tx-env, testing, debugging</span></li>
+    <li><a href="/fx/">fx</a><span>queue-fx / reg-fx order, results as new txs, fx-timeout, fx that need the DOM</span></li>
+    <li><a href="/forms/">forms</a><span>KV-controlled inputs, FormData on submit, an editor that owns its draft</span></li>
+    <li><a href="/keyboard/">keyboard</a><span>::keyboard/listen, key slots, tab-index for panels, nested listeners</span></li>
+    <li><a href="/external-events/">external-events</a><span>other tabs, window events and timers starting txs with run-tx!</span></li>
+  </ul>
+
+  <h2>routing</h2>
+  <ul>
+    <li><a href="/routing/">routing</a><span>URI to data, history/init! and its options, :ui/route!, links, :ui/redirect!</span></li>
+    <li><a href="/hash-routing/">hash-routing</a><span>:use-fragment</span></li>
+    <li><a href="/auth-gate/">auth-gate</a><span>session first, then history and render; remembered tokens; 403 handling (demo/demo)</span></li>
+  </ul>
+
+  <h2>server data</h2>
+  <ul>
+    <li><a href="/http-fx/">http-fx</a><span>setup, request forms, results, optimistic writes, :trace, :timeout, :request-many, transit</span></li>
+    <li><a href="/http-pull/">http-pull</a><span>pulls in binds, the result map, invalidate!, :value and :transform, :suspend false, which tool</span></li>
+  </ul>
+
+  <h2>large lists</h2>
+  <ul>
+    <li><a href="/vlist/">vlist</a><span>a vlist3 handle in a ref, opts, the query contract, keyboard, layout, vlist3/render</span></li>
+    <li><a href="/vlist-remote/">vlist-remote</a><span>fetching missing rows from the query, :more? for growing collections</span></li>
+  </ul>
+
+  <h2>custom managed nodes</h2>
+  <ul>
+    <li><a href="/widget-node/">widget-node</a><span>the protocols and lifecycle, wrapping a widget that owns its DOM, metadata IConstruct, checklist</span></li>
+    <li><a href="/child-host/">child-host</a><span>hosting children with managed-root, the env, ::sg/env-init</span></li>
+    <li><a href="/async-node/">async-node</a><span>content that arrives later, did-suspend! / did-finish! with suspense</span></li>
+    <li><a href="/custom-attributes/">custom-attributes</a><span>a node in its subtree's env, a namespaced attribute that finds it, IHandleDOMEvents</span></li>
+    <li><a href="/slot-provider/">slot-provider</a><span>tracked reads (kv-lookup, query) in user code your node runs</span></li>
+  </ul>
+</main>
+</body>
+</html>
