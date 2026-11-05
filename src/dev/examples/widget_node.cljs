@@ -8,7 +8,7 @@
      append-only logs, grids, lists with enter and leave animations, drag and drop.
    - **third-party widgets that own their DOM** (editors, maps, charts), this page.
    - **subtree context**: a node that puts itself into `env` for its descendants
-     ([child-host](/child-host/), [custom-attributes](/custom-attributes/)).
+     ([child-host](/child-host/)).
    - **custom async boundaries** that cooperate with `suspense`
      ([async-node](/async-node/)).
 

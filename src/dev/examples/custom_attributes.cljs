@@ -1,144 +1,106 @@
 (ns examples.custom-attributes
-  "Subtree context plus custom attributes: a node puts something into its children's
-   env, and a namespaced attribute on elements below finds it there. `dnd_sortable` in
-   the library works this way: the sortable container is in the env, items register
-   with `::dnd/target` and `::dnd/draggable` attributes. Hosting children with an
-   extended env is [child-host](/child-host/)."
+  "A custom attribute attaches behavior to the one element it is on. A namespaced key in
+   an element's attribute map, `{::autosize 6}`, calls the handler registered for it,
+   with the element and the old and new value. Use it to wrap a DOM API the element
+   itself is the subject of: a listener, an observer, a third-party widget bound to the
+   node. The built-in `:dom/ref`, `::keyboard/listen` and `:ui/href` work this way."
   (:require
     [examples.common :as c]
     [shadow.arborist.attributes :as attr]
-    [shadow.arborist.common :as common]
-    [shadow.arborist.protocols :as ap]
     [shadow.grove :as sg :refer (defc << css)]))
 
 (defonce app (sg/get-runtime :app))
 
-;; ## a node in its subtree's env
+;; ## registering a handler
 ;;
-;; `Group` is the shared object: it knows the elements registered with it and can act on
-;; them (highlight). `group-scope` is a node hosting its children in a `managed-root`
-;; created with `(assoc env ::group group)`, so everything rendered below sees it.
-;; Namespace your env keys.
-
-(deftype Group [^:mutable items ^:mutable listeners]
-  Object
-  (add-item [this node label]
-    (set! items (assoc items node label))
-    (.changed this))
-  (remove-item [this node]
-    (set! items (dissoc items node))
-    (.changed this))
-  (changed [this]
-    (doseq [f listeners] (f)))
-  (highlight! [this on?]
-    (doseq [node (keys items)]
-      (.toggle (.-classList node) "group-highlight" on?))))
-
-(declare GroupSeed)
-
-(deftype GroupNode [env group root]
-  ap/IManaged
-  (supports? [this next] (instance? GroupSeed next))
-  (dom-sync! [this ^GroupSeed next] (ap/update! root (.-body next)))
-  (dom-insert [this parent anchor] (ap/dom-insert root parent anchor))
-  (dom-first [this] (ap/dom-first root))
-  (dom-entered! [this] (ap/dom-entered! root))
-  (destroy! [this dom-remove?] (ap/destroy! root dom-remove?)))
-
-(deftype GroupSeed [group body]
-  ap/IConstruct
-  (as-managed [this env]
-    (GroupNode. env group (doto (common/managed-root (assoc env ::group group)) (ap/update! body)))))
-
-(defn group-scope [group body]
-  (GroupSeed. group body))
-
-;; ## a namespaced attribute that finds it
+;; `(attr/add-attr ::autosize (fn [env node oval nval] ...))` registers the handler for
+;; `{::autosize value}` on any element (`shadow.arborist.attributes`). It is called
 ;;
-;; `(attr/add-attr ::item (fn [env node oval nval] ...))` registers a handler for
-;; `{::item value}` on any element (`shadow.arborist.attributes`). It is called on create
-;; (`oval` nil), on change, and when the attribute goes away (`nval` nil). Fragments also
-;; clear namespaced attributes when they are destroyed, so removing the element calls it
-;; with `nval` nil too: cleanup can live in the handler. Make it idempotent anyway.
+;; - on create, `oval` nil,
+;; - when the value changes, both set,
+;; - when the attribute goes away, `nval` nil. Fragments also clear namespaced attributes
+;;   when they are destroyed, so removing the element calls it with `nval` nil too: the
+;;   cleanup lives in the handler. Make it idempotent anyway.
+;;
+;; It is not called when the value stays `=`. Keep per-node state on the node itself, the
+;; handler is a plain function shared by every element using the attribute.
+;;
+;; On create the node is not in the document yet, and attributes after this one in the
+;; map (here `:value`) may not be set yet. Anything measuring has to wait, here a
+;; `requestAnimationFrame`.
+;;
+;; `::autosize` grows a textarea with its content, up to `nval` rows. Try it: type a few
+;; lines, change the max (a change call), turn it off (`nval` nil, the listener is
+;; removed and the textarea stays as it is), remove the textarea (`nval` nil from the
+;; destroyed fragment).
+
+(defn fit! [^js node]
+  (let [max-rows (.-shadow$autosize-max node)]
+    (set! (.-rows node) 1)
+    (while (and (< (.-rows node) max-rows)
+                (> (.-scrollHeight node) (.-clientHeight node)))
+      (set! (.-rows node) (inc (.-rows node))))))
+
+(attr/add-attr ::autosize
+  (fn [env ^js node oval nval]
+    (c/log! "::autosize handler, oval" (pr-str oval) "nval" (pr-str nval))
+    (cond
+      ;; off -> on
+      (and (nil? oval) (some? nval))
+      (let [listener #(fit! node)]
+        (set! (.-shadow$autosize-max node) nval)
+        (set! (.-shadow$autosize-listener node) listener)
+        (.addEventListener node "input" listener)
+        (js/requestAnimationFrame listener))
+
+      ;; on -> off
+      (nil? nval)
+      (when-some [listener (.-shadow$autosize-listener node)]
+        (.removeEventListener node "input" listener)
+        (set! (.-shadow$autosize-listener node) nil))
+
+      ;; value changed
+      :else
+      (do (set! (.-shadow$autosize-max node) nval)
+          (fit! node)))))
+
+;; ## not for reaching other elements
+;;
+;; An attribute handler only touches its own node. It is not a way for a parent to find
+;; and change elements rendered by its children, that goes around the rendering. Pass
+;; the data down instead (`(ui-item item highlight?)`), or let the child query it. If it
+;; really has to be DOM interop, put a `:dom/ref` on the container and use
+;; `(.querySelectorAll @container "...")` in an event slot or effect ([refs](/refs/)).
 ;;
 ;; - A namespaced attribute without a registered handler throws "namespaced attribute
 ;;   without setter".
-;; - Built-in ones: `:dom/ref` ([refs](/refs/)), `::keyboard/listen`
-;;   ([keyboard](/keyboard/)), `:ui/href` (registered by `history/init!`,
-;;   [routing](/routing/)).
-;;
-;; Try it: change a label (a change call), remove the attribute from "two" (nval nil),
-;; remove the last element (nval nil from the destroyed fragment), "count" shows what is
-;; registered.
-
-(attr/add-attr ::item
-  (fn [env node oval nval]
-    (when-some [^Group group (::group env)]
-      (c/log! "::item handler, oval" (pr-str oval) "nval" (pr-str nval))
-      (if nval
-        (.add-item group node nval)
-        (.remove-item group node)))))
-
-(defn items [group labels tagged?]
-  (group-scope group
-    (<< [:ul#group
-         (sg/simple-seq labels
-           (fn [label idx]
-             (<< [:li {::item (when (or tagged? (not= idx 1)) label) :data-label label} label])))])))
-
-;; ## IHandleDOMEvents
-;;
-;; Fragments send `:on-*` keyword and map values to `(::ap/dom-event-handler env)`. `defc`
-;; installs itself there, which is why event maps reach `event` slots. A node can install
-;; itself in its children's env to intercept those values, but the next `defc` below it
-;; takes over again. Rarely needed: a node emitting events from its own callbacks sends
-;; them to `(::comp/event-target env)` ([widget-node](/widget-node/)).
+;; - Plain `data-*` and `aria-*` attributes are set as DOM attributes, they need no
+;;   handler.
 
 ;; # page
 
-;; the page reads the group through an atom it updates
-(defonce group (Group. {} []))
-(defonce group-info (atom {:registered 0 :connected 0}))
-
-(defn refresh-info! []
-  (reset! group-info
-    {:registered (count (.-items group))
-     :connected (count (filter #(.-isConnected %) (keys (.-items group))))}))
-
-(defc ui-info []
-  (bind {:keys [registered connected]} (sg/watch group-info))
-  (render
-    (<< [:div#info {:class c/$muted} "registered: " registered ", still in the document: " connected])))
-
 (defc ui-root []
-  (ref state (atom {:labels ["one" "two" "three"] :tagged? true :highlight? false}))
-  (bind {:keys [labels tagged? highlight?]} (sg/watch state))
+  (ref state (atom {:max-rows 6 :on? true :show? true}))
+  (bind {:keys [max-rows on? show?]} (sg/watch state))
 
-  (event ::untag! [env ev e] (swap! state update :tagged? not))
-  (event ::drop! [env ev e] (swap! state update :labels #(vec (butlast %))))
-  (event ::rename! [env ev e] (swap! state update-in [:labels 0] str "!"))
-  (event ::highlight! [env ev e]
-    (swap! state update :highlight? not)
-    (.highlight! group (not highlight?)))
-  (event ::refresh! [env ev e] (refresh-info!))
+  (event ::max! [env ev e] (swap! state update :max-rows #(if (= 6 %) 3 6)))
+  (event ::on! [env ev e] (swap! state update :on? not))
+  (event ::show! [env ev e] (swap! state update :show? not))
 
   (render
     (c/page "custom attributes"
-      {"a namespaced attribute that finds it"
+      {"registering a handler"
        (<< [:div {:class [c/$row (css :mb-2)]}
-            [:button {:class c/$btn :on-click ::rename!} "change the first label"]
-            [:button {:class c/$btn :on-click ::untag!} (if tagged? "remove the attribute from two" "add it back")]
-            [:button {:class c/$btn :on-click ::drop!} "remove the last element"]
-            [:button {:class c/$btn :on-click ::highlight!} "highlight registered"]
-            [:button {:class c/$btn :on-click ::refresh!} "count"]]
-           (items group labels tagged?)
-           (ui-info))})))
+            [:button {:class c/$btn :on-click ::max!} (str "max " (if (= 6 max-rows) 3 6) " rows")]
+            [:button {:class c/$btn :on-click ::on!} (if on? "turn it off" "turn it on")]
+            [:button {:class c/$btn :on-click ::show!} (if show? "remove the textarea" "add it back")]]
+           (when show?
+             (<< [:textarea#text
+                  {::autosize (when on? max-rows)
+                   :class [c/$input (css :w-full)]
+                   :value "one\ntwo"}])))})))
 
 (defn init []
-  (set! (.-listeners group) [refresh-info!])
-  (let [style (js/document.createElement "style")]
-    (set! (.-textContent style) ".group-highlight { background: #fde68a; }")
-    (.append js/document.head style))
   (c/render! app (ui-root)))
 
 (defn ^:dev/after-load reload! []

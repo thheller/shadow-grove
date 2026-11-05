@@ -51,12 +51,15 @@
 ;; | `::sg/scheduler` | the nearest `IScheduleWork`: a component, a suspense boundary or the root ([async-node](/async-node/)) |
 ;; | `::comp/event-target` | the nearest `IHandleEvents`: a component, else the root tx target ([widget-node](/widget-node/)) |
 ;; | `::comp/component` | the nearest component, nil at the root (`comp/get-component`) |
-;; | `::ap/dom-event-handler` | receives `:on-*` values from fragments ([custom-attributes](/custom-attributes/)) |
+;; | `::ap/dom-event-handler` | the nearest `IHandleDOMEvents`, receives `:on-*` keyword and map values from fragments ([dom-events](/dom-events/)) |
 ;; | `::sg/root-el` | the element passed to `sg/render` |
 ;; | `:dom/svg`, `:dom/element-fn` | set by fragments inside `[:svg ...]` |
 ;;
 ;; Existing overrides: `suspense` swaps `::sg/scheduler` to collect suspensions, `defc`
 ;; sets the component, event target, scheduler and DOM event handler for its subtree.
+;; A node can install itself as `::ap/dom-event-handler` to intercept `:on-*` values, but
+;; the next `defc` below it takes over again. Rarely needed: a node emitting events from
+;; its own callbacks sends them to `(::comp/event-target env)` ([widget-node](/widget-node/)).
 
 (deftype FrameSeed [theme body]
   ap/IConstruct

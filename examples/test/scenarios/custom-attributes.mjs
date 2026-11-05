@@ -1,23 +1,26 @@
-// subtree context + custom attributes
+// custom attributes: per-element behavior and the handler lifecycle
 export default async (t) => {
   await t.goto("/custom-attributes/");
-  await t.waitText("registered:");
-  const info = () => t.text("#info");
-  const count = async () => { await t.click({ text: "count", selector: "button" }); return info(); };
-  t.assert((await count()).includes("registered: 3, still in the document: 3"), "three items registered");
+  await t.waitText("registering a handler");
+  const rows = () => t.evaluate(`document.querySelector("#text").rows`);
+  await t.waitFor(`document.querySelector("#text").rows === 2`, { message: "initial fit after the rAF" });
+  let log = await t.log();
+  t.assert(log.includes("oval nil nval 6"), `handler on create:\n${log}`);
 
-  let log = await t.logOf(() => t.click({ text: "change the first label", selector: "button" }));
-  t.assert(log.includes('oval "one" nval "one!"'), `handler on change:\n${log}`);
+  await t.type("#text", "\nthree\nfour\nfive\nsix\nseven\neight");
+  t.assert(await rows() === 6, `grows up to max 6, got ${await rows()}`);
 
-  log = await t.logOf(() => t.click({ text: "remove the attribute from two", selector: "button" }));
-  t.assert(log.includes('oval "two" nval nil'), "handler on removal of the attribute");
-  t.assert((await info()).includes("registered: 2"), "unregistered");
-  await t.click({ text: "add it back", selector: "button" });
+  log = await t.logOf(() => t.click({ text: "max 3 rows", selector: "button" }));
+  t.assert(log.includes("oval 6 nval 3"), `handler on change:\n${log}`);
+  t.assert(await rows() === 3, "refit to the new max");
 
-  await t.click({ text: "highlight registered", selector: "button" });
-  t.assert(await t.evaluate(`document.querySelectorAll("#group .group-highlight").length`) === 3, "group acts on its registered nodes");
+  log = await t.logOf(() => t.click({ text: "turn it off", selector: "button" }));
+  t.assert(log.includes("oval 3 nval nil"), `handler on removal of the attribute:\n${log}`);
+  await t.type("#text", "\nnine");
+  t.assert(await rows() === 3, "listener removed, no more fitting");
 
-  log = await t.logOf(() => t.click({ text: "remove the last element", selector: "button" }));
-  t.assert(log.includes('::item handler, oval "three" nval nil'), `a destroyed fragment clears its namespaced attributes, the handler gets nval nil:\n${log}`);
-  t.assert((await count()).includes("still in the document: 2"), "two elements left");
+  await t.click({ text: "turn it on", selector: "button" });
+  log = await t.logOf(() => t.click({ text: "remove the textarea", selector: "button" }));
+  t.assert(log.includes("oval 3 nval nil"), `a destroyed fragment clears its namespaced attributes:\n${log}`);
+  t.assert(!(await t.exists("#text")), "textarea gone");
 };
