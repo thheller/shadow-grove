@@ -73,21 +73,6 @@
    ;; last item count rendered, used to clamp focus
    ^:mutable item-count]
 
-  IDeref
-  (-deref [this]
-    @state)
-
-  ;; so sg/watch works on the handle
-  IWatchable
-  (-notify-watches [this old new]
-    (-notify-watches state old new))
-  (-add-watch [this key f]
-    (-add-watch state key f)
-    this)
-  (-remove-watch [this key]
-    (-remove-watch state key)
-    this)
-
   ap/IConstruct
   (as-managed [this env]
     (VListNode. this (ap/as-managed (ui-vlist this) env))))
@@ -167,7 +152,7 @@
           :num (- (+ first-row visible overscan) start))))))
 
 (defn measure! [^VList handle ^js el]
-  (let [{:keys [item-height overscan]} @handle
+  (let [{:keys [item-height overscan]} @(.-state handle)
         height (.-clientHeight el)
         scroll-top (.-scrollTop el)]
     (when (and ^boolean js/goog.DEBUG (zero? height))
@@ -230,7 +215,7 @@
 (defn focus-set!
   "moves keyboard focus to idx, scrolling it into view if needed"
   [^VList handle ^js el idx]
-  (let [{:keys [item-height overscan]} @handle
+  (let [{:keys [item-height overscan]} @(.-state handle)
         item-count (.-item-count handle)]
     (when (pos? item-count)
       (let [idx (-> idx (js/Math.max 0) (js/Math.min (dec item-count)))
@@ -257,7 +242,7 @@
 
 (defn focus-move! [^VList handle el delta]
   ;; using the state, not focus from the last render. two key presses may arrive before it
-  (focus-set! handle el (+ (:focus @handle) delta)))
+  (focus-set! handle el (+ (:focus @(.-state handle)) delta)))
 
 (defn focus-row!
   "moves keyboard focus to row idx, scrolling it into view when mounted.
@@ -280,7 +265,7 @@
   (bind {:keys [query-fn query-args initial-num offset num
                 item-height item-fn key-fn tab-index box-class class content-wrap more-fn
                 overscan focus focused?]}
-    (sg/watch handle))
+    (sg/watch (.-state handle)))
 
   (bind result
     (when query-fn
@@ -339,8 +324,8 @@
     (focus-set! handle @container (dec total)))
 
   (event ::keyboard/enter [env ev e]
-    (when-some [select-event (:select-event @handle)]
-      (let [idx (:focus @handle)]
+    (when-some [select-event (:select-event @(.-state handle))]
+      (let [idx (:focus @(.-state handle))]
         ;; focus may be outside the rendered rows, nothing to select then
         (when-some [item (nth slice (- idx slice-offset) nil)]
           (ev-stop e)
