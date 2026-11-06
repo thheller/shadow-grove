@@ -26,7 +26,6 @@
   3009 "examples/bench-fragment"
   3010 "out/browser-test"
   3011 "examples/app/public"
-  3015 "examples/flex"
 
   ;; all examples in examples/public, see examples/README.md
   ;; the handler serves each example's index.html for pushState routes and fakes their APIs
@@ -48,12 +47,6 @@
    :devtools {:watch-dir "src/ui-release"
               :watch-path "/classpath"}
    :modules {:main {:init-fn shadow.grove.devtools/init}}}
-
-  :flex
-  {:target :browser
-   :output-dir "examples/flex/js"
-   :asset-path "/js"
-   :modules {:main {:init-fn dummy.flex/init}}}
 
   :examples-bootstrap
   {:target :bootstrap
@@ -182,6 +175,7 @@
     :async-node {:init-fn examples.async-node/init :depends-on #{:shared}}
     :custom-attributes {:init-fn examples.custom-attributes/init :depends-on #{:shared}}
     :slot-provider {:init-fn examples.slot-provider/init :depends-on #{:shared}}
+    :signals {:init-fn examples.signals/init :depends-on #{:shared}}
     :overview {:init-fn examples.overview/init :depends-on #{:shared}}
     :lazy-loading {:init-fn examples.lazy-loading/init :depends-on #{:shared}}
     ;; loaded on demand by lazy/use

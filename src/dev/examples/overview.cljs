@@ -174,10 +174,11 @@
 ;; | `[shadow.arborist.protocols :as ap]`, `[shadow.arborist.common :as common]`, `[shadow.grove.protocols :as gp]`, `[shadow.arborist.attributes :as attr]` | custom managed nodes and attributes ([widget-node](/widget-node/)) |
 ;;
 ;; Not covered here, don't reach for them: `shadow.grove.events` (deprecated, see
-;; [transactions](/transactions/)), `flex`, `event-fsm`, `local`, `eql-query`,
+;; [transactions](/transactions/)), `event-fsm`, `local`, `eql-query`,
 ;; `db.ident`, `ui.grid`, `ui.loadable`, `cards.*`, `server`, `ui.vlist2` (deprecated,
 ;; [vlist](/vlist/)). `ui.vgrid` and `ui.dnd-sortable` are reference implementations for
-;; custom nodes, not documented for direct use.
+;; custom nodes, not documented for direct use. `flex` is an empty namespace, see
+;; [signals](/signals/) for the experiment it is reserved for.
 
 ;; ## project setup
 ;;
