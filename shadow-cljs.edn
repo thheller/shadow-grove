@@ -26,9 +26,7 @@
   3009 "examples/bench-fragment"
   3010 "out/browser-test"
   3011 "examples/app/public"
-  3013 "examples/ui"
   3015 "examples/flex"
-  3016 "examples/replicant"
 
   ;; all examples in examples/public, see examples/README.md
   ;; the handler serves each example's index.html for pushState routes and fakes their APIs
@@ -42,12 +40,7 @@
    :shadow-keywords true}}
 
  :builds
- {:ui ;; FIXME: should at some point has some kind of workspaces like UI
-  {:target :browser
-   :output-dir "examples/ui/js"
-   :modules {:main {:init-fn dummy.ui/init}}}
-
-  :devtools
+ {:devtools
   {:target :esm
    :output-dir "src/ui-release/shadow/grove/devtools/dist/js"
    :dev {:output-dir "src/gen/shadow/grove/devtools/dist/js"}
