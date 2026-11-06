@@ -1,15 +1,8 @@
 ;; shadow-cljs configuration
 {:deps {:aliases [:dev]}
 
- :dependencies
- ;; for benchmark purposes, not actually a dependency
- [[reagent "0.9.0-rc3"]
-
-  [com.thheller/shadow-css "0.4.5"]]
-
  :dev-http
  {3005 "public"
-  3006 "../grove-todo/public"
   3009 "examples/bench-fragment"
   3010 "out/browser-test"
   3011 "examples/app/public"
@@ -85,12 +78,6 @@
   {:target :node-test
    :output-to "out/node-test/test.js"
    :ns-regexp "(components|diff-seq|vlist3)-test$"}
-
-  :todo
-  {:target :browser
-   :output-dir "../grove-todo/public/js"
-   :modules {:main {:init-fn todo.ui/init
-                    :preloads [shadow.grove.dev-support]}}}
 
   :bench-db
   {:target :node-script

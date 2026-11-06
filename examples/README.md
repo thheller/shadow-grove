@@ -73,9 +73,7 @@ The shadow-cljs server provides one dev-http on port 3020 for all examples
 npx shadow-cljs watch examples
 ```
 
-then open http://localhost:3020/. `signals` requires `town.lilac/flex`, which only the
-`:dev` alias in `deps.edn` provides, so the server has to run with that alias. With the
-server started from the REPL
+then open http://localhost:3020/. With the server started from the REPL
 (`repl/start`), CSS is regenerated on file changes. Otherwise run
 `(build/css-release)` from `src/dev/build.clj` once.
 
