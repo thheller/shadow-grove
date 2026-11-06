@@ -3,8 +3,9 @@
   "src/test"
   "src/gen" ;; meh
   "src/ui-release"]
+
  :deps
- {com.thheller/shadow-css {:mvn/version "0.6.1"}}
+ {com.thheller/shadow-css {:mvn/version "0.6.4"}}
 
  :aliases
  {:dev
@@ -12,15 +13,17 @@
    ["src/dev"
     "src/test"]
    :extra-deps
-   {org.clojure/clojure {:mvn/version "1.12.0"}
-    org.clojure/clojurescript {:mvn/version "1.12.134"}
-    ;;
-    town.lilac/flex {:git/url "https://github.com/lilactown/flex"
-                     :git/sha "25a96d6f6eb976e4ee2a8514743205db600a92d4"}}
+   {org.clojure/clojure {:mvn/version "1.12.6"}
+    thheller/shadow-cljs {:mvn/version "3.5.11"}
+
+    ;; signals example
+    town.lilac/flex
+    {:git/url "https://github.com/lilactown/flex"
+     :git/sha "346bad039b560a62529a39af66e0afe35565b125"}}
+
    :override-deps
    {com.thheller/shadow-css {:local/root "../shadow-css"}}}
 
   :server
-  {:extra-deps {thheller/shadow-cljs {:mvn/version "3.5.11"}}
-   :jvm-opts ["-Dfile.encoding=UTF-8"]
+  {:jvm-opts ["-Dfile.encoding=UTF-8"]
    :main-opts ["-m" "shadow.cljs.devtools.cli" "run" "repl/start"]}}}

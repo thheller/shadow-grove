@@ -85,7 +85,7 @@
     (if (empty? val)
       (edn-empty-coll "{}")
       (<< [:div {:class (css {:border-left "6px solid purple"})}
-           [:table {:class (css :border-collapse)}
+           [:table
             (sg/simple-seq keys
               (fn [k]
                 (let [v (get val k)
@@ -276,7 +276,7 @@
 
   (render
     (<< [:div {:class (css {:border-left "6px solid purple"})}
-         [:table {:class (css :border-collapse)}
+         [:table
           (sg/simple-seq keys
             (fn [k]
               (let [lv (get left k NOT-FOUND)

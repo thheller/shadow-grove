@@ -1,18 +1,5 @@
 ;; shadow-cljs configuration
-{:source-paths
- ["src/dev"
-  "src/main"
-  "src/test"
-  "src/gen"
-  ;; for easier testing with the example app
-  "../grove-todo/src/main"
-  "../shadow-css/src/main"]
-
- :version
- "3.0.3"
-
- :jvm-opts
- ["-XX:-OmitStackTraceInFastThrow"]
+{:deps {:aliases [:dev]}
 
  :dependencies
  ;; for benchmark purposes, not actually a dependency
