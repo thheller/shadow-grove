@@ -1,6 +1,6 @@
 (ns examples.external-events
   "Data that arrives from outside any component: other tabs, a server push (SSE, a
-   websocket), window events, timers, the response of an async API. The callback never
+   [websocket](/websocket/)), window events, timers, the response of an async API. The callback never
    holds on to a `tx-env` or touches tables. It captures what it needs (the runtime, ids,
    the payload) and starts a new transaction with `(sg/run-tx! rt-ref ev-map)`.
 

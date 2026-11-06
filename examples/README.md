@@ -21,7 +21,7 @@ end, bootstrap, and a "where does this belong" list pointing to the other exampl
 | data | `kv_reads`, `kv_writes`, `loading_sentinel` |
 | changing data | `transactions` (+ `transactions_test`), `fx`, `forms`, `keyboard`, `external_events` |
 | routing | `routing`, `hash_routing`, `auth_gate` |
-| server data | `http_fx`, `http_pull` |
+| server data | `http_fx`, `http_pull`, `websocket` |
 | large lists | `vlist`, `vlist_remote` |
 | custom managed nodes | `widget_node`, `child_host`, `async_node`, `custom_attributes`, `slot_provider` |
 
@@ -83,6 +83,10 @@ talk to `/<name>/api/...`, served from atoms in `src/dev/examples/server.clj`. I
 `POST /<any>/api/reset` resets all of them. pushState routes such as
 `/routing/item/1` survive a reload because the handler serves the example's
 `index.html` for unknown paths below it.
+
+`websocket` opens a real socket to `/websocket/api/ws`, also in `server.clj`. Every open
+tab is one client. `POST /<any>/api/reset` doesn't touch it, it only holds live
+connections.
 
 After changing `common.clj`, delete `.shadow-cljs/builds/examples/dev/ana/examples/`
 before compiling: the compile cache doesn't know the examples depend on the macro's

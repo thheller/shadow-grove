@@ -4,15 +4,17 @@
    file roots are tried first, so this only sees requests for files that don't exist:
    - /<example>/api/... are small fake backends (api multimethod), state in atoms
    - POST /<example>/api/reset resets all of them, used by examples/test/run.mjs
+   - /websocket/api/ws upgrades to a real websocket (ws-op multimethod)
    - any other /<example>/... serves examples/public/<example>/index.html (pushState routing)"
   (:require
     [clojure.edn :as edn]
     [clojure.java.io :as io]
     [clojure.string :as str]
     [cognitect.transit :as transit]
+    [ring.websocket :as ws]
     [shadow.http.push-state :as push-state])
   (:import
-    [java.io ByteArrayOutputStream]))
+    [java.io ByteArrayInputStream ByteArrayOutputStream IOException]))
 
 ;; artificial latency in ms, so loading states and suspense are visible
 ;; (swap! examples.server/latency assoc "http-pull" 2000)
@@ -55,12 +57,15 @@
     :headers {"content-type" "application/edn; charset=utf-8"}
     :body (pr-str data)}))
 
-(defn transit-res [data]
+(defn transit-str [data]
   (let [out (ByteArrayOutputStream. 4096)]
     (transit/write (transit/writer out :json) data)
-    {:status 200
-     :headers {"content-type" "application/transit+json; charset=utf-8"}
-     :body (.toString out "UTF-8")}))
+    (.toString out "UTF-8")))
+
+(defn transit-res [data]
+  {:status 200
+   :headers {"content-type" "application/transit+json; charset=utf-8"}
+   :body (transit-str data)})
 
 (def not-found
   {:status 404
@@ -220,6 +225,98 @@
     (do (swap! vlist-realized + 300)
         (edn-res {:item-count @vlist-realized}))
 
+    not-found))
+
+;; websocket: every open tab of the example is one client, client-id -> client data.
+;; holds live connections, so reset-all! leaves it alone
+
+(defonce ws-clients (atom {}))
+
+(defonce ws-client-seq (atom 0))
+
+(def ws-ping-ms 2000)
+
+(defn ws-read [^String text]
+  (transit/read (transit/reader (ByteArrayInputStream. (.getBytes text "UTF-8")) :json)))
+
+(defn ws-send! [client-id msg]
+  (when-some [socket (get-in @ws-clients [client-id :socket])]
+    (try
+      (ws/send socket (transit-str msg))
+      ;; the client just went away, :on-close cleans up
+      (catch IOException e
+        nil))))
+
+(defn ws-notify! [event-op {:keys [client-id client-info]}]
+  (doseq [other (vals @ws-clients)
+          :when (and (:notify other) (not= client-id (:client-id other)))]
+    (ws-send! (:client-id other)
+      {:op :ws/notify :event-op event-op :client-id client-id :client-info client-info})))
+
+;; client-id is the sender
+(defmulti ws-op (fn [client-id msg] (:op msg)))
+
+(defmethod ws-op :ws/hello [client-id {:keys [client-info]}]
+  (swap! ws-clients assoc-in [client-id :client-info] client-info)
+  (ws-notify! :client-connect (get @ws-clients client-id)))
+
+(defmethod ws-op :ws/request-clients [client-id {:keys [notify]}]
+  (swap! ws-clients assoc-in [client-id :notify] notify)
+  (ws-send! client-id
+    {:op :ws/clients
+     :clients (->> (vals @ws-clients)
+                   (filter :client-info)
+                   (mapv #(select-keys % [:client-id :client-info])))}))
+
+(defmethod ws-op :ws/pong [client-id _]
+  (swap! ws-clients update-in [client-id :pongs] inc))
+
+(defmethod ws-op :ws/say [client-id {:keys [text]}]
+  (swap! ws-clients update-in [client-id :said] inc)
+  (doseq [other-id (keys @ws-clients)]
+    (ws-send! other-id {:op :ws/said :from client-id :text text})))
+
+;; replies carry the :call-id of the message they answer
+(defmethod ws-op :ws/describe-client [from {:keys [call-id client-id]}]
+  (ws-send! from
+    (if-some [{:keys [pongs said]} (get @ws-clients client-id)]
+      {:op :ws/client-description :call-id call-id :pongs pongs :said said}
+      {:op :ws/client-not-found :call-id call-id})))
+
+(defmethod ws-op :ws/close-me [client-id _]
+  (ws/close (get-in @ws-clients [client-id :socket])))
+
+(defn ws-ping-loop [client-id]
+  (Thread/sleep ws-ping-ms)
+  (when (contains? @ws-clients client-id)
+    (ws-send! client-id {:op :ws/ping})
+    (recur client-id)))
+
+(defn ws-listener []
+  (let [client-id (swap! ws-client-seq inc)]
+    {:on-open
+     (fn [socket]
+       (swap! ws-clients assoc client-id {:client-id client-id :socket socket :pongs 0 :said 0})
+       (ws-send! client-id {:op :ws/welcome :client-id client-id})
+       (future (ws-ping-loop client-id))
+       ;; a returned map would replace this listener
+       nil)
+
+     :on-message
+     (fn [socket text]
+       (ws-op client-id (ws-read text)))
+
+     :on-close
+     (fn [socket code reason]
+       (let [client (get @ws-clients client-id)]
+         (swap! ws-clients dissoc client-id)
+         ;; never said hello, nobody knows about it
+         (when (:client-info client)
+           (ws-notify! :client-disconnect client))))}))
+
+(defmethod api "websocket" [_ req [route]]
+  (if (and (= "ws" route) (ws/upgrade-request? req))
+    {::ws/listener (ws-listener)}
     not-found))
 
 (defn reset-all! []

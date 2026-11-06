@@ -195,6 +195,7 @@
     :auth-gate {:init-fn examples.auth-gate/init :depends-on #{:shared}}
     :http-fx {:init-fn examples.http-fx/init :depends-on #{:shared}}
     :http-pull {:init-fn examples.http-pull/init :depends-on #{:shared}}
+    :websocket {:init-fn examples.websocket/init :depends-on #{:shared}}
     :vlist {:init-fn examples.vlist/init :depends-on #{:shared}}
     :vlist-remote {:init-fn examples.vlist-remote/init :depends-on #{:shared}}
     :widget-node {:init-fn examples.widget-node/init :depends-on #{:shared}}
