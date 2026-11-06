@@ -73,6 +73,10 @@
    ;; last item count rendered, used to clamp focus
    ^:mutable item-count]
 
+  IDeref
+  (-deref [this]
+    @state)
+
   ap/IConstruct
   (as-managed [this env]
     (VListNode. this (ap/as-managed (ui-vlist this) env))))

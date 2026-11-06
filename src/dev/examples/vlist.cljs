@@ -45,9 +45,10 @@
 ;; | `(set-item-fn! h f)` | replaces `:item-fn` |
 ;; | `(set-query! h query-fn & args)` | replaces the query |
 ;; | `(focus-row! h idx)` | moves keyboard focus to `idx`, scrolling it into view when mounted. Doesn't move DOM focus. |
+;; | `@h` | the current state: the opts, plus `:focus` with the focused row |
 ;;
-;; These functions are the whole API. The handle's fields are internal to `vlist3`, don't
-;; read them from outside.
+;; That is the whole API. The handle's fields are internal to `vlist3`, don't read them
+;; from outside.
 ;;
 ;; Try it: click into the list (or tab to it while active), then arrow keys, page up and
 ;; down, home and end, enter. Type a filter. "focus row 5000" calls `focus-row!`.
