@@ -26,10 +26,8 @@
 ;; - `lazy/use` suspends until the module is loaded, so put a `suspense` above it
 ;;   ([suspense](/suspense/)).
 ;; - The function gets the args given to `lazy/use` and returns any renderable.
-;; - The node supports another `lazy/use` with the same name, so new args are meant to
-;;   update it in place. Known issue: currently they don't, `LoadableRoot`'s `dom-sync!`
-;;   reads `(.-opts next)` but the args live in `(.-args next)`, so "add a value" calls
-;;   the chart with nil args and it renders no bars.
+;; - Another `lazy/use` with the same name updates the node in place: "add a value"
+;;   calls the function again with the new args.
 
 (defn chart [values]
   (sg/suspense {:fallback (<< [:div#chart-fallback "loading the chart module ..."]) :timeout 0}

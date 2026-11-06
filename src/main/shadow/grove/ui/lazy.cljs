@@ -26,7 +26,7 @@
          (identical? loadable-name (.-loadable-name next))))
 
   (dom-sync! [this ^LoadableInit next]
-    (set! opts (.-opts next))
+    (set! opts (.-args next))
 
     (when (and managed result)
       (let [rendered (apply (result) opts)]

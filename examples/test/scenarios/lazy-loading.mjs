@@ -11,5 +11,5 @@ export default async (t) => {
   const bars = () => t.evaluate(`document.querySelectorAll("#bar-chart rect").length`);
   t.assert(await bars() === 5, "5 bars");
   await t.click({ text: "add a value", selector: "button" });
-  t.knownIssue(await bars() === 0, `new args reach the lazy fn as nil, LoadableRoot.dom-sync! reads (.-opts next) but the field is args (${await bars()} bars)`);
+  await t.waitFor(`document.querySelectorAll("#bar-chart rect").length === 6`, { message: "new args update the chart in place" });
 };
