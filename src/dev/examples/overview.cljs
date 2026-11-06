@@ -164,7 +164,8 @@
 ;; | `[shadow.grove.history :as history]` | `history/init!` ([routing](/routing/)) |
 ;; | `[shadow.grove.http-fx :as http-fx]` | `make-handler`, `trace-state` ([http-fx](/http-fx/)) |
 ;; | `[shadow.grove.http-pull :as pull]` | `pull/setup`, `pull/invalidate!` ([http-pull](/http-pull/)) |
-;; | `[shadow.grove.edn :as edn]`, `[shadow.grove.transit :as transit]` | `init!`, response readers ([http-fx](/http-fx/)) |
+;; | `[shadow.grove.websocket :as ws]` | `ws/init!`, `ws/connect!`, `ws/cast!`, `ws/call!` ([websocket](/websocket/)) |
+;; | `[shadow.grove.edn :as edn]`, `[shadow.grove.transit :as transit]` | `init!`, readers and writers for http-fx and websocket ([http-fx](/http-fx/)) |
 ;; | `[shadow.grove.keyboard :as keyboard]` | `::keyboard/listen`, key events ([keyboard](/keyboard/)) |
 ;; | `[shadow.grove.ui.vlist3 :as vlist3]` | virtual lists ([vlist](/vlist/)) |
 ;; | `[shadow.grove.ui.lazy :as lazy]` | lazy-loaded components ([lazy-loading](/lazy-loading/)) |

@@ -45,15 +45,26 @@ export default async (t) => {
   await t.click({ text: `describe client ${id2}`, selector: "button" });
   await t.waitFor(`${describe(id2)}.innerText.includes("the server doesn't know this client")`, { message: "failed call" });
 
-  // losing the connection
+  // losing the connection, the call in flight gets ::ws/closed instead of a reply
   await t.click({ text: "server closes this socket", selector: "button" });
-  await t.waitText("websocket not connected, reload the page to reconnect");
+  await t.waitText("websocket not connected");
   await t.assertText("not connected");
-  t.assert(await t.evaluate(`[...document.querySelectorAll("[data-demo] button")].every((b) => b.disabled)`), "buttons disabled");
+  await t.waitFor(`document.querySelector("#close-result").innerText.includes("closed")`, { message: "pending call failed" });
+  const enabled = await t.evaluate(`[...document.querySelectorAll("[data-demo] button:not([disabled])")].map((b) => b.innerText)`);
+  t.assert(enabled.length === 1 && enabled[0] === "reconnect", `only reconnect enabled: ${enabled}`);
 
-  // a reload is a new connection
+  // reconnecting is a new connection, all state comes from the new welcome
+  await t.click({ text: "reconnect", selector: "button" });
+  await t.waitText("connected as client");
+  const id3 = await idOf(t);
+  t.assert(id3 !== id, "reconnect: new client id");
+  t.assert(!(await t.exists("#banner")), "banner gone after reconnect");
+  await t.waitFor(`document.querySelector("[data-client='${id3}']")?.innerText.includes("this tab")`, { message: "own client listed after reconnect" });
+  t.assert(!(await t.exists(`[data-client='${id}']`)), "old connection gone from the table");
+
+  // a reload is a new connection too
   await t.goto("/websocket/");
   await t.waitText("connected as client");
-  t.assert(await idOf(t) !== id, "new client id");
+  t.assert(await idOf(t) !== id3, "new client id");
   t.assert(!(await t.exists("#banner")), "banner gone");
 };

@@ -77,7 +77,7 @@
   :node-test
   {:target :node-test
    :output-to "out/node-test/test.js"
-   :ns-regexp "(components|diff-seq|vlist3)-test$"}
+   :ns-regexp "(components|diff-seq|vlist3|websocket)-test$"}
 
   :bench-db
   {:target :node-script

@@ -1,6 +1,6 @@
 (ns examples.websocket
   "A connection that stays open: one websocket for the whole app, the pattern the
-   shadow-cljs UI uses. grove has nothing websocket specific, and it needs nothing. What
+   shadow-cljs UI uses. `shadow.grove.websocket` keeps the socket on the runtime. What
    comes in starts a tx ([external-events](/external-events/)), what goes out is an fx
    ([fx](/fx/)), so tx handlers never touch the socket.
 
@@ -8,11 +8,11 @@
    it is one client, so open it a second time to see messages arrive. For a plain request
    and response use [http-fx](/http-fx/)."
   (:require
-    [clojure.string :as str]
     [examples.common :as c]
     [shadow.grove :as sg :refer (defc deftx << css)]
     [shadow.grove.kv :as kv]
-    [shadow.grove.transit :as transit]))
+    [shadow.grove.transit :as transit]
+    [shadow.grove.websocket :as ws]))
 
 (defonce app (sg/get-runtime :app))
 
@@ -20,13 +20,24 @@
 
 ;; ## one socket
 ;;
-;; `connect!` runs once in `init` and keeps the socket on the runtime, so everything that
-;; has the `rt-ref` can reach it. The listeners have no `tx-env`, they only turn socket
-;; events into txs.
+;; `(ws/init! app :ws opts)` adds a connection to the runtime and registers the fx `:ws`.
+;; The id is yours, as with [http-fx](/http-fx/), and an app with two sockets uses two.
+;; `(ws/connect! app :ws)` opens the socket, it can run later than `init!`, after a login
+;; for example. The options:
 ;;
-;; Every message is a map with an `:op`. They travel as transit, which keeps keywords
-;; intact: `(transit/init! app)` puts `::sg/transit-str` and `::sg/transit-read` on the
-;; runtime. These are the ops of this page, the following chapters go through them:
+;; | option | for |
+;; |---|---|
+;; | `:url` | relative to the page or a full url, `ws://` or `wss://` follows the page |
+;; | `:format` | `:transit` or `:edn`, or `{:read fn :write fn}` for anything else |
+;; | `:on-message` | `(fn [rt-ref msg])` for every message that isn't a reply, [see below](#incoming-messages) |
+;; | `:on-open` | event map, runs when the socket opens |
+;; | `:on-close` | event map, runs when the socket closes or fails to connect, with `:code` and `:reason` |
+;;
+;; `:format` reuses what is on the runtime already. `(transit/init! app)` puts
+;; `::sg/transit-str` and `::sg/transit-read` there, `init!` throws if they are missing.
+;; Transit keeps keywords intact. A message can be any map, `shadow.grove.websocket` only
+;; ever looks at `:call-id`. On this page every message has an `:op`. These are its ops,
+;; the following chapters go through them:
 ;;
 ;; | op | sent by | for |
 ;; |---|---|---|
@@ -41,96 +52,49 @@
 
 (declare on-message)
 
-(defn cast! [rt-ref msg]
-  (let [{::keys [socket] ::sg/keys [transit-str]} @rt-ref]
-    (when (not= :ws/pong (:op msg))
-      (c/log! "send" msg))
-    (.send socket (transit-str msg))))
-
-(defn connect! [rt-ref]
-  (let [socket
-        (js/WebSocket.
-          (str (str/replace js/self.location.protocol "http" "ws")
-               "//" js/self.location.host
-               "/websocket/api/ws"))]
-
-    (swap! rt-ref assoc ::socket socket)
-
-    (.addEventListener socket "message"
-      (fn [e]
-        (on-message rt-ref (.-data e))))
-
-    (.addEventListener socket "close"
-      (fn [e]
-        (sg/run-tx! rt-ref {:e :ws/closed})))))
+(defn setup! []
+  (ws/init! app :ws
+    {:url "/websocket/api/ws"
+     :format :transit
+     :on-message on-message
+     :on-close {:e :ws/closed}}))
 
 ;; ## sending
 ;;
-;; `cast!` above sends one message and expects nothing back. It is a plain fn for code
-;; that isn't a tx. A tx handler doesn't call it, sending is a side effect. It queues the
-;; `:ws-send` fx instead, with a vector of messages sent in order.
+;; A tx handler doesn't touch the socket, sending is a side effect. It queues the fx with
+;; `{:cast msg}`, which sends one message and expects nothing back. One `queue-fx` is one
+;; message, several run in the order they were queued.
 ;;
 ;; "say hello" sends `:ws/say`, and the tx writes nothing. The server pushes `:ws/said` to
 ;; every client, this tab included, and that write is the one that shows the message.
 ;;
-;; A message with a `::result` is a call instead of a cast, [see below](#calls). Only
-;; `:ws-send` knows about it. `::result` never goes over the wire.
-
-(defonce call-id-seq (atom 0))
-
-(defonce calls (atom {}))
-
-(defn call! [rt-ref msg result]
-  (let [call-id (swap! call-id-seq inc)]
-    (swap! calls assoc call-id result)
-    (cast! rt-ref (assoc msg :call-id call-id))))
-
-(defn register-fx! []
-  (sg/reg-fx app :ws-send
-    (fn [fx-env messages]
-      (let [rt-ref (::sg/runtime-ref fx-env)]
-        (doseq [msg messages]
-          (if-some [result (::result msg)]
-            (call! rt-ref (dissoc msg ::result) result)
-            (cast! rt-ref msg)))))))
+;; Code that isn't a tx calls `(ws/cast! rt-ref :ws msg)`, the next chapter does.
+;; [Calls](#calls) work the same way with `{:call msg :on-result ev}` and `ws/call!`.
 
 (deftx say! [text]
   [tx-env ev e]
-  (sg/queue-fx tx-env :ws-send [{:op :ws/say :text text}]))
+  (let [msg {:op :ws/say :text text}]
+    (c/log! "send" msg)
+    (sg/queue-fx tx-env :ws {:cast msg})))
 
 ;; ## incoming messages
 ;;
-;; Every message lands in `on-message`. There are three kinds:
+;; A reply to a call goes to that call, [see below](#calls). Every other message lands in
+;; `:on-message`. Without that option each message starts a tx, and the `:op` is the event
+;; id. Each op gets its own `reg-event` ([transactions](/transactions/)), which is what
+;; the event log in the devtools then shows. One event with a `case` inside would work
+;; too, but every entry in that log would have the same name.
 ;;
-;; - A `:call-id` marks a reply. It runs the event map kept by `call!`, with the reply
-;;   added as `:call-result`.
-;; - `:ws/ping` is answered on the spot. A server can use it to tell a live client from
-;;   a dead one (this one only counts the answers). It is an op because browsers don't
-;;   expose protocol level pings. A tx here would change nothing and fill the event log,
-;;   which is also why the log below doesn't show them.
-;; - Everything else starts a tx, and the `:op` is the event id. Each op gets its own
-;;   `reg-event` ([transactions](/transactions/)), which is what the event log in the
-;;   devtools then shows. One `::message` event with a `case` inside would work too, but
-;;   every entry in that log would have the same name.
+;; This page needs the option for `:ws/ping`, which is answered on the spot. A server can
+;; use it to tell a live client from a dead one (this one only counts the answers). It is
+;; an op because browsers don't expose protocol level pings. A tx here would change
+;; nothing and fill the event log, which is also why the log below doesn't show them.
 
-(defn on-message [rt-ref data]
-  (let [{::sg/keys [transit-read]} @rt-ref
-        {:keys [op call-id] :as msg} (transit-read data)]
-
-    (when (not= :ws/ping op)
-      (c/log! "received" msg))
-
-    (cond
-      call-id
-      (let [result (get @calls call-id)]
-        (swap! calls dissoc call-id)
-        (sg/run-tx! rt-ref (assoc result :call-result msg)))
-
-      (= :ws/ping op)
-      (cast! rt-ref {:op :ws/pong})
-
-      :else
-      (sg/run-tx! rt-ref (assoc msg :e op)))))
+(defn on-message [rt-ref {:keys [op] :as msg}]
+  (if (= :ws/ping op)
+    (ws/cast! rt-ref :ws {:op :ws/pong})
+    (do (c/log! "received" msg)
+        (sg/run-tx! rt-ref (assoc msg :e op)))))
 
 ;; ## welcome and server push
 ;;
@@ -146,13 +110,14 @@
 
 (defn on-welcome [tx-env {:keys [client-id]} e]
   (-> tx-env
-      (assoc-in [:ui :client-id] client-id)
-      (sg/queue-fx :ws-send
-        [{:op :ws/hello :client-info {:tab tab-id}}
-         {:op :ws/request-clients :notify true}])))
+      (update :ui assoc :client-id client-id :connected? true)
+      (sg/queue-fx :ws {:cast {:op :ws/hello :client-info {:tab tab-id}}})
+      (sg/queue-fx :ws {:cast {:op :ws/request-clients :notify true}})))
 
 (defn on-clients [tx-env {:keys [clients]} e]
-  (kv/merge-seq tx-env :client clients))
+  (-> tx-env
+      (kv/remove-all :client)
+      (kv/merge-seq :client clients)))
 
 (defn on-notify [tx-env {:keys [event-op client-id client-info]} e]
   (case event-op
@@ -166,7 +131,7 @@
   (update-in tx-env [:ui :messages] conj [from text]))
 
 (defn on-closed [tx-env ev e]
-  (assoc-in tx-env [:ui :connected?] false))
+  (update tx-env :ui assoc :connected? false :client-id nil))
 
 (defn register-events! []
   (sg/reg-event app :ws/welcome on-welcome)
@@ -190,15 +155,16 @@
 
 ;; ## calls
 ;;
-;; A call is a message that wants a reply. The `::result` of a queued message is an event
-;; map, usually from a deftx. `call!` above gives the message a `:call-id` and keeps the
-;; event map. The server sends the `:call-id` back with its reply, and `on-message` runs
-;; the event map with the reply under `:call-result`.
+;; A call is a message that wants a reply. `{:call msg :on-result ev}` sends `msg` with a
+;; `:call-id` and keeps the event map `ev`, usually from a deftx. The server sends the
+;; `:call-id` back with its reply, which then runs `ev` with the reply under
+;; `:call-result`. The reply doesn't reach `:on-message`.
 ;;
 ;; - Whatever the handler needs from the moment of asking goes into that event map, like
 ;;   the `client-id` here. The server doesn't have to send it back.
 ;; - One handler gets every outcome, the reply's `:op` says which one it is. Here
-;;   describing a disconnected client gets `:ws/client-not-found`.
+;;   describing a disconnected client gets `:ws/client-not-found`. Losing the connection
+;;   is one more outcome, [see below](#losing-the-connection).
 ;; - "describe" also shows the count of `:ws/pong` the server received, which grows
 ;;   without a tx ever running for it.
 
@@ -208,14 +174,14 @@
     (assoc-in tx-env [:client client-id :description]
       (case op
         :ws/client-description (str "pongs: " pongs ", said: " said)
-        :ws/client-not-found "the server doesn't know this client"))))
+        :ws/client-not-found "the server doesn't know this client"
+        ::ws/closed "connection lost, no reply"))))
 
 (deftx describe! [client-id]
   [tx-env ev e]
-  (sg/queue-fx tx-env :ws-send
-    [{:op :ws/describe-client
-      :client-id client-id
-      ::result (describe-result! client-id)}]))
+  (sg/queue-fx tx-env :ws
+    {:call {:op :ws/describe-client :client-id client-id}
+     :on-result (describe-result! client-id)}))
 
 (defc ui-describe [{:keys [client-id description]} idx]
   (bind connected? (sg/kv-lookup :ui :connected?))
@@ -227,30 +193,47 @@
 
 ;; ## losing the connection
 ;;
-;; When the socket closes, `:ws/closed` sets `:connected?`, and the banner reads that like
-;; any other data. `:connected?` starts as `true`: the first connect is assumed to work,
-;; otherwise the banner would flash on every page load until the socket is up.
+;; When the socket closes, `:on-close` runs `:ws/closed`, and the banner reads
+;; `:connected?` like any other data. It starts as `true`: the first connect is assumed to
+;; work, otherwise the banner would flash on every page load until the socket is up.
+;; A connect that fails ends the same way, it just never opened.
 ;;
-;; - Nothing reconnects by itself. A reload opens a new socket, gets a new `:ws/welcome`,
-;;   and its handler requests everything again.
-;; - The `.send` of a closed socket doesn't fail, the message is just lost. The buttons
-;;   here are disabled for that reason. A socket that is still connecting throws instead,
-;;   so they also wait for `:client-id`.
-;; - A call still waiting when the socket closes gets no reply, its result tx never runs.
-;;   Its entry stays in `calls`, which matters if the UI waits for it.
+;; - Nothing reconnects by itself, when and how often to try is up to the app. "reconnect"
+;;   queues `{:connect true}`, `{:close true}` is the other direction. The `:on-close` tx
+;;   could also do it right away, or after a delay with `sg/fx-timeout`
+;;   ([fx](/fx/)).
+;; - A new socket gets a new `:ws/welcome`, and its handler requests everything again.
+;;   The server has a new `:client-id` for it, so `on-clients` replaces the table.
+;; - A message queued while the socket is connecting is sent once it is open.
+;; - A cast without a connection is lost with a warning in the console. The buttons here
+;;   are disabled for that reason.
+;; - A call without a connection doesn't get lost. Every call that is still waiting when
+;;   the socket closes runs its `:on-result` with `{:op ::ws/closed}` as `:call-result`,
+;;   and so does a new one while there is no socket. There is no timeout for a server that
+;;   stays connected and never replies.
+;;
+;; `:ws/close-me` below is such a call. The server closes the socket instead of replying.
+
+(deftx close-me-result! []
+  [tx-env {:keys [call-result]} e]
+  (assoc-in tx-env [:ui :close-result] (:op call-result)))
 
 (deftx close-me! []
   [tx-env ev e]
-  (sg/queue-fx tx-env :ws-send [{:op :ws/close-me}]))
+  (sg/queue-fx tx-env :ws {:call {:op :ws/close-me} :on-result (close-me-result!)}))
+
+(deftx reconnect! []
+  [tx-env ev e]
+  (sg/queue-fx tx-env :ws {:connect true}))
 
 (defn ui-banner []
   (<< [:div#banner {:class (css :p-2 :mb-2 :rounded :bg-red-700 :text-white :font-semibold)}
-       "websocket not connected, reload the page to reconnect"]))
+       "websocket not connected"]))
 
 ;; # page
 
 (defc ui-root []
-  (bind {:keys [connected? client-id messages]} (sg/kv-lookup :ui))
+  (bind {:keys [connected? client-id messages close-result]} (sg/kv-lookup :ui))
   (bind clients (sg/query ?clients))
   (bind ready? (and connected? (some? client-id)))
   (render
@@ -275,15 +258,18 @@
        "losing the connection"
        (<< (when-not connected?
              (ui-banner))
-           [:button {:class c/$btn :disabled (not ready?) :on-click (close-me!)} "server closes this socket"])})))
+           [:div {:class c/$row}
+            [:button {:class c/$btn :disabled (not ready?) :on-click (close-me!)} "server closes this socket"]
+            [:button {:class c/$btn :disabled connected? :on-click (reconnect!)} "reconnect"]
+            [:span#close-result (when close-result (str "call result: " close-result))]])})))
 
 (defn init []
   (sg/add-kv-table app :ui {} {:connected? true :client-id nil :messages []})
   (sg/add-kv-table app :client {:primary-key :client-id} {})
   (transit/init! app)
-  (register-fx!)
+  (setup!)
   (register-events!)
-  (connect! app)
+  (ws/connect! app :ws)
   (c/render! app (ui-root)))
 
 (defn ^:dev/after-load reload! []
