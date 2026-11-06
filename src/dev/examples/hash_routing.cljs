@@ -16,10 +16,7 @@
 ;; - `:ui/href "/two"` writes `href="#/two"`. There is no click interception, a hash link
 ;;   is a normal browser navigation, and history listens to `hashchange` (and `popstate`
 ;;   for back and forward).
-;; - `:ui/redirect!` is meant to change the hash too. Known issue: currently it pushes
-;;   the token as a path, the URL becomes `/two` instead of `/hash-routing/#/two`. The page
-;;   shows the right route, but a reload lands somewhere else. Navigate with links, or set
-;;   `js/location.hash` from an fx, until that is fixed.
+;; - `:ui/redirect!` changes the hash too, the URL becomes `/hash-routing/#/two`.
 
 (defn route! [tx-env {:keys [token tokens]}]
   (c/log! "route!" token)

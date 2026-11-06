@@ -12,5 +12,5 @@ export default async (t) => {
   await t.click({ text: ":ui/redirect! to /two", selector: "button" });
   await t.waitText("page: :two");
   const loc = await t.evaluate("location.pathname + location.hash");
-  t.knownIssue(loc !== "/hash-routing/#/two", `:ui/redirect! with :use-fragment pushes a path instead of the hash (location is ${loc})`);
+  t.assert(loc === "/hash-routing/#/two", `:ui/redirect! writes the hash (location is ${loc})`);
 };

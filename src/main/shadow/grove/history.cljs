@@ -79,7 +79,7 @@
         (js/window.history.pushState
           nil
           (or title js/document.title)
-          (str path-prefix token))
+          (str (when use-fragment "#") path-prefix token))
 
         (let [tokens (str/split (subs token 1) #"/")]
           ;; FIXME: there needs to be cleaner way to start another tx from fx
