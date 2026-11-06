@@ -17,4 +17,3 @@ The [shadow-cljs UI](https://github.com/thheller/shadow-cljs/tree/master/src/mai
 - [shadow-cljs UI](https://github.com/thheller/shadow-cljs/tree/master/src/main/shadow/cljs/ui)
 - [shadow-grove devtools](https://github.com/thheller/shadow-grove/blob/master/src/main/shadow/grove/devtools.cljs)
 - [shadow-stack-mvp](https://github.com/thheller/shadow-stack-mvp) minimum viable project example ([compiled demo](https://code.thheller.com/demos/shadow-stack-mvp/))
-- [grove-todo](https://github.com/thheller/grove-todo) grove implementation of todomvc ([compiled demo](https://code.thheller.com/demos/todomvc/))
