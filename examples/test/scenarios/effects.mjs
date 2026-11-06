@@ -13,7 +13,7 @@ export default async (t) => {
   log = await t.logOf(() => t.click({ text: "b + 1", selector: "button" }));
   t.assert(log.includes("effect :render ran"), ":render runs on every render");
   t.assert(!log.includes("effect :auto ran"), ":auto doesn't run when only b (not used in its body) changed");
-  t.knownIssue(log.includes("effect [a] ran"), "an effect with deps a also runs when only b changed (its body uses b), the previous deps aren't stored");
+  t.assert(!log.includes("effect [a] ran"), "an effect with deps a doesn't run when only b changed, even though its body uses b");
 
   log = await t.logOf(() => t.click({ text: "unmount", selector: "button" }));
   t.assert(log.includes("cleanup :mount (unmount)"), "cleanup on unmount");

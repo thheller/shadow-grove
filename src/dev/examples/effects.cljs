@@ -17,14 +17,11 @@
 ;; | `:mount` | once, after the instance is attached |
 ;; | `:render` | after every render |
 ;; | `:auto` | when binds (or args) used in the body changed |
-;; | any other value | meant as "when that value becomes `not=` to the previous one" |
+;; | any other value | when that value becomes `not=` to the previous one |
 ;;
 ;; Watch the log: `a + 1` runs `:render`, `:auto` and the `a` effect, each after the
-;; cleanup of its previous run. `b + 1` runs only `:render`... and the `a` effect too:
-;; currently the previous deps aren't stored, so an effect with a deps value runs
-;; whenever its slot runs again, which is when `deps` **or any bind its body uses**
-;; changes, like `:auto`. The body here uses `b`. Don't rely on value deps to filter
-;; more than `:auto` does.
+;; cleanup of its previous run. `b + 1` runs only `:render`. The `a` effect stays quiet
+;; even though its body uses `b`: with a deps value only `deps` decides, unlike `:auto`.
 ;;
 ;; Unmounting runs every cleanup.
 
@@ -95,9 +92,8 @@
 ;;
 ;; `(sg/track-change val (fn [env old new prev-result] ...))` runs the fn when `val`
 ;; changes and gives it the previous value and result. `(effect active [env] ...)` runs
-;; after render when `active` changed (or another bind its body uses, see the first
-;; chapter, here there is none). Together: "scroll the active item into view when it
-;; changes", with the read batched through the dom scheduler.
+;; after render when `active` changed. Together: "scroll the active item into view when
+;; it changes", with the read batched through the dom scheduler.
 
 (def items (vec (for [i (range 40)] (str "item " i))))
 

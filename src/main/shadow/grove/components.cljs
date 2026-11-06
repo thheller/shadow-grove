@@ -846,6 +846,7 @@
       ;; else
       (let [prev-deps @ref]
         (when (not= prev-deps deps)
+          (-reset! ref deps)
           (.add-after-render-effect-once component ref callback))
         ))
 
