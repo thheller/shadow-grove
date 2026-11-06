@@ -28,17 +28,6 @@
               {:keys [warning-type] :as warning} (:warnings mod)]
         (prn [:CSS (name warning-type) (dissoc warning :warning-type)])))
 
-    ;; dummy
-    (let [build-state
-          (-> build-state
-              (cb/index-path (io/file "src" "dev") {})
-              (cb/generate '{:ui {:include [dummy*]}})
-              (cb/write-outputs-to (io/file "examples" "dummy" "css")))]
-
-      (doseq [mod (:outputs build-state)
-              {:keys [warning-type] :as warning} (:warnings mod)]
-        (prn [:CSS (name warning-type) (dissoc warning :warning-type)])))
-
     ;; examples, one css file per example so they don't interfere
     ;; examples/public/css/<name>.css from examples.<name> and what it requires
     (let [build-state
