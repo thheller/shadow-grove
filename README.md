@@ -14,6 +14,10 @@ The [shadow-cljs UI](https://github.com/thheller/shadow-cljs/tree/master/src/mai
 
 ## Examples
 
+The documentation is written as examples, one per concept, each a page you can read and try in the browser. See [examples/README.md](examples/README.md) for where to start and how to run them.
+
+Larger projects:
+
 - [shadow-cljs UI](https://github.com/thheller/shadow-cljs/tree/master/src/main/shadow/cljs/ui)
 - [shadow-grove devtools](https://github.com/thheller/shadow-grove/blob/master/src/main/shadow/grove/devtools.cljs)
 - [shadow-stack-mvp](https://github.com/thheller/shadow-stack-mvp) minimum viable project example ([compiled demo](https://code.thheller.com/demos/shadow-stack-mvp/))
