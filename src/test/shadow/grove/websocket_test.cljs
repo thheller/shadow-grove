@@ -67,10 +67,16 @@
     (ws/init! rt-ref :ws (merge {:url "/ws" :format :edn} opts))
     [rt-ref events-ref]))
 
+(defn make-tx-env [rt-ref]
+  {::sg/runtime-ref rt-ref ::sg/fx []})
+
 (defn run-fx!
-  "runs the fx handler the way a queued fx would, without the tick in between"
-  [rt-ref value]
-  ((get-in @rt-ref [::sg/fx-config :ws]) {::sg/runtime-ref rt-ref} value))
+  "runs what a tx queued the way the runtime would, without the tick in between"
+  [{::sg/keys [runtime-ref fx]}]
+  (doseq [[fx-id value] fx]
+    ((get-in @runtime-ref [::sg/fx-config fx-id])
+     {::sg/runtime-ref runtime-ref}
+     value)))
 
 (deftest url-follows-the-page
   (let [[rt-ref] (make-rt ::url {})]
@@ -101,7 +107,7 @@
   (let [[rt-ref] (make-rt ::queue {})]
     (ws/connect! rt-ref :ws)
     (ws/cast! rt-ref :ws {:n 1})
-    (run-fx! rt-ref {:cast {:n 2}})
+    (run-fx! (ws/cast! (make-tx-env rt-ref) :ws {:n 2}))
     (is (= [] (sent (last-socket))))
 
     (open! (last-socket))
@@ -131,7 +137,7 @@
     (ws/connect! rt-ref :ws)
     (open! (last-socket))
 
-    (run-fx! rt-ref {:call {:op :foo} :on-result {:e ::event :ctx 1}})
+    (run-fx! (ws/call! (make-tx-env rt-ref) :ws {:op :foo} {:e ::event :ctx 1}))
     (ws/call! rt-ref :ws {:op :bar} {:e ::event :ctx 2})
     (is (= [(pr-str {:op :foo :call-id 1})
             (pr-str {:op :bar :call-id 2})]
@@ -184,9 +190,9 @@
 
 (deftest connect-only-without-a-socket
   (let [[rt-ref] (make-rt ::connect {})]
-    (run-fx! rt-ref {:connect true})
+    (run-fx! (ws/connect! (make-tx-env rt-ref) :ws))
     (let [socket (last-socket)]
-      (run-fx! rt-ref {:connect true})
+      (run-fx! (ws/connect! (make-tx-env rt-ref) :ws))
       (is (= 1 (count @sockets-ref)))
       (open! socket)
       (ws/connect! rt-ref :ws)
@@ -200,7 +206,7 @@
   (let [[rt-ref events-ref] (make-rt ::closing {:on-close {:e ::event}})
         socket (do (ws/connect! rt-ref :ws) (last-socket))]
     (open! socket)
-    (run-fx! rt-ref {:close true})
+    (run-fx! (ws/close! (make-tx-env rt-ref) :ws))
     (is (= 2 (.-readyState socket)))
     (closed! socket)
     (is (= [{:e ::event :code 1006 :reason "gone"}] @events-ref))))
@@ -218,9 +224,39 @@
     (receive! socket (pr-str {:call-id 1}))
     (is (= 1 (count @events-ref)))))
 
-(deftest bad-fx-value
-  (let [[rt-ref] (make-rt ::bad-fx {})]
-    (is (thrown-with-msg? js/Error #"websocket fx needs" (run-fx! rt-ref {:send {:op :foo}})))))
+(deftest tx-env-only-queues
+  (let [[rt-ref] (make-rt ::in-tx {})]
+    (ws/connect! rt-ref :ws)
+    (open! (last-socket))
+
+    (let [tx-env
+          (-> (make-tx-env rt-ref)
+              (assoc :kept true)
+              (ws/cast! :ws {:n 1})
+              (ws/call! :ws {:n 2} {:e ::event})
+              (ws/close! :ws)
+              (ws/connect! :ws))]
+
+      ;; threads, and nothing happened yet
+      (is (:kept tx-env))
+      (is (= 4 (count (::sg/fx tx-env))))
+      (is (= [] (sent (last-socket))))
+      (is (= 1 (.-readyState (last-socket))))
+
+      ;; runs in the order queued
+      (run-fx! tx-env)
+      (is (= [(pr-str {:n 1}) (pr-str {:n 2 :call-id 1})] (sent (last-socket))))
+      (is (= 2 (.-readyState (last-socket)))))))
+
+(deftest fx-env-runs-directly
+  (let [[rt-ref] (make-rt ::in-fx {})]
+    (ws/connect! rt-ref :ws)
+    (open! (last-socket))
+    (ws/cast! (assoc (make-tx-env rt-ref) :transact! identity) :ws {:n 1})
+    (is (= ["{:n 1}"] (sent (last-socket))))))
+
+(deftest invalid-env
+  (is (thrown-with-msg? js/Error #"invalid app-id" (ws/cast! {:not "an env"} :ws {}))))
 
 (deftest unknown-id
   (is (thrown-with-msg? js/Error #"unknown websocket" (ws/cast! (sg/get-runtime ::unknown) :nope {}))))

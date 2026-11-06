@@ -20,8 +20,8 @@
 
 ;; ## one socket
 ;;
-;; `(ws/init! app :ws opts)` adds a connection to the runtime and registers the fx `:ws`.
-;; The id is yours, as with [http-fx](/http-fx/), and an app with two sockets uses two.
+;; `(ws/init! app :ws opts)` adds a connection to the runtime. The id is yours, and an app
+;; with two sockets uses two.
 ;; `(ws/connect! app :ws)` opens the socket, it can run later than `init!`, after a login
 ;; for example. The options:
 ;;
@@ -61,21 +61,24 @@
 
 ;; ## sending
 ;;
-;; A tx handler doesn't touch the socket, sending is a side effect. It queues the fx with
-;; `{:cast msg}`, which sends one message and expects nothing back. One `queue-fx` is one
-;; message, several run in the order they were queued.
+;; `ws/cast!` sends one message and expects nothing back. Its first argument is a `tx-env`
+;; or a `rt-ref`, and that decides when it happens:
+;;
+;; - With a `tx-env` it queues an fx ([fx](/fx/)) and returns the `tx-env`, so it threads
+;;   like `sg/queue-fx`. Sending is a side effect, the message goes out after the tx
+;;   committed. Several go out in the order they were queued.
+;; - With a `rt-ref` it sends right away, for code that isn't a tx. The next chapter does.
+;;
+;; `ws/call!`, `ws/connect!` and `ws/close!` work the same way.
 ;;
 ;; "say hello" sends `:ws/say`, and the tx writes nothing. The server pushes `:ws/said` to
 ;; every client, this tab included, and that write is the one that shows the message.
-;;
-;; Code that isn't a tx calls `(ws/cast! rt-ref :ws msg)`, the next chapter does.
-;; [Calls](#calls) work the same way with `{:call msg :on-result ev}` and `ws/call!`.
 
 (deftx say! [text]
   [tx-env ev e]
   (let [msg {:op :ws/say :text text}]
     (c/log! "send" msg)
-    (sg/queue-fx tx-env :ws {:cast msg})))
+    (ws/cast! tx-env :ws msg)))
 
 ;; ## incoming messages
 ;;
@@ -111,8 +114,8 @@
 (defn on-welcome [tx-env {:keys [client-id]} e]
   (-> tx-env
       (update :ui assoc :client-id client-id :connected? true)
-      (sg/queue-fx :ws {:cast {:op :ws/hello :client-info {:tab tab-id}}})
-      (sg/queue-fx :ws {:cast {:op :ws/request-clients :notify true}})))
+      (ws/cast! :ws {:op :ws/hello :client-info {:tab tab-id}})
+      (ws/cast! :ws {:op :ws/request-clients :notify true})))
 
 (defn on-clients [tx-env {:keys [clients]} e]
   (-> tx-env
@@ -155,8 +158,8 @@
 
 ;; ## calls
 ;;
-;; A call is a message that wants a reply. `{:call msg :on-result ev}` sends `msg` with a
-;; `:call-id` and keeps the event map `ev`, usually from a deftx. The server sends the
+;; A call is a message that wants a reply. `(ws/call! tx-env :ws msg ev)` sends `msg` with
+;; a `:call-id` and keeps the event map `ev`, usually from a deftx. The server sends the
 ;; `:call-id` back with its reply, which then runs `ev` with the reply under
 ;; `:call-result`. The reply doesn't reach `:on-message`.
 ;;
@@ -179,9 +182,9 @@
 
 (deftx describe! [client-id]
   [tx-env ev e]
-  (sg/queue-fx tx-env :ws
-    {:call {:op :ws/describe-client :client-id client-id}
-     :on-result (describe-result! client-id)}))
+  (ws/call! tx-env :ws
+    {:op :ws/describe-client :client-id client-id}
+    (describe-result! client-id)))
 
 (defc ui-describe [{:keys [client-id description]} idx]
   (bind connected? (sg/kv-lookup :ui :connected?))
@@ -199,9 +202,8 @@
 ;; A connect that fails ends the same way, it just never opened.
 ;;
 ;; - Nothing reconnects by itself, when and how often to try is up to the app. "reconnect"
-;;   queues `{:connect true}`, `{:close true}` is the other direction. The `:on-close` tx
-;;   could also do it right away, or after a delay with `sg/fx-timeout`
-;;   ([fx](/fx/)).
+;;   calls `ws/connect!` from a tx, `ws/close!` is the other direction. The `:on-close` tx
+;;   could also do it right away, or after a delay with `sg/fx-timeout` ([fx](/fx/)).
 ;; - A new socket gets a new `:ws/welcome`, and its handler requests everything again.
 ;;   The server has a new `:client-id` for it, so `on-clients` replaces the table.
 ;; - A message queued while the socket is connecting is sent once it is open.
@@ -220,11 +222,11 @@
 
 (deftx close-me! []
   [tx-env ev e]
-  (sg/queue-fx tx-env :ws {:call {:op :ws/close-me} :on-result (close-me-result!)}))
+  (ws/call! tx-env :ws {:op :ws/close-me} (close-me-result!)))
 
 (deftx reconnect! []
   [tx-env ev e]
-  (sg/queue-fx tx-env :ws {:connect true}))
+  (ws/connect! tx-env :ws))
 
 (defn ui-banner []
   (<< [:div#banner {:class (css :p-2 :mb-2 :rounded :bg-red-700 :text-white :font-semibold)}

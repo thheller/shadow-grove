@@ -6,20 +6,33 @@
    (ws/init! rt-ref :ws {:url \"/api/ws\" :format :transit})
    (ws/connect! rt-ref :ws)
 
-   the id is yours, it is the fx id and names this connection. in a tx handler:
+   the id is yours, it names this connection. cast!, call!, connect! and close! all take a
+   tx-env or a rt-ref as their first arg. a tx-env queues an fx and returns the tx-env, so
+   they thread like sg/queue-fx. anything else runs right away.
 
-   (sg/queue-fx tx-env :ws {:cast {:op :hello}})
-   (sg/queue-fx tx-env :ws {:call {:op :load} :on-result (loaded!)})
-   (sg/queue-fx tx-env :ws {:connect true})
-   (sg/queue-fx tx-env :ws {:close true})
+   (-> tx-env
+       (ws/cast! :ws {:op :hello})
+       (ws/call! :ws {:op :load} (loaded!)))
 
-   code that isn't a tx calls cast!, call!, connect! and close! with the rt-ref instead.
+   (ws/cast! rt-ref :ws {:op :pong})
 
    messages are maps. the only key this ns adds or looks at is :call-id, the rest is up to
    the app and its server. a server answers a call by sending the :call-id back in its reply."
   (:require
     [clojure.string :as str]
     [shadow.grove :as sg]))
+
+;; an fx-env is the tx-env of a finished tx with :transact! added. queueing on it would go nowhere
+(defn- tx-env? [env-or-ref]
+  (and (map? env-or-ref)
+       (some? (::sg/fx env-or-ref))
+       (not (:transact! env-or-ref))))
+
+(defn- get-rt-ref [env-or-ref]
+  (sg/get-runtime
+    (if (map? env-or-ref)
+      (::sg/runtime-ref env-or-ref)
+      env-or-ref)))
 
 ;; taking the read and write fns from the runtime, so this ns doesn't depend on either
 ;; cljs.reader or transit. only the app requires the one it actually uses
@@ -74,32 +87,37 @@
       false)))
 
 (defn cast!
-  "sends msg and expects nothing back. tx handlers queue {:cast msg} instead.
+  "sends msg and expects nothing back. takes a tx-env or rt-ref, see the ns docstring.
 
    sent once the socket is open if it is still connecting.
    lost with a warning if there is no connection."
-  [rt-ref ws-id msg]
-  (when-not (send! rt-ref ws-id msg)
-    (js/console.warn "websocket not connected, message lost" ws-id msg)))
+  [env-or-ref ws-id msg]
+  (if (tx-env? env-or-ref)
+    (sg/queue-fx env-or-ref ::fx [:cast ws-id msg])
+    (when-not (send! (get-rt-ref env-or-ref) ws-id msg)
+      (js/console.warn "websocket not connected, message lost" ws-id msg))))
 
 (defn call!
   "sends msg with a :call-id. runs the event map on-result as a tx when the reply with that
-   :call-id arrives, the reply is added to it as :call-result. tx handlers queue
-   {:call msg :on-result on-result} instead.
+   :call-id arrives, the reply is added to it as :call-result. takes a tx-env or rt-ref, see
+   the ns docstring.
 
    without a connection, or when it closes before the reply, on-result still runs, with
    {:op ::closed} as :call-result. there is no timeout, a call stays waiting for as long as
    the connection is open and the server doesn't reply."
-  [rt-ref ws-id msg on-result]
+  [env-or-ref ws-id msg on-result]
   {:pre [(map? msg)
          (map? on-result)
          (keyword? (:e on-result))]}
-  (let [call-id (-> (swap-conn! rt-ref ws-id update :call-id-seq inc)
-                    (get-in [::connections ws-id :call-id-seq]))]
+  (if (tx-env? env-or-ref)
+    (sg/queue-fx env-or-ref ::fx [:call ws-id msg on-result])
+    (let [rt-ref (get-rt-ref env-or-ref)
+          call-id (-> (swap-conn! rt-ref ws-id update :call-id-seq inc)
+                      (get-in [::connections ws-id :call-id-seq]))]
 
-    (if (send! rt-ref ws-id (assoc msg :call-id call-id))
-      (swap-conn! rt-ref ws-id assoc-in [:calls call-id] on-result)
-      (call-result! rt-ref on-result {:op ::closed}))))
+      (if (send! rt-ref ws-id (assoc msg :call-id call-id))
+        (swap-conn! rt-ref ws-id assoc-in [:calls call-id] on-result)
+        (call-result! rt-ref on-result {:op ::closed})))))
 
 (defn- handle-open [rt-ref ws-id]
   (let [{:keys [^js socket queue on-open]} (get-conn rt-ref ws-id)]
@@ -136,38 +154,52 @@
 
 (defn connect!
   "opens the socket. does nothing if there is one already, connected or not. to connect again
-   use :on-close to tell when the previous socket is gone. tx handlers queue {:connect true}."
-  [rt-ref ws-id]
-  (let [{:keys [url socket]} (get-conn rt-ref ws-id)]
-    (when-not socket
-      (let [^js socket (js/WebSocket. (ws-url url))]
-        (swap-conn! rt-ref ws-id assoc :socket socket)
+   use :on-close to tell when the previous socket is gone. takes a tx-env or rt-ref, see the
+   ns docstring."
+  [env-or-ref ws-id]
+  (if (tx-env? env-or-ref)
+    (sg/queue-fx env-or-ref ::fx [:connect ws-id])
+    (let [rt-ref (get-rt-ref env-or-ref)
+          {:keys [url socket]} (get-conn rt-ref ws-id)]
+      (when-not socket
+        (let [^js socket (js/WebSocket. (ws-url url))]
+          (swap-conn! rt-ref ws-id assoc :socket socket)
 
-        (.addEventListener socket "open"
-          (fn [e]
-            (handle-open rt-ref ws-id)))
+          (.addEventListener socket "open"
+            (fn [e]
+              (handle-open rt-ref ws-id)))
 
-        (.addEventListener socket "message"
-          (fn [^js e]
-            (handle-message rt-ref ws-id (.-data e))))
+          (.addEventListener socket "message"
+            (fn [^js e]
+              (handle-message rt-ref ws-id (.-data e))))
 
-        (.addEventListener socket "close"
-          (fn [e]
-            (handle-close rt-ref ws-id e)))))))
+          (.addEventListener socket "close"
+            (fn [e]
+              (handle-close rt-ref ws-id e))))))))
 
 (defn close!
-  "closes the socket, :on-close runs like for any other close. tx handlers queue {:close true}."
-  [rt-ref ws-id]
-  (let [{:keys [^js socket]} (get-conn rt-ref ws-id)]
-    (when socket
-      (.close socket))))
+  "closes the socket, :on-close runs like for any other close. takes a tx-env or rt-ref, see
+   the ns docstring."
+  [env-or-ref ws-id]
+  (if (tx-env? env-or-ref)
+    (sg/queue-fx env-or-ref ::fx [:close ws-id])
+    (let [{:keys [^js socket]} (get-conn (get-rt-ref env-or-ref) ws-id)]
+      (when socket
+        (.close socket)))))
+
+(defn- fx-handler [{::sg/keys [runtime-ref]} [action ws-id msg on-result]]
+  (case action
+    :cast (cast! runtime-ref ws-id msg)
+    :call (call! runtime-ref ws-id msg on-result)
+    :connect (connect! runtime-ref ws-id)
+    :close (close! runtime-ref ws-id)))
 
 (defn- run-op-tx! [rt-ref {:keys [op] :as msg}]
   (sg/run-tx! rt-ref (assoc msg :e op)))
 
 (defn init!
-  "adds the connection ws-id to the runtime and registers the fx of the same id. connect!
-   opens the socket. call this during init, after transit/init! or edn/init!.
+  "adds the connection ws-id to the runtime. connect! opens the socket. call this during
+   init, after transit/init! or edn/init!.
 
    opts:
    :url         relative to the page, or a full url
@@ -196,13 +228,6 @@
            :write write
            :on-message (or on-message run-op-tx!)})))
 
-    (sg/reg-fx rt-ref ws-id
-      (fn ws-fx-handler [fx-env {:keys [cast call on-result connect close] :as value}]
-        (cond
-          cast (cast! rt-ref ws-id cast)
-          call (call! rt-ref ws-id call on-result)
-          connect (connect! rt-ref ws-id)
-          close (close! rt-ref ws-id)
-          :else (throw (ex-info "websocket fx needs :cast, :call, :connect or :close" {:value value})))))
+    (sg/reg-fx rt-ref ::fx fx-handler)
 
     rt-ref))
