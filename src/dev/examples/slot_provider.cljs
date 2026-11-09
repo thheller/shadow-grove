@@ -25,9 +25,6 @@
 ;;   owns, made with `(rt/slot-ref node idx)`: that is what `rt/claim-slot!` hands the
 ;;   helper.
 ;;   `-invalidate-slot!` is called when tracked data changed: run the read again.
-;;   `-provide-new-value!` only matters for helpers that use it (`vgrid` does). The
-;;   ref implements `gp/IInvalidateSlot` (`invalidate!`, `provide-new-value!`), which is
-;;   what claiming helpers call, and forwards to these.
 ;; - One ref means one claim per run, the rule of a `bind`. The read here does one
 ;;   `kv-lookup`. Several values come from one query.
 ;; - `(rt/run-slot node idx env prev-value f)` calls `f` with the slot bound. It returns
@@ -56,7 +53,6 @@
   gp/IProvideSlot
   (-init-slot-ref [this idx] slot-ref)
   (-invalidate-slot! [this idx] (.run-read! this))
-  (-provide-new-value! [this idx v])
 
   ap/IManaged
   (supports? [this next] (instance? ReadSeed next))
