@@ -355,12 +355,29 @@
     @imports-ref
     ))
 
-(defn- merge-imports [env imports]
-  (reduce
-    (fn [env [kv-table pkey item]]
-      (update-in env [kv-table pkey] merge item))
-    env
-    imports))
+;; a new item is stored as is, (merge nil item) would copy it into a plain map
+(defn- merge-item [prev item]
+  (if (nil? prev) item (merge prev item)))
+
+;; imports for one table usually arrive in a row, so the table is only put back
+;; into env when the table changes, instead of once per item
+(defn- merge-imports [env ^not-native imports]
+  (let [n (-count imports)]
+    (loop [env env
+           i 0
+           cur-table nil
+           cur-kv nil]
+      (if (>= i n)
+        (if (nil? cur-kv) env (assoc env cur-table cur-kv))
+        (let [^not-native imp (-nth imports i)
+              kv-table (-nth imp 0)
+              pkey (-nth imp 1)
+              item (-nth imp 2)]
+          (if (and (some? cur-kv) (keyword-identical? kv-table cur-table))
+            (recur env (inc i) cur-table (assoc cur-kv pkey (merge-item (get cur-kv pkey) item)))
+            (let [env (if (nil? cur-kv) env (assoc env cur-table cur-kv))
+                  kv (get env kv-table)]
+              (recur env (inc i) kv-table (assoc kv pkey (merge-item (get kv pkey) item))))))))))
 
 (defn merge-seq
   ([env kv-table coll]
@@ -382,9 +399,7 @@
              (throw (ex-info "no primary key defined for table" {:kv-table kv-table})))
 
          coll-keys
-         (->> coll
-              (map primary-key-fn)
-              (into []))
+         (mapv primary-key-fn coll)
 
          imports
          (normalize env kv-table coll)]

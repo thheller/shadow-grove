@@ -7,7 +7,18 @@
     [shadow.grove.components :as comp]
     ))
 
-(defrecord IndexKey [kv-table key])
+;; not a defrecord, a record hash walks a seq of map entries. it is cached per instance
+;; but these are created fresh per key on every lookup and tx, so the cache never pays off.
+;; caching this hash made no measurable difference either, the parts are cheap or cached
+(deftype IndexKey [kv-table key]
+  IHash
+  (-hash [_]
+    (hash-combine (hash kv-table) (hash key)))
+  IEquiv
+  (-equiv [_ ^IndexKey other]
+    (and (instance? IndexKey other)
+         (= kv-table (.-kv-table other))
+         (= key (.-key other)))))
 
 ;; {query-id callback} using js/Map for speed, since query-id is always just a number
 (defonce active-queries-map (js/Map.))
