@@ -203,18 +203,20 @@
 
     ;; refs are created before root, so they could be provided to children env later
     (when-some [ref-fns (.-refs config)]
-      (set! ref-values (js/Array. (alength ref-fns)))
-      (dotimes [idx (alength ref-fns)]
-        ;; init fn may access args and previously created refs via this
-        (let [init ((aget ref-fns idx) this)
-              val (if (satisfies? gp/IRefInit init)
-                    (gp/-ref-init init component-env)
-                    init)]
-          (aset ref-values idx val)
-          (when (satisfies? gp/IRefRender val)
-            (when (nil? ref-render)
-              (set! ref-render (array)))
-            (.push ref-render val)))))
+      (set! ref-values
+        (.map ref-fns
+          (fn [^function ref-fn]
+            (let [init (ref-fn this)
+                  val (if (satisfies? gp/IRefInit init)
+                        (gp/-ref-init init component-env)
+                        init)]
+
+              (when (satisfies? gp/IRefRender val)
+                (when (nil? ref-render)
+                  (set! ref-render (array)))
+                (.push ref-render val))
+
+              val)))))
 
     (set! root (common/managed-root component-env))
     ;; marking everything dirty to ensure all slots run
