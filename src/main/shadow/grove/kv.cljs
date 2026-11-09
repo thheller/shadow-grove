@@ -230,7 +230,33 @@
   Object
   (check-completed! [this]
     (when @completed-ref
-      (throw (ex-info "transaction concluded, don't hold on to db while in tx" {})))))
+      (throw (ex-info "transaction concluded, don't hold on to db while in tx" {}))))
+
+  ;; same result as a dissoc for every key, without a new map and instance per key
+  (dissoc-all [this]
+    (.check-completed! this)
+    (if (zero? (-count data))
+      this
+      (let [none-new? (zero? (count keys-new))
+
+            ;; keys created in this tx leave no trace, same as in -dissoc
+            removed
+            (reduce-kv
+              (fn [removed key _]
+                (if (or none-new? (not (contains? keys-new key)))
+                  (conj! removed key)
+                  removed))
+              keys-removed
+              data)]
+
+        (TransactedData.
+          data-before
+          (empty data)
+          ;; all new and updated keys are in data, so none are left
+          (transient #{})
+          (transient #{})
+          removed
+          completed-ref)))))
 
 (defn transacted [data]
   {:pre [(map? data)]}
@@ -290,8 +316,10 @@
 (defn remove-all [env kv-table]
   (update env kv-table
     (fn [kv]
-      (reduce dissoc kv (keys kv))
-      )))
+      (if (instance? TransactedData kv)
+        (.dissoc-all ^TransactedData kv)
+        ;; not in a tx, e.g. sg/kv-init
+        (reduce dissoc kv (keys kv))))))
 
 (defn- normalize* [imports-ref env kv-table item]
   (let [kv
