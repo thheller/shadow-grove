@@ -339,22 +339,9 @@
 
                           ;; user turned transacted table into a map, acts as an override
                           ;; where something may just want to empty out a table or replace a full table with remote data
-                          ;; merge it while
+                          ;; the map becomes the table, diffed against the old one for tx-info
                           (map? kv)
-                          (let [^not-native kv-actual (-lookup tx-before kv-table)
-                                sentinel (js-obj)]
-                            (reduce
-                              (fn [^not-native new-kv k]
-                                (let [new-v (-lookup kv k sentinel)]
-                                  (if (identical? new-v sentinel)
-                                    ;; entry was removed
-                                    (-dissoc new-kv k)
-                                    ;; otherwise just assoc, TransactedData checks if equal already
-                                    (-assoc new-kv k new-v)
-                                    )))
-                              kv-actual
-                              ;; need to process union of all keys, otherwise might miss new ones
-                              (into (set (keys kv-actual)) (keys kv))))
+                          (kv/transacted-replace (-lookup tx-before kv-table) kv)
 
                           :else
                           (throw (js/Error. (str "during transaction the " kv-table " was replaced with an invalid return value: " (type kv)))))

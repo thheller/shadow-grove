@@ -256,7 +256,62 @@
           (transient #{})
           (transient #{})
           removed
-          completed-ref)))))
+          completed-ref))))
+
+  ;; next is the whole table after the tx. only its difference to data-before matters,
+  ;; not what was done to this instance. tracks keys like an assoc for every entry
+  ;; and a dissoc for every missing key would, without touching a map per key
+  (replace-all [this ^not-native next]
+    (.check-completed! this)
+    (let [^not-native before data-before
+          config (::config (-meta before))
+          validate-fn (:validate-fn config)
+          nil-allowed? (:allow-nil-key? config)
+
+          ;; transient sets are edited in place, conj! always returns the same instance
+          new (transient #{})
+          updated (transient #{})
+          removed (transient #{})]
+
+      (-kv-reduce
+        next
+        (fn [_ key value]
+          (let [prev (-lookup before key NOT-FOUND)]
+            (when-not (identical? prev value)
+              (when (and (nil? key) (not nil-allowed?))
+                (throw (ex-info "nil key not allowed" {:value value})))
+
+              (when-not (nil? validate-fn)
+                (validate-fn before key value))
+
+              (if (identical? NOT-FOUND prev)
+                (conj! new key)
+                (conj! updated key))))
+          nil)
+        nil)
+
+      ;; entries of next that are not new were in before
+      ;; if that covers all of before nothing was removed and the scan can be skipped
+      (when-not (== (-count before) (- (-count next) (count new)))
+        (-kv-reduce
+          before
+          (fn [_ key _]
+            (when-not (-contains-key? next key)
+              (conj! removed key))
+            nil)
+          nil))
+
+      (TransactedData.
+        before
+        (if (and (zero? (count new)) (zero? (count updated)) (zero? (count removed)))
+          ;; nothing changed, keeping the instance signals that to tx-commit! users
+          before
+          ;; table config lives in meta
+          (-with-meta next (-meta before)))
+        new
+        updated
+        removed
+        completed-ref))))
 
 (defn transacted [data]
   {:pre [(map? data)]}
@@ -267,6 +322,14 @@
     (transient #{})
     (transient #{})
     (volatile! false)))
+
+(defn transacted-replace
+  "tx-table is a table from the tx, new-table the plain map a handler put in its place.
+   returns the table as if new-table had been written entry by entry"
+  [^TransactedData tx-table new-table]
+  {:pre [(instance? TransactedData tx-table)
+         (map? new-table)]}
+  (.replace-all tx-table new-table))
 
 (defn get-kv! [env kv-table]
   (let [kv (get env kv-table)]
