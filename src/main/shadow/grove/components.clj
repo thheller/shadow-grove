@@ -259,8 +259,8 @@
 
 (defn make-check-fn
   "generates the fn checking the destructured values of a slot.
-   called with the value the slot produced, either via running or gp/provide-new-value!
-   must be generated after all slots are analyzed, since it needs to know who uses which values"
+   called with the value the slot produced. must be generated after all slots are analyzed,
+   since it needs to know who uses which values"
   [{:keys [comp-sym slots] :as state} render-deps own-idx {:keys [form or-let own-sym cells]}]
   (let [val-sym
         (gensym "val")

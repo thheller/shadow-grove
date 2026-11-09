@@ -42,9 +42,6 @@
   (invalidate! [this]
     (gp/-invalidate-slot! provider idx))
 
-  (provide-new-value! [this new-value]
-    (gp/-provide-new-value! provider idx new-value))
-
   cljs.core/IDeref
   (-deref [this]
     state)

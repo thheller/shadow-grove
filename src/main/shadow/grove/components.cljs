@@ -425,25 +425,6 @@
 
     js/undefined)
 
-  (-provide-new-value! [this idx new]
-    (when-not destroyed?
-      (let [dirty-before dirty-slots
-            render-before needs-render?]
-
-        ;; same check as if the slot had run and produced this value
-        ;; so destructured values are handled properly
-        (.check-slot-value! this idx (-> (.-slots config) (aget idx)) new)
-
-        (when-not (and (identical? dirty-before dirty-slots)
-                       (identical? render-before needs-render?))
-          (when (pos? dirty-slots)
-            (set! current-idx (find-first-set-bit-idx dirty-slots)))
-
-          (when needs-render?
-            (set! current-idx (js/Math.min current-idx (alength (.-slots config)))))
-
-          (.schedule! this ::slot-provided-new-value!)))))
-
   ;; FIXME: should have an easier way to tell shadow-cljs not to create externs for these
   Object
   (get-slot-value [this idx]
