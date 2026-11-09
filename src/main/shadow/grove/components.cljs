@@ -178,13 +178,14 @@
         (.. parent -child-components (add this))))
 
     (set! component-env
-      (-> parent-env
-          (update ::depth safe-inc)
-          (assoc ::parent (::component parent-env)
-                 ::ap/dom-event-handler this
-                 ::component this
-                 ::event-target this
-                 ::sg/scheduler this)))
+      (-> (transient parent-env)
+          (assoc! ::depth (safe-inc (::depth parent-env)))
+          (assoc! ::parent (::component parent-env))
+          (assoc! ::ap/dom-event-handler this)
+          (assoc! ::component this)
+          (assoc! ::event-target this)
+          (assoc! ::sg/scheduler this)
+          (persistent!)))
 
     ;; marks component boundaries in dev mode for easier inspect
     (when DEBUG
