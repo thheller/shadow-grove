@@ -213,7 +213,9 @@
 (deftest test-arg-rest
   (is (= [1 [2 3]] (seed-args (ui-arg-rest 1 2 3))))
   (is (= [1 nil] (seed-args (ui-arg-rest 1))))
-  (is (thrown? js/Error (ui-arg-rest))))
+  ;; arity check is an assert, elided in release builds
+  (when ^boolean js/goog.DEBUG
+    (is (thrown? js/Error (ui-arg-rest)))))
 
 (defc ui-arg-stable [{:keys [^:stable id label]} log-ref]
   (effect :mount [env]

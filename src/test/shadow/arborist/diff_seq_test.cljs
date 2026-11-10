@@ -341,7 +341,9 @@
           (is (= "9" (.getAttribute m9 "data-k")))))))))
 
 (deftest keyed-duplicate-keys-throw-in-dev
-  (is (thrown? js/Error (coll/keyed-seq [(kv 1 "a") (kv 1 "b")] :id keyed-item))))
+  ;; the check is dev only, release builds skip it
+  (when ^boolean js/goog.DEBUG
+    (is (thrown? js/Error (coll/keyed-seq [(kv 1 "a") (kv 1 "b")] :id keyed-item)))))
 
 (deftest interpreted-hiccup-seq-with-dom-key
   ;; lazy seqs of hiccup with :dom/key construct a keyed-seq
