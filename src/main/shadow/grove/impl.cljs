@@ -7,238 +7,232 @@
     [shadow.grove.components :as comp]
     ))
 
-;; not a defrecord, a record hash walks a seq of map entries. it is cached per instance
-;; but these are created fresh per key on every lookup and tx, so the cache never pays off.
-;; caching this hash made no measurable difference either, the parts are cheap or cached
-(deftype IndexKey [kv-table key]
-  IHash
-  (-hash [_]
-    (hash-combine (hash kv-table) (hash key)))
-  IEquiv
-  (-equiv [_ ^IndexKey other]
-    (and (instance? IndexKey other)
-         (= kv-table (.-kv-table other))
-         (= key (.-key other)))))
-
-;; {query-id callback} using js/Map for speed, since query-id is always just a number
-(defonce active-queries-map (js/Map.))
 ;; {[query-fn args] <Query>}
 (defonce active-queries-ref (atom {}))
-;; {IndexKey js/Set-of-query-id} keeping track of which key is used by which query
-(defonce key-index-ref (volatile! {}))
-
-(defn js-set-union [a b]
-  (.forEach b (fn [x] (.add a x))))
-
-(defn set-conj [x y]
-  (if (nil? x)
-    #{y}
-    (conj x y)))
 
 (set! *warn-on-infer* false)
 
-(def ^function
-  work-queue-task!
-  (if (and (exists? js/window) js/window.requestIdleCallback)
-    (fn [work-task]
-      (js/window.requestIdleCallback work-task))
-    (fn [^function work-task]
-      ;; microtask or goog.async.run don't do what we want
-      ;; we want the browser to prioritise rendering stuff
-      ;; the other work can be delayed until idle. setTimeout seems closest.
-      (js/setTimeout
-        (fn []
-          (let [start (js/Date.now)
-                fake-deadline
-                #js {:timeRemaining
-                     #(< 16 (- (js/Date.now) start))}]
-            (work-task fake-deadline)))
-        ;; usually 4 or so minimum but that is good enough for our purposes
-        0))))
+;; mutable map with cljs key equality, for the read index below.
+;; numbers and strings are their own js/Map key. keywords are not identical per instance,
+;; so they are stored by fqn in a second js/Map, kw-keys has the keyword for the fqn.
+;; none of these need a hash. everything else (vectors from composite primary keys,
+;; uuids, nil, ...) is rare and goes into a persistent map.
+(deftype KeyMap [^js prims ^js kws ^js kw-keys ^:mutable ^not-native others])
 
-(def ^function
-  work-queue-cancel!
-  (if (and (exists? js/window) js/window.cancelIdleCallback)
-    (fn [id]
-      (js/window.cancelIdleCallback id))
-    (fn [id]
-      (js/clearTimeout id))))
+(defn- key-map []
+  (KeyMap. (js/Map.) (js/Map.) (js/Map.) {}))
 
-(defonce index-queue (js/Array.))
+(defn- km-get [^KeyMap m key]
+  (cond
+    (or (number? key) (string? key))
+    (.get (.-prims m) key)
+    (keyword? key)
+    (.get (.-kws m) (.-fqn ^Keyword key))
+    :else
+    (-lookup (.-others m) key)))
 
-(defonce ^boolean work-queued? false)
-(defonce work-timeout nil)
-
-(defn index-work-all! []
-  (when work-queued?
-    (when work-timeout
-      (work-queue-cancel! work-timeout)
-      (set! work-timeout nil))
-
-    ;; work until all work is done, immediately work off new tasks
-    (loop []
-      (let [^function task (.shift index-queue)]
-        (when ^boolean task
-          (task)
-          (recur))))
-
-    (set! work-queued? false)))
-
-(defn index-work-some! [^js deadline]
-  (loop []
-    (when (pos? (.timeRemaining deadline))
-      (let [^function task (.shift index-queue)]
-        (when ^boolean task
-          (task)
-          (recur)))))
-
-  (if (pos? (alength index-queue))
-    (do (set! work-timeout (work-queue-task! index-work-some!))
-        (set! work-queued? true))
-    (do (set! work-timeout nil)
-        (set! work-queued? false))))
-
-(defn index-queue-some! []
-  (when-not work-queued?
-    (set! work-timeout (work-queue-task! index-work-some!))
-    (set! work-queued? true)))
-
-(defn get-key-index-set [key]
-  (or (-lookup @key-index-ref key)
-      (let [s (js/Set.)]
-        (vswap! key-index-ref assoc key s)
-        s)))
-
-(defn index-query-key*
-  [query-id prev-key next-key]
-  ;; this is done async, query might be gone since index was queued
-  (when (.has active-queries-map query-id)
-    ;; index keys that weren't used previously
-
-    (cond
-      (nil? prev-key)
-      (let [set (get-key-index-set next-key)]
-        (.add set query-id))
-
-      (not= prev-key next-key)
-      (let [prev-set (get-key-index-set prev-key)
-            next-set (get-key-index-set next-key)]
-        (.delete prev-set query-id)
-        (.add next-set query-id))
-
-      ))
-
+(defn- km-set! [^KeyMap m key val]
+  (cond
+    (or (number? key) (string? key))
+    (.set (.-prims m) key val)
+    (keyword? key)
+    (let [fqn (.-fqn ^Keyword key)]
+      (when-not (.has (.-kws m) fqn)
+        (.set (.-kw-keys m) fqn key))
+      (.set (.-kws m) fqn val))
+    :else
+    (set! (.-others m) (-assoc (.-others m) key val)))
   js/undefined)
 
-;; FIXME: this is likely overkill for a single key? might as well just do it immediately?
-(defn index-query-key [query-id prev-key next-key]
-  (.push index-queue #(index-query-key* query-id prev-key next-key))
-  (index-queue-some!))
-
-(defn unindex-query-key*
-  [query-id key]
-  (when-some [s (-lookup @key-index-ref key)]
-    (.delete s query-id)))
-
-(defn unindex-query-key [query-id key]
-  (.push index-queue #(unindex-query-key* query-id key))
-  (index-queue-some!))
-
-(defn index-query-keys*
-  [query-id prev-keys next-keys]
-  ;; this is done async, query might be gone since index was queued
-  (when (.has active-queries-map query-id)
-    ;; index keys that weren't used previously
-    (reduce
-      (fn [_ key]
-        (when-not (contains? prev-keys key)
-          (let [set (get-key-index-set key)]
-            (.add set query-id)))
-        nil)
-      nil
-      next-keys)
-
-    ;; remove old keys that are no longer used
-    (when-not (nil? prev-keys)
-      (reduce
-        (fn [_ key]
-          (when-not (contains? next-keys key)
-            (let [set (get-key-index-set key)]
-              (.delete set query-id))))
-        nil
-        prev-keys)))
-
+(defn- km-delete! [^KeyMap m key]
+  (cond
+    (or (number? key) (string? key))
+    (.delete (.-prims m) key)
+    (keyword? key)
+    (let [fqn (.-fqn ^Keyword key)]
+      (.delete (.-kws m) fqn)
+      (.delete (.-kw-keys m) fqn))
+    :else
+    (set! (.-others m) (-dissoc (.-others m) key)))
   js/undefined)
 
-(defn index-query-keys [query-id prev-keys next-keys]
-  (.push index-queue #(index-query-keys* query-id prev-keys next-keys))
-  (index-queue-some!))
+(defn- km-count [^KeyMap m]
+  (+ (.-size (.-prims m))
+     (.-size (.-kws m))
+     (-count (.-others m))))
 
-(defn unindex-query-keys*
-  [query-id keys]
-  (reduce
-    (fn [_ key]
-      (when-some [s (-lookup @key-index-ref key)]
-        ;; FIXME: this needs some kind of GC
-        ;; currently does not remove empty sets from key-index-ref
-        ;; so possibly accumulates unused keys over time
-        ;; checking every time if its empty seems more expensive overall
-        (.delete s query-id)))
-    nil
-    keys))
+(defn- km-each
+  "(f key val) for every entry"
+  [^KeyMap m f]
+  (.forEach (.-prims m) (fn [val key] (f key val)))
+  (let [kw-keys (.-kw-keys m)]
+    (.forEach (.-kws m) (fn [val fqn] (f (.get kw-keys fqn) val))))
+  (-kv-reduce (.-others m) (fn [_ key val] (f key val) nil) nil)
+  js/undefined)
 
-(defn unindex-query-keys [query-id keys]
-  (.push index-queue #(unindex-query-keys* query-id keys))
-  (index-queue-some!))
+(defn- km-reduce
+  "(f acc key val) for every entry"
+  [^KeyMap m f init]
+  (let [acc (volatile! init)]
+    (km-each m (fn [key val] (vreset! acc (f @acc key val))))
+    @acc))
+
+;; the read index: which kv keys the mounted UI reads and who reads them.
+;; a reader (sub) is the slot ref of a sg/kv-lookup or a Query, both are told about
+;; changes via gp/invalidate!. most keys only have one reader, so that is stored as is.
+;; a js/Set is only created for the second one.
+
+(defn- notify-sub [sub]
+  (gp/invalidate! sub))
+
+(defn- subs-add [subs sub]
+  (cond
+    (nil? subs) sub
+    (instance? js/Set subs) (do (.add subs sub) subs)
+    (identical? subs sub) subs
+    :else (doto (js/Set.) (.add subs) (.add sub))))
+
+;; returns nil when no reader is left
+(defn- subs-del [subs sub]
+  (cond
+    (nil? subs) nil
+    (identical? subs sub) nil
+    (instance? js/Set subs) (do (.delete subs sub) (if (zero? (.-size subs)) nil subs))
+    :else subs))
+
+(defn- subs-notify [subs]
+  (cond
+    (nil? subs) nil
+    (instance? js/Set subs) (.forEach subs notify-sub)
+    :else (gp/invalidate! subs))
+  js/undefined)
+
+;; all: readers of the table as a whole, (sg/kv-lookup table) or a query that used seq on it.
+;; tracking every entry a seq touched is expensive, so those are told about every change
+;; keys: {key subs}, only has keys that currently have a reader
+(deftype TableIndex [kv-table ^:mutable all ^KeyMap keys])
+
+;; {kv-table TableIndex}
+(defonce ^KeyMap read-index (key-map))
+
+(defn- get-table-index ^TableIndex [kv-table]
+  (let [ti (km-get read-index kv-table)]
+    (if-not (nil? ti)
+      ti
+      (let [ti (TableIndex. kv-table nil (key-map))]
+        (km-set! read-index kv-table ti)
+        ti))))
+
+(defn- keys-add! [^KeyMap keys key sub]
+  (let [subs (km-get keys key)
+        next (subs-add subs sub)]
+    (when-not (identical? subs next)
+      (km-set! keys key next))))
+
+(defn- keys-del! [^KeyMap keys key sub]
+  (let [subs (km-get keys key)]
+    (when-not (nil? subs)
+      ;; a set is edited in place, the entry only goes away with the last reader
+      (when (nil? (subs-del subs sub))
+        (km-delete! keys key)))))
+
+(defn index-key-add! [kv-table key sub]
+  (keys-add! (.-keys (get-table-index kv-table)) key sub))
+
+(defn index-key-del! [kv-table key sub]
+  (when-some [^TableIndex ti (km-get read-index kv-table)]
+    (keys-del! (.-keys ti) key sub)))
+
+(defn index-table-add! [kv-table sub]
+  (let [ti (get-table-index kv-table)]
+    (set! (.-all ti) (subs-add (.-all ti) sub))))
+
+(defn index-table-del! [kv-table sub]
+  (when-some [^TableIndex ti (km-get read-index kv-table)]
+    (set! (.-all ti) (subs-del (.-all ti) sub))))
+
+(defn reduce-read-keys
+  "calls (f acc kv-table key) for every key the mounted UI currently reads,
+   through sg/kv-lookup or in a sg/query. see read-tables for reads of whole tables"
+  [f init]
+  (km-reduce read-index
+    (fn [acc kv-table ^TableIndex ti]
+      (km-reduce (.-keys ti)
+        (fn [acc key _]
+          (f acc kv-table key))
+        acc))
+    init))
+
+(defn read-keys
+  "vector of [kv-table key] tuples the mounted UI currently reads"
+  []
+  (persistent!
+    (reduce-read-keys
+      (fn [acc kv-table key]
+        (conj! acc [kv-table key]))
+      (transient []))))
+
+(defn read-tables
+  "vector of the kv-tables the mounted UI currently reads as a whole,
+   so it depends on every key of them"
+  []
+  (persistent!
+    (km-reduce read-index
+      (fn [acc kv-table ^TableIndex ti]
+        (if (nil? (.-all ti))
+          acc
+          (conj! acc kv-table)))
+      (transient []))))
+
+;; bumped per invalidate-kv!, a query reading many of the changed keys only has to tell its subs once
+(defonce invalidation-id 0)
 
 (defn invalidate-kv! [^not-native tx-info]
-  ;; before we can invalidate anything we need to make sure the index is updated
-  ;; we delay updating index stuff to be async since we only need it here later
-  (index-work-all!)
+  (set! invalidation-id (inc invalidation-id))
 
-  (let [key-index
-        @key-index-ref
+  (-kv-reduce
+    tx-info
+    (fn [_ kv-table ^not-native table-info]
+      ;; no index, no one ever read this table
+      (when-some [^TableIndex ti (km-get read-index kv-table)]
+        (let [keys-new (:keys-new table-info)
+              keys-updated (:keys-updated table-info)
+              keys-removed (:keys-removed table-info)]
 
-        ;; using mutable things since they are a bit faster and time matters here
-        keys-to-invalidate
-        (js/Array.)
+          (when (or (pos? (count keys-new))
+                    (pos? (count keys-updated))
+                    (pos? (count keys-removed)))
 
-        query-ids
-        (js/Set.)]
+            (subs-notify (.-all ti))
 
-    (-kv-reduce
-      tx-info
-      (fn [_ kv-table ^not-native tx-info]
-        (let [keys-new (:keys-new tx-info)
-              keys-updated (:keys-updated tx-info)
-              keys-removed (:keys-removed tx-info)
-              add (fn [key] (.push keys-to-invalidate (IndexKey. kv-table key)))]
+            ;; a table that is only written to, or only read as a whole, has no keys to check
+            (let [keys (.-keys ti)
+                  read-count (km-count keys)
+                  n-new (count keys-new)
+                  n-updated (count keys-updated)
+                  n-removed (count keys-removed)]
+              (cond
+                (zero? read-count)
+                nil
 
-          ;; using kv-table as marker when kv seq was used (e.g. keys/vals)
-          ;; tracking every single entry is expensive, so just assuming
-          ;; there was interest in all when seq was used
-          (when (or (seq keys-updated)
-                    (seq keys-new)
-                    (seq keys-removed))
-            (.push keys-to-invalidate kv-table))
+                ;; a tx changing more keys than are read: walk the read keys instead.
+                ;; testing if a key changed is a lot cheaper than iterating a persistent set,
+                ;; so this is still ahead when both are about the same size
+                (<= read-count (+ n-new n-updated n-removed))
+                (km-each keys
+                  (fn [key subs]
+                    (when (or (and (pos? n-updated) (contains? keys-updated key))
+                              (and (pos? n-removed) (contains? keys-removed key))
+                              (and (pos? n-new) (contains? keys-new key)))
+                      (subs-notify subs))))
 
-          (run! add keys-new)
-          (run! add keys-updated)
-          (run! add keys-removed))
-        nil)
+                :else
+                (let [notify (fn [_ key] (subs-notify (km-get keys key)) nil)]
+                  (reduce notify nil keys-new)
+                  (reduce notify nil keys-updated)
+                  (reduce notify nil keys-removed)))))))
       nil)
-
-    (.forEach keys-to-invalidate
-      (fn [key]
-        (when-some [query-set (get key-index key)]
-          (js-set-union query-ids query-set))))
-
-    ;; (js/console.log "invalidating" keys-to-invalidate query-ids tx-info)
-
-    (.forEach query-ids
-      (fn [query-id]
-        (when-some [callback (.get active-queries-map query-id)]
-          (callback)))))
+    nil)
 
   js/undefined)
 
@@ -474,14 +468,66 @@
   (and (instance? cljs.core/LazySeq thing)
        (not (realized? thing))))
 
+;; calls (f keys key sub) for every key in reads that is not in other-reads
+;; reads are {kv-table #{key}}, keys is the index of the kv-table
+(defn- diff-reads! [^not-native reads ^not-native other-reads f sub]
+  (-kv-reduce
+    reads
+    (fn [_ kv-table ^not-native table-keys]
+      (let [other-keys (-lookup other-reads kv-table)]
+        (when-not (identical? table-keys other-keys)
+          (let [keys (.-keys (get-table-index kv-table))]
+            (if (nil? other-keys)
+              (reduce (fn [_ key] (f keys key sub) nil) nil table-keys)
+              (reduce
+                (fn [_ key]
+                  (when-not (contains? other-keys key)
+                    (f keys key sub))
+                  nil)
+                nil
+                table-keys)))))
+      nil)
+    nil))
+
+(defn- table-in? [^array tables kv-table]
+  (loop [i 0]
+    (cond
+      (>= i (alength tables)) false
+      (keyword-identical? kv-table (aget tables i)) true
+      :else (recur (inc i)))))
+
+;; calls (f kv-table sub) for every table in tables that is not in other-tables
+(defn- diff-tables! [^array tables ^array other-tables f sub]
+  (dotimes [i (alength tables)]
+    (let [kv-table (aget tables i)]
+      (when-not (table-in? other-tables kv-table)
+        (f kv-table sub)))))
+
+(def ^:private no-tables (array))
+
+;; a query is shared by all slots using the same query-fn and args (subs).
+;; it is a sub in the read index itself, for everything the query-fn read
 (deftype Query
-  [query-id
-   ^not-native query-key
+  [^not-native query-key
    rt-ref
    subs
    ^:mutable invalidated
+   ;; the invalidation-id it last told subs about
+   ^:mutable invalidation
+   ;; {kv-table #{key}}, only tables it read keys from
    ^:mutable read-keys
+   ;; array of kv-table, the tables it used seq on
+   ^:mutable read-tables
    ^:mutable result]
+
+  gp/IInvalidateSlot
+  (invalidate! [this]
+    (set! invalidated true)
+    ;; only invalidate sub refs, do not run yet
+    ;; possible that component gets unmounted and query is no longer needed
+    (when-not (identical? invalidation invalidation-id)
+      (set! invalidation invalidation-id)
+      (.forEach subs notify-sub)))
 
   Object
   (add-sub [this ref]
@@ -494,19 +540,10 @@
     ;; this doesn't need to happen immediately
     (when (zero? (.-size subs))
       (swap! active-queries-ref dissoc query-key)
-      (unindex-query-keys query-id read-keys)
-      (.delete active-queries-map query-id)))
-
-  (setup! [this]
-    (.set active-queries-map query-id #(.invalidate! this)))
-
-  (invalidate! [this]
-    (set! invalidated true)
-    ;; only invalidate sub refs, do not run yet
-    ;; possible that component gets unmounted and query is no longer needed
-    (.forEach subs
-      (fn [^not-native ref]
-        (gp/invalidate! ref))))
+      (diff-reads! read-keys {} keys-del! this)
+      (diff-tables! read-tables no-tables index-table-del! this)
+      (set! read-keys {})
+      (set! read-tables no-tables)))
 
   (run! [this]
     (let [kv
@@ -530,22 +567,31 @@
               (throw
                 (js/Error. "query functions are not allowed to return lazy sequences!")))
 
-          new-keys
+          next-tables
+          (array)
+
+          next-keys
           (-kv-reduce
             kv
-            (fn [^not-native key-set kv-table _]
+            (fn [^not-native reads kv-table _]
               (let [^not-native observed (-lookup query-env kv-table)
-                    [seq-used kv-keys] (kv/observed-keys observed)]
-                (-> key-set
-                    (cond->
-                      seq-used
-                      (-conj kv-table))
-                    (into (map #(IndexKey. kv-table %)) kv-keys))))
-            #{})]
+                    ^not-native res (kv/observed-keys observed)
+                    ^not-native kv-keys (-nth res 1)]
+                (when (-nth res 0)
+                  (.push next-tables kv-table))
+                (if (zero? (-count kv-keys))
+                  reads
+                  (-assoc reads kv-table kv-keys))))
+            {})]
 
-      (index-query-keys query-id read-keys new-keys)
+      ;; only what changed since the last run touches the index
+      (diff-reads! next-keys read-keys keys-add! this)
+      (diff-reads! read-keys next-keys keys-del! this)
+      (diff-tables! next-tables read-tables index-table-add! this)
+      (diff-tables! read-tables next-tables index-table-del! this)
 
-      (set! read-keys new-keys)
+      (set! read-keys next-keys)
+      (set! read-tables next-tables)
       (set! invalidated false)
       (set! result next-result))
 
@@ -560,14 +606,14 @@
 
 (defn- setup-query [rt-ref query-key]
   (let [q (Query.
-            (rt/next-id)
             query-key
             rt-ref
             (js/Set.)
             true
-            nil
+            0
+            {}
+            no-tables
             nil)]
-    (.setup! q)
     (swap! active-queries-ref assoc query-key q)
     q))
 
@@ -595,78 +641,73 @@
 
     (.get-result query)))
 
+;; state of a sg/kv-lookup slot, what it is in the read index for
+;; the slot ref itself is the sub, so a change invalidates the slot directly
+(deftype KvRead [ref ^:mutable kv-table ^:mutable key])
+
+(defn- kv-read-table-cleanup [^KvRead read]
+  (index-table-del! (.-kv-table read) (.-ref read)))
+
+(defn- kv-read-key-cleanup [^KvRead read]
+  (index-key-del! (.-kv-table read) (.-key read) (.-ref read)))
+
 (defn slot-kv-get [kv-table]
   (let [^not-native ref
         (rt/claim-slot! ::slot-kv-get)
 
         rt-ref
-        (::sg/runtime-ref rt/*env*)]
+        (::sg/runtime-ref rt/*env*)
 
-    ;; setup only once
-    (when (nil? @ref)
-      (comp/set-cleanup! ref
-        (fn [{:keys [query-id read-key] :as last-state}]
-          (unindex-query-key query-id read-key)
-          (.delete active-queries-map query-id)
-          ))
+        ;; throws for unknown tables, before the index is touched
+        kv
+        (kv/get-kv! (::sg/kv @rt-ref) kv-table)
 
-      (let [query-id (rt/next-id)]
-        (-swap! ref assoc :query-id query-id)
-        (.set active-queries-map query-id #(gp/invalidate! ref))))
+        ^KvRead read
+        @ref]
 
-    (let [all
-          (::sg/kv @rt-ref)
+    (cond
+      (nil? read)
+      (do (index-table-add! kv-table ref)
+          (-reset! ref (KvRead. ref kv-table nil))
+          (comp/set-cleanup! ref kv-read-table-cleanup))
 
-          {:keys [query-id read-key]}
-          @ref
+      (not (keyword-identical? kv-table (.-kv-table read)))
+      (do (index-table-del! (.-kv-table read) ref)
+          (index-table-add! kv-table ref)
+          (set! (.-kv-table read) kv-table)))
 
-          kv
-          (kv/get-kv! all kv-table)]
-
-      (index-query-key query-id read-key kv-table)
-
-      (-swap! ref assoc :read-key kv-table)
-
-      ;; no observation is performed, assuming the user wanted everything
-      kv)))
+    ;; no observation is performed, assuming the user wanted everything
+    kv))
 
 (defn slot-kv-lookup [kv-table key]
-  (let [ref
+  (let [^not-native ref
         (rt/claim-slot! ::slot-kv-lookup)
 
         rt-ref
-        (::sg/runtime-ref rt/*env*)]
+        (::sg/runtime-ref rt/*env*)
 
-    ;; setup only once
-    (when (nil? @ref)
-      (comp/set-cleanup! ref
-        (fn [{:keys [query-id read-key] :as last-state}]
-          (unindex-query-key query-id read-key)
-          (.delete active-queries-map query-id)
-          ))
+        ;; throws for unknown tables, before the index is touched
+        ^not-native kv
+        (kv/get-kv! (::sg/kv @rt-ref) kv-table)
 
-      (let [query-id (rt/next-id)]
-        (swap! ref assoc :query-id query-id)
-        (.set active-queries-map query-id #(gp/invalidate! ref))))
+        ^KvRead read
+        @ref]
 
-    ;; perform query
-    (let [all
-          (::sg/kv @rt-ref)
+    (cond
+      (nil? read)
+      (do (index-key-add! kv-table key ref)
+          (-reset! ref (KvRead. ref kv-table key))
+          (comp/set-cleanup! ref kv-read-key-cleanup))
 
-          {:keys [query-id read-key]}
-          @ref
+      ;; only a different key touches the index, a re-run after a change doesn't
+      (not (and (keyword-identical? kv-table (.-kv-table read))
+                (= key (.-key read))))
+      (do (index-key-del! (.-kv-table read) (.-key read) ref)
+          (index-key-add! kv-table key ref)
+          (set! (.-kv-table read) kv-table)
+          (set! (.-key read) key)))
 
-          kv
-          (kv/get-kv! all kv-table)
-
-          new-key
-          (IndexKey. kv-table key)]
-
-      (index-query-key query-id read-key new-key)
-
-      (-swap! ref assoc :read-key new-key)
-
-      (-lookup kv key))))
+    (-lookup kv key)))
 
 (defn slot-state [init-state merge-fn]
   (let [^not-native ref (rt/claim-slot! ::slot-state)
