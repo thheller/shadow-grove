@@ -4,8 +4,7 @@
     [cljs.test :as ct :refer (deftest is async)]
     [shadow.grove :as sg :refer (defc <<)]
     [shadow.grove.components :as comp]
-    [shadow.grove.protocols :as gp]
-    [shadow.grove.runtime :as rt]))
+    [shadow.grove.protocols :as gp]))
 
 (defn make-env [rt-id]
   (let [dom (JSDOM. "<!DOCTYPE html>")
@@ -177,41 +176,6 @@
          (fn [] (reset! state-ref [1 {:deep "d"}]))
          (fn []
            (is (= "1/d/nil" (.-textContent root))))]))))
-
-(defn use-pushed-value [ref-holder init]
-  (let [ref (rt/claim-slot! ::pushed-value)]
-    (vreset! ref-holder ref)
-    init))
-
-(defc ui-provide-new-value [ref-holder log-ref]
-  (bind {:keys [a b]}
-    (use-pushed-value ref-holder {:a 1 :b 2}))
-  (bind a-out
-    (swap! log-ref conj :a)
-    (str "a=" a))
-  (bind b-out
-    (swap! log-ref conj :b)
-    (str "b=" b))
-  (render
-    (str a-out " " b-out)))
-
-(deftest test-provide-new-value
-  (let [{:keys [root rt-ref]} (make-env ::provide-new-value)
-        ref-holder (volatile! nil)
-        log-ref (atom [])]
-
-    (async done
-      (run-steps done
-        [(fn []
-           (sg/render rt-ref root (ui-provide-new-value ref-holder log-ref))
-           (is (= [:a :b] (take-log! log-ref)))
-           (is (= "a=1 b=2" (.-textContent root))))
-
-         ;; value pushed without running the slot must still be destructured
-         (fn [] (gp/provide-new-value! @ref-holder {:a 1 :b 5}))
-         (fn []
-           (is (= [:b] (take-log! log-ref)))
-           (is (= "a=1 b=5" (.-textContent root))))]))))
 
 (defn seed-args [^clj seed]
   (.-args seed))

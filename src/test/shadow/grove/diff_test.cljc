@@ -3,7 +3,7 @@
     [clojure.test :refer (deftest is)]
     [clojure.pprint :refer (pprint)]))
 
-(def NOT-FOUND (Object.))
+(def NOT-FOUND #?(:clj (Object.) :cljs (js/Object.)))
 
 (declare diff-object)
 

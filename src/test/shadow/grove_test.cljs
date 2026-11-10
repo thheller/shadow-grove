@@ -5,7 +5,6 @@
     [shadow.cljs.modern :refer (js-await)]
     [shadow.arborist.attributes :as sa]
     [shadow.grove :as sg :refer (defc <<)]
-    [shadow.grove.db :as db]
     [shadow.grove.runtime :as rt]))
 
 
@@ -38,14 +37,7 @@
         doc (-> dom .-window .-document)
         root (.-body doc)
 
-        data-ref
-        (-> {}
-            (db/configure {})
-            (atom))
-
-        rt-ref
-        (-> {}
-            (sg/prepare data-ref :test))]
+        rt-ref (sg/get-runtime ::basic-fragment-ops)]
 
     ;; hack until I decide whether document should come from env?
     ;; used in a few places and currently always js/document
@@ -93,14 +85,7 @@
         doc (-> dom .-window .-document)
         root (.-body doc)
 
-        data-ref
-        (-> {}
-            (db/configure {})
-            (atom))
-
-        rt-ref
-        (-> {}
-            (sg/prepare data-ref :test))]
+        rt-ref (sg/get-runtime ::component-lifecycle)]
 
     ;; hack until I decide whether document should come from env?
     ;; used in a few places and currently always js/document
@@ -148,7 +133,3 @@
               (done)))))
       )))
 
-
-
-(comment
-  (test-jsdom))

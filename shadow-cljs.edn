@@ -72,12 +72,14 @@
    :test-dir "out/browser-test"
    :compiler-options {:output-feature-set :es-next}}
 
-  ;; tests that run in node using jsdom
+  ;; all library tests, run in node using jsdom
   ;; node out/node-test/test.js
+  ;; node out/node-test/test.js --test=shadow.grove.kv-test (one ns or var, --list shows all)
+  ;; examples.*-test belong to :examples-test
   :node-test
   {:target :node-test
    :output-to "out/node-test/test.js"
-   :ns-regexp "(components|diff-seq|kv|kv-index|vlist3|websocket)-test$"}
+   :ns-regexp "^shadow\\..+-test$"}
 
   :bench-db
   {:target :node-script

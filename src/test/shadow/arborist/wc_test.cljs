@@ -1,5 +1,6 @@
 (ns shadow.arborist.wc-test
   (:require
+    [shadow.arborist.test-dom :as test-dom]
     [goog.object :as gobj]
     [cljs.test :as ct :refer (deftest is)]
     [clojure.string :as str]
@@ -24,6 +25,7 @@
   ([callback]
    (with-test-node {} callback))
   ([env callback]
+   (test-dom/use-document!)
    (let [node (js/document.createElement "div")]
      (js/document.body.append node)
      (callback node (sa/dom-root node env))
