@@ -111,7 +111,20 @@
                           (let [href (.getAttribute a "href")
                                 a-target (.getAttribute a "target")]
 
-                            (when (and href (seq href) (str/starts-with? href path-prefix) (nil? a-target))
+                            ;; only same-origin links that stay within path-prefix, the raw href
+                            ;; can't be checked alone since a "" prefix matches every href
+                            (when (and href
+                                       (seq href)
+                                       (nil? a-target)
+                                       (not (.hasAttribute a "download"))
+                                       (= (.-origin a) js/location.origin)
+                                       (or (= "" path-prefix)
+                                           (= (.-pathname a) path-prefix)
+                                           (str/starts-with? (.-pathname a) (str path-prefix "/")))
+                                       ;; same-page #fragment links keep native scrolling
+                                       (not (and (seq (.-hash a))
+                                                 (= (.-pathname a) js/location.pathname)
+                                                 (= (.-search a) js/location.search))))
                               (.preventDefault e)
 
                               (js/window.history.pushState nil js/document.title href)
