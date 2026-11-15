@@ -143,6 +143,28 @@
       (wrap-stop!)
       )))
 
+;; shared by fragments and attributes, ev-value is the latest value at the time the event fired
+(defn handle-dom-event [env event ev-value dom-event]
+  (cond
+    ;; might have :on-click (when x :foo!)
+    ;; should do nothing x is false
+    (nil? ev-value)
+    nil
+
+    (fn? ev-value)
+    (ev-value dom-event env)
+
+    :else
+    (let [^not-native ev-handler (::p/dom-event-handler env)]
+
+      (when-not ev-handler
+        (throw (ex-info "missing dom-event-handler!" {:env env :event event :value ev-value})))
+
+      (when ^boolean js/goog.DEBUG
+        (p/validate-dom-event-value! ev-handler env event ev-value))
+
+      (p/handle-dom-event! ev-handler env event ev-value dom-event))))
+
 (defn make-attr-handler [^Keyword key]
   (let [prop-name (.-name key)
         prop-ns (.-ns key)]
@@ -163,50 +185,28 @@
           {:attr key}))
 
       ;; :on-* convention for events
-      ;; only handled when there is an actual handler for it registered in the env
-      ;; which will usually be components which I don't want to reference here
-      ;; but is common enough that it should also be extensible somewhat
+      ;; same as fragments, the listener is added once and reads the latest value
+      ;; when the event fires, so updates only need to store the new value.
+      ;; :e/debounce and other wrapping options are taken from the first value.
       (str/starts-with? prop-name "on-")
       (let [event (subs prop-name 3)
-            ev-key (str "__shadow$" event)]
+            val-key (str "__shadow$ev$" event)
+            fn-key (str "__shadow$evfn$" event)]
 
-        (fn [env node oval nval]
-          (when-let [ev-fn (unchecked-get node ev-key)]
-            (.removeEventListener node event ev-fn))
+        (fn [env ^js node oval nval]
+          (unchecked-set node val-key nval)
 
-          ;; FIXME: should maybe allow to just use a function as value
-          ;; skipping all the ev-handler logic and just calling it as a regular callback
-          (when (some? nval)
-            (if (fn? nval)
-              (.addEventListener node event (fn [e] (nval e env)))
-              (let [^not-native ev-handler (::p/dom-event-handler env)]
-
-                (when-not ev-handler
-                  (throw (ex-info "missing dom-event-handler!" {:env env :event event :node node :value nval})))
-
-                (when ^boolean js/goog.DEBUG
-                  ;; validate value now in dev so it fails on construction
-                  ;; slightly better experience than firing on-event
-                  ;; easier to miss in tests and stuff that don't test particular events
-                  (p/validate-dom-event-value! ev-handler env event nval))
-
-                (let [ev-fn
-                      (fn [dom-event]
-                        (p/handle-dom-event! ev-handler env event nval dom-event))
-
-                      ev-opts
-                      #js {}
-
-                      ev-fn
-                      (if-not (map? nval)
-                        ev-fn
-                        (maybe-wrap-ev-fn ev-fn nval ev-opts))]
-
-                  ;; FIXME: ev-opts are not supported by all browsers
-                  ;; closure lib probably has something to handle that
-                  (.addEventListener node event ev-fn ev-opts)
-
-                  (unchecked-set node ev-key ev-fn)))))))
+          (when (and (some? nval) (not (unchecked-get node fn-key)))
+            (let [ev-opts #js {}
+                  ev-fn
+                  (fn [dom-event]
+                    (handle-dom-event env event (unchecked-get node val-key) dom-event))
+                  ev-fn
+                  (if-not (map? nval)
+                    ev-fn
+                    (maybe-wrap-ev-fn ev-fn nval ev-opts))]
+              (unchecked-set node fn-key ev-fn)
+              (.addEventListener node event ev-fn ev-opts)))))
 
       :else
       (let [prop (gstr/toCamelCase prop-name)]

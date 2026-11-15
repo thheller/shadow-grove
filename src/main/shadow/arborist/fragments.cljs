@@ -110,29 +110,7 @@
 
   Object
   (handle-event [this event ev-value dom-event]
-    (cond
-      ;; might have :on-click (when x :foo!)
-      ;; should do nothing x is false
-      (nil? ev-value)
-      nil
-
-      (fn? ev-value)
-      (ev-value dom-event env)
-
-      :else
-      (let [^not-native ev-handler (::p/dom-event-handler env)]
-
-        (when-not ev-handler
-          (throw (ex-info "missing dom-event-handler!" {:env env :event event :value ev-value})))
-
-        (when ^boolean js/goog.DEBUG
-          ;; validate value now in dev so it fails on construction
-          ;; slightly better experience than firing on-event
-          ;; easier to miss in tests and stuff that don't test particular events
-          (p/validate-dom-event-value! ev-handler env event ev-value))
-
-        (p/handle-dom-event! ev-handler env event ev-value dom-event)
-        ))))
+    (a/handle-dom-event env event ev-value dom-event)))
 
 (deftype FragmentInit [vals element-ns ^FragmentCode code]
   p/IConstruct
