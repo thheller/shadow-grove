@@ -64,7 +64,10 @@
       (api/list-node
         (list*
           (api/token-node 'let)
-          (api/vector-node [binding (or expr (api/token-node nil))])
+          (api/vector-node [binding
+                            (or expr
+                                (api/list-node [(api/token-node 'volatile!)
+                                                (api/token-node nil)]))])
           (rewrite-hooks! hooks))))))
 
 (defmethod rewrite-hooks! 'hook
