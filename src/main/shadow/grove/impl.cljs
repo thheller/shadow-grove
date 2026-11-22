@@ -324,12 +324,7 @@
 
                           ;; acts as dissoc-all
                           (nil? kv)
-                          (let [kv-actual (-lookup tx-before kv-table)]
-                            (-kv-reduce
-                              kv-actual
-                              (fn [kv k v]
-                                (dissoc kv k))
-                              kv-actual))
+                          (kv/transacted-clear (-lookup tx-before kv-table))
 
                           ;; user turned transacted table into a map, acts as an override
                           ;; where something may just want to empty out a table or replace a full table with remote data

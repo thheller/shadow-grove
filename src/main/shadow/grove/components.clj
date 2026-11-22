@@ -13,13 +13,6 @@
 
 (def set-conj (fnil conj #{}))
 
-;; FIXME: this will mistakenly match "shadow" bindings
-;; (defc some-component [env props state]
-;;   [x (let [env (:thing props)]
-;;        (uses env))])
-;; would make env a dependency of some-hook although it isn't
-;; should be rather unlikely though so doesn't matter for now
-
 (declare find-used-bindings)
 
 (defn binding-form-idents
@@ -88,10 +81,6 @@
     '{{:keys [nested] :or {nested default-a}} some-key :or {x 1}})
   (binding-top-level-as '[a b :as x]))
 
-(defn find-fn-args [args]
-  {:pre [(vector? args)]}
-  (set (binding-syms args)))
-
 (defn find-used-bindings [used bindings form]
   (cond
     (contains? bindings form)
@@ -106,25 +95,41 @@
       used
       form)
 
-    ;; attempt to at least filter out (fn [some thing] ...)
-    ;; so they don't appear as used when using the same name as a defc binding
-    ;; (defc ui-thing [a]
-    ;;   (render
-    ;;     (simple-seq ...
-    ;;       (fn [a]
-    ;;         (<< [:div a])))) <- this isn't the a from args
-    (and (seq? form) (= 'fn (first form)))
-    (let [[_ maybe-vec & more] form
+    ;; filter out (fn [args] ...), (fn name [args] ...), multi-arity (fn ([a] ...) ([a b] ...)), and fn*
+    (and (seq? form) (or (= 'fn (first form)) (= 'fn* (first form))))
+    (let [[_ maybe-name & more] form
+          [fn-name clauses] (if (symbol? maybe-name)
+                              [maybe-name more]
+                              [nil (cons maybe-name more)])
+          base-bindings (if fn-name (dissoc bindings fn-name) bindings)
+          arities (if (vector? (first clauses))
+                    [clauses]
+                    clauses)]
+      (reduce
+        (fn [used clause]
+          (if (and (seq? clause) (vector? (first clause)))
+            (let [[args & body] clause
+                  {:keys [syms deps]} (destructure-info base-bindings args)
+                  fn-bindings (reduce dissoc base-bindings syms)]
+              (reduce #(find-used-bindings %1 fn-bindings %2) (into used deps) body))
+            (find-used-bindings used base-bindings clause)))
+        used
+        arities))
 
-          shadows
-          (if (symbol? maybe-vec)
-            (find-fn-args (first more))
-            (find-fn-args maybe-vec))
-
-          fn-bindings
-          (reduce dissoc bindings shadows)]
-
-      (reduce #(find-used-bindings %1 fn-bindings %2) used form))
+    ;; filter out shadowed locals in (let [...] ...) and (loop [...] ...)
+    (and (seq? form) (or (= 'let (first form)) (= 'loop (first form))) (vector? (second form)))
+    (let [[_ bind-vec & body] form
+          [used inner-bindings]
+          (reduce
+            (fn [[used bindings] [bform init]]
+              (let [{:keys [syms deps]} (destructure-info bindings bform)
+                    used (-> used
+                             (into deps)
+                             (find-used-bindings bindings init))]
+                [used (reduce dissoc bindings syms)]))
+            [used bindings]
+            (partition 2 bind-vec))]
+      (reduce #(find-used-bindings %1 inner-bindings %2) used body))
 
     (coll? form)
     (reduce #(find-used-bindings %1 bindings %2) used form)

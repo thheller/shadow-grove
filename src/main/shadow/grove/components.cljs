@@ -181,6 +181,7 @@
       (-> (transient parent-env)
           (assoc! ::depth (safe-inc (::depth parent-env)))
           (assoc! ::parent (::component parent-env))
+          (assoc! ::parent-event-target (::event-target parent-env))
           (assoc! ::ap/dom-event-handler this)
           (assoc! ::component this)
           (assoc! ::event-target this)
@@ -433,7 +434,10 @@
 
   (mark-slots-dirty! [this dirty-bits]
     (set! dirty-slots (bit-or dirty-slots dirty-bits))
-    (set! current-idx (find-first-set-bit-idx dirty-slots)))
+    (let [first-new (find-first-set-bit-idx dirty-bits)]
+      (when (<= first-new current-idx)
+        (set! current-idx first-new)
+        (set! suspended? false))))
 
   (mark-dirty-from-args! [this dirty-bits]
     (set! dirty-from-args (bit-or dirty-from-args dirty-bits))

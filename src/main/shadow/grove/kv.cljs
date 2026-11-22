@@ -23,11 +23,49 @@
   (-dissoc [coll k]
     (throw (ex-info "observed data is read-only" {})))
 
+  ICollection
+  (-conj [coll o]
+    (throw (ex-info "observed data is read-only, conj not allowed" {:o o})))
+
+  IEmptyableCollection
+  (-empty [_]
+    (empty data))
+
+  ICounted
+  (-count [_]
+    (set! seq-used true)
+    (-count data))
+
+  IEquiv
+  (-equiv [_ other]
+    (set! seq-used true)
+    (if (instance? ObservedData other)
+      (do (set! (.-seq-used ^ObservedData other) true)
+          (= data (.-data ^ObservedData other)))
+      (= data other)))
+
+  IHash
+  (-hash [_]
+    (set! seq-used true)
+    (hash data))
+
   IAssociative
-  (-contains-key? [coll k]
+  (-contains-key? [_ k]
+    (when (nil? k)
+      (when-not (is-nil-allowed? data)
+        (throw (ex-info "cannot read nil key" {}))))
+    (set! keys-used (conj! keys-used k))
     (-contains-key? data k))
   (-assoc [coll k v]
     (throw (ex-info "observed data is read-only, assoc not allowed" {:k k :v v})))
+
+  IFind
+  (-find [_ k]
+    (when (nil? k)
+      (when-not (is-nil-allowed? data)
+        (throw (ex-info "cannot read nil key" {}))))
+    (set! keys-used (conj! keys-used k))
+    (-find data k))
 
   ISeqable
   (-seq [this]
@@ -38,6 +76,24 @@
     ;; vs. tracking if a seq was fully traversed?
     (set! seq-used true)
     (-seq data))
+
+  IIterable
+  (-iterator [_]
+    (set! seq-used true)
+    (-iterator data))
+
+  IReduce
+  (-reduce [_ f]
+    (set! seq-used true)
+    (-reduce data f))
+  (-reduce [_ f start]
+    (set! seq-used true)
+    (-reduce data f start))
+
+  IKVReduce
+  (-kv-reduce [_ f init]
+    (set! seq-used true)
+    (-kv-reduce data f init))
 
   ILookup
   (-lookup [_ key]
@@ -52,7 +108,18 @@
       (when-not (is-nil-allowed? data)
         (throw (ex-info "cannot read nil key" {}))))
     (set! keys-used (conj! keys-used key))
-    (-lookup data key default)))
+    (-lookup data key default))
+
+  IFn
+  (-invoke [this key]
+    (-lookup this key))
+  (-invoke [this key default]
+    (-lookup this key default))
+
+  IPrintWithWriter
+  (-pr-writer [_ writer opts]
+    (set! seq-used true)
+    (-pr-writer data writer opts)))
 
 (defn observed [data]
   (ObservedData. false (transient #{}) data))
@@ -93,7 +160,26 @@
 
   ISeqable
   (-seq [this]
+    (.check-completed! this)
     (-seq data))
+
+  IIterable
+  (-iterator [this]
+    (.check-completed! this)
+    (-iterator data))
+
+  IReduce
+  (-reduce [this f]
+    (.check-completed! this)
+    (-reduce data f))
+  (-reduce [this f start]
+    (.check-completed! this)
+    (-reduce data f start))
+
+  IKVReduce
+  (-kv-reduce [this f init]
+    (.check-completed! this)
+    (-kv-reduce data f init))
 
   ILookup
   (-lookup [this key]
@@ -104,29 +190,67 @@
     (.check-completed! this)
     (-lookup data key default))
 
+  IFn
+  (-invoke [this key]
+    (.check-completed! this)
+    (-lookup data key))
+  (-invoke [this key default]
+    (.check-completed! this)
+    (-lookup data key default))
+
+  IFind
+  (-find [this key]
+    (.check-completed! this)
+    (-find data key))
+
   ICounted
   (-count [this]
     (.check-completed! this)
     (-count data))
 
+  IEquiv
+  (-equiv [this other]
+    (.check-completed! this)
+    (if (instance? TransactedData other)
+      (do (.check-completed! ^TransactedData other)
+          (= data (.-data ^TransactedData other)))
+      (= data other)))
+
+  IHash
+  (-hash [this]
+    (.check-completed! this)
+    (hash data))
+
+  IEmptyableCollection
+  (-empty [this]
+    (.check-completed! this)
+    (empty data))
+
+  IPrintWithWriter
+  (-pr-writer [_ writer opts]
+    (-pr-writer data writer opts))
+
   IMap
   (-dissoc [this key]
     (.check-completed! this)
-    (let [was-added-in-tx? (contains? keys-new key)]
-      (TransactedData.
-        data-before
-        (-dissoc data key)
-        ;; removal means the key is no longer new or modified
-        (-disjoin! keys-new key)
-        (-disjoin! keys-updated key)
-        ;; if created and removed in same tx, just don't record it at all
-        (if was-added-in-tx?
-          keys-removed
-          (-conj! keys-removed key))
-        completed-ref)))
+    (if-not (-contains-key? data key)
+      this
+      (let [was-added-in-tx? (contains? keys-new key)]
+        (TransactedData.
+          data-before
+          (-dissoc data key)
+          ;; removal means the key is no longer new or modified
+          (-disjoin! keys-new key)
+          (-disjoin! keys-updated key)
+          ;; if created and removed in same tx, just don't record it at all
+          (if was-added-in-tx?
+            keys-removed
+            (-conj! keys-removed key))
+          completed-ref))))
 
   IAssociative
-  (-contains-key? [coll k]
+  (-contains-key? [this k]
+    (.check-completed! this)
     (-contains-key? data k))
 
   (-assoc [this key value]
@@ -187,6 +311,7 @@
 
   ICollection
   (-conj [coll ^not-native entry]
+    (.check-completed! coll)
     (if (vector? entry)
       (-assoc coll (-nth entry 0) (-nth entry 1))
       (loop [^not-native ret coll
@@ -322,6 +447,12 @@
     (transient #{})
     (transient #{})
     (volatile! false)))
+
+(defn transacted-clear
+  "returns the table with all entries removed"
+  [^TransactedData tx-table]
+  {:pre [(instance? TransactedData tx-table)]}
+  (.dissoc-all tx-table))
 
 (defn transacted-replace
   "tx-table is a table from the tx, new-table the plain map a handler put in its place.

@@ -105,9 +105,9 @@
 ;;
 ;; `(assoc tx-env :person new-map)` is diffed against the old table: keys missing from
 ;; it are removed, changed ones written. Use it for "the server sent the full table", and
-;; `kv/merge-seq` when the payload is partial. A table can't be removed or set to
-;; anything that isn't a map, see the failing writes below. Empty it with
-;; `kv/remove-all`.
+;; `kv/merge-seq` when the payload is partial. Setting a table to `nil` (or `dissoc`ing
+;; it from `tx-env`) empties it, same as `kv/remove-all`. Anything else that isn't a map
+;; fails the tx, see below.
 
 (deftx replace-table! []
   [tx-env ev e]
@@ -130,13 +130,13 @@
 ;;
 ;; - The first button writes a string key, which the table's `:validate-fn` rejects.
 ;; - The second uses `kv/add` on `:ui`, which has no `:primary-key`.
-;; - The third sets the table to nil. Tables are installed at init and stay, a tx can
-;;   replace their contents with a map but not remove them. (The error it logs comes from
-;;   inside the kv code, an `IKVReduce` protocol error, not a message saying so.)
+;; - The third replaces the table with a non-map value (`"not-a-map"`). A tx can replace
+;;   a table's contents with a map or clear it with `nil`, not replace it with another
+;;   type.
 
-(deftx clear-table! []
+(deftx invalid-table! []
   [tx-env ev e]
-  (assoc tx-env :person nil))
+  (assoc tx-env :person "not-a-map"))
 
 (deftx invalid-write! []
   [tx-env ev e]
@@ -199,7 +199,7 @@
        (<< [:div {:class c/$row}
             (btn "write rejected by :validate-fn" (invalid-write!))
             (btn "kv/add without :primary-key" (add-without-pk!))
-            (btn "table nil" (clear-table!))]
+            (btn "table not a map" (invalid-table!))]
            (ui-table :person))})))
 
 (defn init []

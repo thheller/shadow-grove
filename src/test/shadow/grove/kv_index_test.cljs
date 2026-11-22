@@ -382,3 +382,108 @@
          (fn []
            (sg/unmount-root root)
            (is (= #{} (read-tables ::whole))))]))))
+
+;; -- ObservedData protocols in queries (contains?, find, IFn, count, reduce-kv)
+
+(defn ?has-key [env k]
+  (contains? (::obs-proto env) k))
+
+(defn ?find-key [env k]
+  (some-> (find (::obs-proto env) k) val))
+
+(defn ?fn-key [env k]
+  ((::obs-proto env) k))
+
+(defn ?count-direct [env]
+  (count (::obs-proto env)))
+
+(defn ?sum-reduce-kv [env]
+  (reduce-kv (fn [acc _ v] (+ acc v)) 0 (::obs-proto env)))
+
+(defc ui-obs-protos [log-ref]
+  (bind has-2? (sg/query ?has-key 2))
+  (bind found-1 (sg/query ?find-key 1))
+  (bind fn-1 (sg/query ?fn-key 1))
+  (bind cnt (sg/query ?count-direct))
+  (bind total (sg/query ?sum-reduce-kv))
+  (render
+    (swap! log-ref conj [has-2? found-1 fn-1 cnt total])
+    (<< [:span (str has-2? "/" found-1 "/" fn-1 "/" cnt "/" total)])))
+
+(deftest observed-protocols-track-queries
+  (let [{:keys [root rt-ref]} (make-env ::obs-proto-rt)
+        log-ref (atom [])]
+    (sg/add-kv-table rt-ref ::obs-proto {} {1 10})
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root (ui-obs-protos log-ref))
+           (is (= "false/10/10/1/10" (.-textContent root)))
+           (is (= #{[::obs-proto 1] [::obs-proto 2]} (read-keys ::obs-proto)))
+           (is (= #{::obs-proto} (read-tables ::obs-proto)))
+           (take-log! log-ref))
+
+         ;; adding key 2 triggers ?has-key, ?count-direct, ?sum-reduce-kv
+         (fn []
+           (tx! rt-ref #(assoc-in % [::obs-proto 2] 20)))
+
+         (fn []
+           (is (= "true/10/10/2/30" (.-textContent root))))
+
+         ;; updating key 1 triggers ?find-key, ?fn-key, ?sum-reduce-kv
+         (fn []
+           (tx! rt-ref #(assoc-in % [::obs-proto 1] 15)))
+
+         (fn []
+           (is (= "true/15/15/2/35" (.-textContent root))))
+
+         ;; setting table to nil clears it and notifies all readers
+         (fn []
+           (tx! rt-ref #(assoc % ::obs-proto nil)))
+
+         (fn []
+           (is (= "false///0/0" (.-textContent root))))
+
+         (fn []
+           (sg/unmount-root root)
+           (is (= #{} (read-keys ::obs-proto)))
+           (is (= #{} (read-tables ::obs-proto))))]))))
+
+;; -- sg/kv-lookups shares its query across components and re-runs
+
+(defc ui-kv-lookups [ids]
+  (bind items (sg/kv-lookups ::lookups ids))
+  (render
+    (<< [:span (str (count items) ":" (get-in items [1 :text]) ";")])))
+
+(deftest kv-lookups-shares-query
+  (let [{:keys [root rt-ref]} (make-env ::lookups-rt)]
+    (sg/add-kv-table rt-ref ::lookups {:primary-key :id}
+      {1 {:id 1 :text "a"}
+       2 {:id 2 :text "b"}})
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root
+             (<< (ui-kv-lookups [1 2])
+                 (ui-kv-lookups [1 2])))
+           (is (= "2:a;2:a;" (.-textContent root)))
+           ;; both components share one active query entry
+           (let [matching (filter (fn [[[_ args] _]] (= [::lookups [1 2]] args)) @impl/active-queries-ref)]
+             (is (= 1 (count matching)))))
+
+         (fn []
+           (let [q-before (val (first (filter (fn [[[_ args] _]] (= [::lookups [1 2]] args)) @impl/active-queries-ref)))]
+             (tx! rt-ref #(assoc-in % [::lookups 1 :text] "x"))
+             (swap! rt-ref assoc ::q-before q-before)))
+
+         (fn []
+           (is (= "2:x;2:x;" (.-textContent root)))
+           (let [q-after (val (first (filter (fn [[[_ args] _]] (= [::lookups [1 2]] args)) @impl/active-queries-ref)))]
+             (is (identical? (::q-before @rt-ref) q-after))))
+
+         (fn []
+           (sg/unmount-root root)
+           (is (= #{} (read-keys ::lookups))))]))))

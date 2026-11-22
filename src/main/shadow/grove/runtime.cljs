@@ -53,9 +53,9 @@
         (set! state nval)
 
         ;; don't invalidate when slot-fn itself is modifying ref
-        (when-not (identical? *slot-provider* provider)
-          (when-not (identical? idx *slot-idx*)
-            (gp/invalidate! this)))
+        (when-not (and (identical? *slot-provider* provider)
+                       (identical? idx *slot-idx*))
+          (gp/invalidate! this))
         ))
 
     nval)

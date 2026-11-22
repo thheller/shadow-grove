@@ -93,18 +93,12 @@
     (.preventDefault e)
     (target e)))
 
-(defn maybe-wrap-ev-fn [ev-fn m ev-opts]
+(defn set-ev-opts! [ev-opts m]
   (let [{:e/keys
-         [debounce
-          throttle
-          rate-limit
-          once
+         [once
           passive
           capture
-          signal
-          stop!
-          stop
-          prevent-default]}
+          signal]}
         m]
 
     ;; FIXME: need to track if once already happened. otherwise may re-attach and actually fire more than once
@@ -119,7 +113,19 @@
       (unchecked-set ev-opts "capture" true))
 
     (when signal
-      (unchecked-set ev-opts "signal" true))
+      (unchecked-set ev-opts "signal" signal)))
+  ev-opts)
+
+(defn maybe-wrap-ev-fn [ev-fn m ev-opts]
+  (set-ev-opts! ev-opts m)
+  (let [{:e/keys
+         [debounce
+          throttle
+          rate-limit
+          stop!
+          stop
+          prevent-default]}
+        m]
 
     ;; FIXME: should these be exclusive?
     (cond-> ev-fn
@@ -142,6 +148,59 @@
       stop!
       (wrap-stop!)
       )))
+
+(deftype DynamicEvState [^:mutable kind ^:mutable ms ^:mutable f])
+
+(defn make-dynamic-ev-fn [get-val dispatch-fn]
+  (let [state (DynamicEvState. nil nil nil)]
+    (fn [^js e]
+      (let [ev-value (get-val)]
+        (when (some? ev-value)
+          (if-not (map? ev-value)
+            (dispatch-fn ev-value e)
+            (let [{:e/keys
+                   [prevent-default
+                    stop
+                    stop!
+                    debounce
+                    throttle
+                    rate-limit]}
+                  ev-value]
+
+              (when stop!
+                (.stopPropagation e)
+                (.preventDefault e))
+
+              (when stop
+                (.stopPropagation e))
+
+              (when prevent-default
+                (.preventDefault e))
+
+              (let [kind (cond
+                           debounce :debounce
+                           throttle :throttle
+                           rate-limit :rate-limit
+                           :else nil)
+                    ms (or debounce throttle rate-limit)]
+                (if (nil? kind)
+                  (dispatch-fn ev-value e)
+                  (let [wrapped
+                        (if (and (keyword-identical? kind (.-kind state))
+                                 (identical? ms (.-ms state)))
+                          (.-f state)
+                          (let [inner (fn [e]
+                                        (when-some [v (get-val)]
+                                          (dispatch-fn v e)))
+                                f (case kind
+                                    :debounce (gfn/debounce inner ms)
+                                    :throttle (gfn/throttle inner ms)
+                                    :rate-limit (gfn/rateLimit inner ms))]
+                            (set! (.-kind state) kind)
+                            (set! (.-ms state) ms)
+                            (set! (.-f state) f)
+                            f))]
+                    (wrapped e)))))))))))
 
 ;; shared by fragments and attributes, ev-value is the latest value at the time the event fired
 (defn handle-dom-event [env event ev-value dom-event]
@@ -187,7 +246,6 @@
       ;; :on-* convention for events
       ;; same as fragments, the listener is added once and reads the latest value
       ;; when the event fires, so updates only need to store the new value.
-      ;; :e/debounce and other wrapping options are taken from the first value.
       (str/starts-with? prop-name "on-")
       (let [event (subs prop-name 3)
             val-key (str "__shadow$ev$" event)
@@ -198,13 +256,13 @@
 
           (when (and (some? nval) (not (unchecked-get node fn-key)))
             (let [ev-opts #js {}
+                  _ (when (map? nval)
+                      (set-ev-opts! ev-opts nval))
                   ev-fn
-                  (fn [dom-event]
-                    (handle-dom-event env event (unchecked-get node val-key) dom-event))
-                  ev-fn
-                  (if-not (map? nval)
-                    ev-fn
-                    (maybe-wrap-ev-fn ev-fn nval ev-opts))]
+                  (make-dynamic-ev-fn
+                    (fn [] (unchecked-get node val-key))
+                    (fn [ev-value dom-event]
+                      (handle-dom-event env event ev-value dom-event)))]
               (unchecked-set node fn-key ev-fn)
               (.addEventListener node event ev-fn ev-opts)))))
 

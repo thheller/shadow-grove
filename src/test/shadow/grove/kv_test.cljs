@@ -174,3 +174,146 @@
 
     (is (thrown? ExceptionInfo (kv/transacted-replace (kv/transacted table) {"a" {:id "a"}})))
     (is (thrown? ExceptionInfo (kv/transacted-replace (kv/transacted table) {nil {:id nil}})))))
+
+(deftest observed-data-map-protocols
+  (let [table (todo-table)]
+    ;; contains? tracks key
+    (let [obs (kv/observed table)]
+      (is (true? (contains? obs 1)))
+      (is (false? (contains? obs 99)))
+      (is (= [false #{1 99}] (kv/observed-keys obs))))
+
+    ;; find tracks key
+    (let [obs (kv/observed table)]
+      (is (= [1 {:id 1 :text "a"}] (find obs 1)))
+      (is (nil? (find obs 99)))
+      (is (= [false #{1 99}] (kv/observed-keys obs))))
+
+    ;; IFn tracks key
+    (let [obs (kv/observed table)]
+      (is (= {:id 1 :text "a"} (obs 1)))
+      (is (= :missing (obs 99 :missing)))
+      (is (= [false #{1 99}] (kv/observed-keys obs))))
+
+    ;; nil key checks on contains?, find, IFn
+    (let [obs (kv/observed table)]
+      (is (thrown? ExceptionInfo (contains? obs nil)))
+      (is (thrown? ExceptionInfo (find obs nil)))
+      (is (thrown? ExceptionInfo (obs nil))))
+
+    (let [obs (kv/observed (kv/init :allow-nil {:allow-nil-key? true} {nil :ok}))]
+      (is (true? (contains? obs nil)))
+      (is (= [nil :ok] (find obs nil)))
+      (is (= :ok (obs nil)))
+      (is (= [false #{nil}] (kv/observed-keys obs))))
+
+    ;; count marks seq-used
+    (let [obs (kv/observed table)]
+      (is (= 3 (count obs)))
+      (is (= [true #{}] (kv/observed-keys obs))))
+
+    ;; reduce-kv marks seq-used
+    (let [obs (kv/observed table)]
+      (is (= #{1 2 3} (reduce-kv (fn [acc k _] (conj acc k)) #{} obs)))
+      (is (= [true #{}] (kv/observed-keys obs))))
+
+    ;; reduce (2- and 3-arity) marks seq-used
+    (let [obs (kv/observed table)]
+      (is (= 6 (reduce (fn [acc [k _]] (+ acc k)) 0 obs)))
+      (is (= [true #{}] (kv/observed-keys obs))))
+    (let [obs (kv/observed {1 10})]
+      (is (= [1 10] (reduce (fn [a b] a) obs)))
+      (is (= [true #{}] (kv/observed-keys obs))))
+
+    ;; into / iterator marks seq-used
+    (let [obs (kv/observed table)]
+      (is (= table (into {} obs)))
+      (is (= [true #{}] (kv/observed-keys obs))))
+
+    ;; equiv (both directions and observed-to-observed) marks seq-used
+    (let [obs1 (kv/observed table)
+          obs2 (kv/observed table)
+          obs3 (kv/observed table)]
+      (is (= obs1 table))
+      (is (= obs1 obs2))
+      (is (not= obs1 {}))
+      (is (= [true #{}] (kv/observed-keys obs1)))
+      (is (= [true #{}] (kv/observed-keys obs2)))
+      ;; plain map on the left calls -count and -lookup on obs3
+      (is (= table obs3))
+      (is (true? (first (kv/observed-keys obs3)))))
+
+    ;; hash matches underlying map and marks seq-used
+    (let [obs (kv/observed table)]
+      (is (= (hash table) (hash obs)))
+      (is (= [true #{}] (kv/observed-keys obs))))
+
+    ;; empty and pr-str
+    (let [obs (kv/observed table)]
+      (is (= {} (empty obs)))
+      (is (= (pr-str table) (pr-str obs)))
+      (is (= [true #{}] (kv/observed-keys obs))))
+
+    ;; read-only mutations throw
+    (let [obs (kv/observed table)]
+      (is (thrown? ExceptionInfo (assoc obs 4 {:id 4})))
+      (is (thrown? ExceptionInfo (dissoc obs 1)))
+      (is (thrown? ExceptionInfo (conj obs [4 {:id 4}]))))))
+
+(deftest transacted-data-map-protocols
+  (let [table (todo-table)
+        tx (kv/transacted table)]
+    ;; IFn, find, reduce-kv, reduce, into, equiv, hash, empty, pr-str
+    (is (= {:id 1 :text "a"} (tx 1)))
+    (is (= :missing (tx 99 :missing)))
+    (is (= [2 {:id 2 :text "b"}] (find tx 2)))
+    (is (nil? (find tx 99)))
+    (is (= #{1 2 3} (reduce-kv (fn [acc k _] (conj acc k)) #{} tx)))
+    (is (= 6 (reduce (fn [acc [k _]] (+ acc k)) 0 tx)))
+    (is (= table (into {} tx)))
+    (is (= tx table))
+    (is (= table tx))
+    (is (= tx (kv/transacted table)))
+    (is (= (hash table) (hash tx)))
+    (is (= (pr-str table) (pr-str tx)))
+
+    ;; empty does not mutate tx tracking state
+    (is (= {} (empty tx)))
+    (let [commit (kv/tx-commit! tx)]
+      (is (= #{} (:keys-removed commit)))
+      (is (identical? table (:data commit)))
+      ;; pr-str still works after commit for debugging
+      (is (= (pr-str table) (pr-str tx)))
+      ;; completed tx throws on reads/ops
+      (is (thrown? ExceptionInfo (seq tx)))
+      (is (thrown? ExceptionInfo (contains? tx 1)))
+      (is (thrown? ExceptionInfo (tx 1)))
+      (is (thrown? ExceptionInfo (find tx 1)))
+      (is (thrown? ExceptionInfo (reduce-kv (fn [acc _ _] acc) nil tx)))
+      (is (thrown? ExceptionInfo (reduce (fn [acc _] acc) nil tx)))
+      (is (thrown? ExceptionInfo (into {} tx)))
+      (is (thrown? ExceptionInfo (= tx table)))
+      (is (thrown? ExceptionInfo (hash tx)))
+      (is (thrown? ExceptionInfo (empty tx)))
+      (is (thrown? ExceptionInfo (conj tx []))))))
+
+(deftest transacted-dissoc-missing-key-is-noop
+  (let [table (todo-table)
+        tx (kv/transacted table)
+        tx2 (dissoc tx 999)]
+    (is (identical? tx tx2))
+    (let [commit (-> tx2
+                     (assoc 1 {:id 1 :text "updated"})
+                     (kv/tx-commit!))]
+      (is (= #{1} (:keys-updated commit)))
+      (is (= #{} (:keys-removed commit)))
+      (is (= #{} (:keys-new commit)))))
+
+  ;; dissoc of missing key followed by assoc of same key must count as :keys-new, not :keys-updated
+  (let [commit (-> (kv/transacted (todo-table))
+                   (dissoc 999)
+                   (assoc 999 {:id 999 :text "fresh"})
+                   (kv/tx-commit!))]
+    (is (= #{999} (:keys-new commit)))
+    (is (= #{} (:keys-updated commit)))
+    (is (= #{} (:keys-removed commit)))))

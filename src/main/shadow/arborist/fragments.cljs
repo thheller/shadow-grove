@@ -260,11 +260,11 @@
 ;; macro calls this for :on-click {:e :foo! :arg arg}, entire map becomes a value in vals array
 (defn frag-add-updating-event-listener
   [^ManagedFragment frag ^js node ^string event val-idx]
-  (frag-add-event-listener frag node event
-    (aget (.-vals frag) val-idx)
-    (fn [e]
-      (.handle-event frag event
-        ;; we can always get the latest value
-        ;; this saves ever having to check or update the existing handler added in mount
-        (aget (.-vals frag) val-idx)
-        e))))
+  (let [init-val (aget (.-vals frag) val-idx)
+        ev-opts #js {}
+        _ (when (map? init-val)
+            (a/set-ev-opts! ev-opts init-val))
+        ev-fn (a/make-dynamic-ev-fn
+                (fn [] (aget (.-vals frag) val-idx))
+                (fn [ev-value e] (.handle-event frag event ev-value e)))]
+    (.addEventListener node event ev-fn ev-opts)))

@@ -37,12 +37,12 @@ export default async (t) => {
 
   await click("replace table");
   const before = await table("person");
-  t.expectConsoleError(/FAILED TO PROCESS EVENT|person ids must be numbers|no primary-key|IKVReduce|ExceptionInfo|Object/);
+  t.expectConsoleError(/FAILED TO PROCESS EVENT|person ids must be numbers|no primary-key|invalid return value|ExceptionInfo|Object/);
   await click("write rejected by :validate-fn");
   await click("kv/add without :primary-key");
   t.assert((await table("person")) === before, "failed txs commit nothing");
   t.assert(t.takeErrors().length >= 2, "both failures logged");
-  await click("table nil");
-  t.assert((await table("person")) === before, "setting a table to nil fails the tx, the table stays");
+  await click("table not a map");
+  t.assert((await table("person")) === before, "replacing a table with a non-map fails the tx, the table stays");
   t.assert(t.takeErrors().length >= 1, "the failure is logged");
 };

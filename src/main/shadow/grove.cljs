@@ -32,12 +32,14 @@
 ;; used by shadow.grove.preload to funnel debug messages to devtools
 (def dev-log-handler nil)
 
-(defn dispatch-up! [{::comp/keys [^not-native parent] :as env} ev-map]
+(defn dispatch-up! [{::comp/keys [^not-native parent-event-target ^not-native parent] :as env} ev-map]
   {:pre [(map? env)
          (map? ev-map)
          (qualified-keyword? (:e ev-map))]}
   ;; FIXME: should schedule properly when it isn't in event handler already
-  (gp/handle-event! parent ev-map nil env))
+  (if-some [target (or parent-event-target parent)]
+    (gp/handle-event! target ev-map nil env)
+    (js/console.warn "event not handled" (:e ev-map) ev-map)))
 
 ;; the idea is that query (and potentially others) can call suspend!
 ;; to let runtime know that data it required was still loading
@@ -56,10 +58,12 @@
   [query-fn & args]
   (impl/slot-query args query-fn))
 
+(defn- kv-lookups-query [env kv-table keys]
+  (select-keys (get env kv-table) keys))
+
 (defn kv-lookups [kv-table keys]
-  (impl/slot-query nil
-    (fn [env]
-      (select-keys (get env kv-table) keys))))
+  (let [keys (if (or (nil? keys) (vector? keys) (set? keys)) keys (vec keys))]
+    (impl/slot-query [kv-table keys] kv-lookups-query)))
 
 (defn kv-lookup
   ([kv-table]

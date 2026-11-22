@@ -4,7 +4,8 @@
     [cljs.test :as ct :refer (deftest is async)]
     [shadow.grove :as sg :refer (defc <<)]
     [shadow.grove.components :as comp]
-    [shadow.grove.protocols :as gp]))
+    [shadow.grove.protocols :as gp]
+    [shadow.grove.runtime :as rt]))
 
 (defn make-env [rt-id]
   (let [dom (JSDOM. "<!DOCTYPE html>")
@@ -440,3 +441,185 @@
          (fn []
            (is (= 1 @state-ref))
            (is (= "b1" (.-textContent root))))]))))
+
+;; multi-arity fn and let/loop shadowing in defc
+
+(defc ui-multi-arity-and-shadow [a b log-ref]
+  (bind f
+    (fn
+      ([a] (str "one:" a))
+      ([a b] (str "two:" a ":" b))))
+  (bind g
+    (fn named
+      ([x] (named x 0))
+      ([x y] (+ x y))))
+  (bind only-uses-b
+    (swap! log-ref conj :only-uses-b)
+    (let [a 100]
+      (+ a b)))
+  (bind loop-shadow
+    (swap! log-ref conj :loop-shadow)
+    (loop [a 0 acc 0]
+      (if (< a 3)
+        (recur (inc a) (+ acc a))
+        (+ acc b))))
+  (render
+    (str (f 1) "," (f 1 2) "," (g 5) "," only-uses-b "," loop-shadow "," a)))
+
+(deftest test-defc-multi-arity-fn-and-shadowing
+  (let [{:keys [root rt-ref]} (make-env ::multi-arity-shadow)
+        log-ref (atom [])]
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root (ui-multi-arity-and-shadow 1 2 log-ref))
+           (is (= "one:1,two:1:2,5,102,5,1" (.-textContent root)))
+           (is (= [:only-uses-b :loop-shadow] (take-log! log-ref))))
+
+         ;; changing a must NOT re-run binds that shadowed a in let/loop
+         (fn []
+           (sg/render rt-ref root (ui-multi-arity-and-shadow 99 2 log-ref))
+           (is (= "one:1,two:1:2,5,102,5,99" (.-textContent root)))
+           (is (= [] (take-log! log-ref))))
+
+         ;; changing b re-runs binds that use b
+         (fn []
+           (sg/render rt-ref root (ui-multi-arity-and-shadow 99 10 log-ref))
+           (is (= "one:1,two:1:2,5,110,13,99" (.-textContent root)))
+           (is (= [:only-uses-b :loop-shadow] (take-log! log-ref))))]))))
+
+;; dispatch-up! from a root component must reach RootEventTarget
+
+(sg/deftx root-inc! []
+  [tx-env ev e]
+  (update-in tx-env [::root-dispatch :n] inc))
+
+(defc ui-root-dispatch []
+  (bind n (sg/kv-lookup ::root-dispatch :n))
+  (event ::root-inc! [env ev e]
+    (sg/dispatch-up! env ev))
+  (render
+    (<< [:button {:on-click (root-inc!)} (str "n=" n)])))
+
+(deftest test-dispatch-up-from-root
+  (let [{:keys [root rt-ref]} (make-env ::root-dispatch-rt)]
+    (sg/add-kv-table rt-ref ::root-dispatch {} {:n 0})
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root (ui-root-dispatch))
+           (is (= "n=0" (.-textContent root))))
+
+         (fn []
+           (.click (.querySelector root "button")))
+
+         (fn []
+           (is (= "n=1" (.-textContent root))))]))))
+
+;; suspended component receiving new non-stable args must wake and re-evaluate
+
+(defc ui-suspend-on-arg [id]
+  (bind item (sg/kv-lookup ::susp-arg id))
+  (hook (when-not item (sg/suspend!)))
+  (render
+    (<< [:span (str "item:" item)])))
+
+(deftest test-suspended-component-updates-on-new-args
+  (let [{:keys [root rt-ref]} (make-env ::susp-arg-rt)]
+    (sg/add-kv-table rt-ref ::susp-arg {} {:ready "ok"})
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root (ui-suspend-on-arg :missing))
+           ;; suspended, nothing rendered
+           (is (= "" (.-textContent root))))
+
+         ;; parent passes a new arg whose data IS present -> must wake and render
+         (fn []
+           (sg/render rt-ref root (ui-suspend-on-arg :ready))
+           (is (= "item:ok" (.-textContent root))))]))))
+
+;; SlotRef -reset! from another component running at the same slot idx (0) must still invalidate
+
+(defn slot-0-trigger [holder]
+  (let [ref (rt/claim-slot! ::slot-0-trigger)]
+    (when (nil? @ref)
+      (reset! ref 0)
+      (vreset! holder ref))
+    @ref))
+
+(defc ui-slot-0-target [holder]
+  (bind v (slot-0-trigger holder))
+  (render (str "target=" v)))
+
+(defc ui-slot-0-writer [holder trigger]
+  ;; also slot 0, writes to target's slot-0 ref while running its own slot 0
+  (bind _
+    (when (and trigger @holder)
+      (reset! @holder trigger))
+    trigger)
+  (render (str "writer=" trigger)))
+
+(deftest test-slot-ref-reset-from-other-component-same-idx
+  (let [{:keys [root rt-ref]} (make-env ::slot-ref-same-idx)
+        holder (volatile! nil)]
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root
+             (<< (ui-slot-0-target holder)
+                 (ui-slot-0-writer holder nil)))
+           (is (= "target=0writer=" (.-textContent root))))
+
+         (fn []
+           (sg/render rt-ref root
+             (<< (ui-slot-0-target holder)
+                 (ui-slot-0-writer holder 42))))
+
+         (fn []
+           (is (= "target=42writer=42" (.-textContent root))))]))))
+
+;; dynamic :on-* event map starting as nil still applies :e/prevent-default when armed,
+;; and does NOT preventDefault when disarmed
+
+(defc ui-dynamic-ev-opts [armed? log-ref]
+  (event ::go! [env ev e]
+    (swap! log-ref conj [:fired (.-defaultPrevented e)]))
+  (render
+    (<< [:a {:href "#x"
+             :on-click (when armed? {:e ::go! :e/prevent-default true})}
+         "go"])))
+
+(deftest test-dynamic-event-options-from-nil
+  (let [{:keys [root rt-ref]} (make-env ::dyn-ev-opts)
+        log-ref (atom [])
+        dispatch-click (fn []
+                         (let [a (.querySelector root "a")
+                               win (.-defaultView (.-ownerDocument root))
+                               ev (new (.-Event win) "click" #js {:bubbles true :cancelable true})]
+                           (.dispatchEvent a ev)
+                           (.-defaultPrevented ev)))]
+
+    (async done
+      (run-steps done
+        [(fn []
+           ;; starts disarmed (nil)
+           (sg/render rt-ref root (ui-dynamic-ev-opts false log-ref))
+           (is (false? (dispatch-click)))
+           (is (= [] (take-log! log-ref))))
+
+         (fn []
+           ;; now armed -> :e/prevent-default must take effect
+           (sg/render rt-ref root (ui-dynamic-ev-opts true log-ref))
+           (is (true? (dispatch-click)))
+           (is (= [[:fired true]] (take-log! log-ref))))
+
+         (fn []
+           ;; disarmed again -> must NOT call preventDefault
+           (sg/render rt-ref root (ui-dynamic-ev-opts false log-ref))
+           (is (false? (dispatch-click)))
+           (is (= [] (take-log! log-ref))))]))))

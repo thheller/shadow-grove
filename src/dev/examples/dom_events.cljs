@@ -75,6 +75,7 @@
 ;; | `:e/once true` | listener option `{once: true}` |
 ;; | `:e/passive true` | listener option `{passive: true}` |
 ;; | `:e/capture true` | listener option `{capture: true}` |
+;; | `:e/signal abort-signal` | listener option `{signal: abort-signal}` |
 ;;
 ;; - The three DOM-control keys run synchronously when the event fires, even when the
 ;;   handler itself is debounced or throttled.
@@ -83,8 +84,6 @@
 ;;   once, every time, the throttle is ignored.
 ;; - When preventing is conditional (only for Enter), call `(.preventDefault e)` in the
 ;;   handler instead.
-;; - `:e/signal` exists in the source but sets `signal: true`, which is not an
-;;   `AbortSignal`. Don't use it.
 
 (deftx search! []
   {:e/debounce 300}
