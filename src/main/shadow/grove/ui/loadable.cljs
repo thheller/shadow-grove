@@ -8,6 +8,7 @@
     [shadow.grove.runtime :as rt]
     [shadow.grove.protocols :as gp]
     [shadow.grove.components :as comp]
+    [shadow.grove.trace :as trace]
     ))
 
 ;; FIXME: shadow.lazy is only available with shadow-cljs since it requires compiler support
@@ -76,15 +77,20 @@
           (lazy/load loadable
             (fn []
               ;; (js/console.log ::loaded this)
-              (.render! this)
+              ;; async callback, outside any scheduler work. needs its own trace
+              (let [t (trace/render-direct)]
+                (try
+                  (.render! this)
 
-              ;; FIXME: dom-insert should have happened by now but might not be because of suspense
-              (when-some [parent-el (.-parentElement marker)]
-                (ap/dom-insert managed parent-el marker)
-                (when dom-entered?
-                  (ap/dom-entered! managed)))
+                  ;; FIXME: dom-insert should have happened by now but might not be because of suspense
+                  (when-some [parent-el (.-parentElement marker)]
+                    (ap/dom-insert managed parent-el marker)
+                    (when dom-entered?
+                      (ap/dom-entered! managed)))
 
-              (gp/did-finish! scheduler this))
+                  (gp/did-finish! scheduler this)
+                  (finally
+                    (trace/render-direct-done t)))))
             (fn [err]
               (js/console.warn "lazy loading failed" this err)
               )))))

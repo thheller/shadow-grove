@@ -11,10 +11,14 @@
     [clojure.java.io :as io]
     [clojure.string :as str]
     [cognitect.transit :as transit]
+    [examples.remote-backend :as remote-backend]
+    [ring.core.protocols :as ring-p]
     [ring.websocket :as ws]
+    [shadow.grove.remote.server :as rs]
     [shadow.http.push-state :as push-state])
   (:import
-    [java.io ByteArrayInputStream ByteArrayOutputStream IOException]))
+    [java.io ByteArrayInputStream ByteArrayOutputStream IOException OutputStream]
+    [java.util.concurrent LinkedBlockingQueue TimeUnit]))
 
 ;; artificial latency in ms, so loading states and suspense are visible
 ;; (swap! examples.server/latency assoc "http-pull" 2000)
@@ -319,11 +323,74 @@
     {::ws/listener (ws-listener)}
     not-found))
 
+;; remote: both WebSocket and HTTP POST + SSE against examples.remote-backend
+
+(def remote-codec
+  {:read-str ws-read
+   :write-str transit-str
+   :content-type "application/transit+json; charset=utf-8"})
+
+(defn remote-sse-response []
+  (let [queue (LinkedBlockingQueue. 256)
+        overflow? (volatile! false)]
+    {:status 200
+     :headers {"content-type" "text/event-stream; charset=utf-8"
+               "cache-control" "no-cache"
+               "connection" "keep-alive"}
+     :body
+     (reify ring-p/StreamableResponseBody
+       (write-body-to-stream [_ _ output-stream]
+         (let [^OutputStream out output-stream
+               conn-id (rs/sse-connect! remote-backend/hub
+                         {:write-str transit-str
+                          :write-event! (fn [ev data]
+                                          (when-not (.offer queue [ev data])
+                                            ;; Queue overflow: force disconnect so client reconnects & resyncs
+                                            (vreset! overflow? true)
+                                            (throw (IOException. "SSE send queue overflow"))))})]
+           (try
+             (loop []
+               (when-not @overflow?
+                 (let [[ev data] (or (.poll queue 25 TimeUnit/SECONDS) ["ping" "{}"])]
+                   (.write out (.getBytes (str "event: " ev "\ndata: " data "\n\n") "UTF-8"))
+                   (.flush out)
+                   (recur))))
+             (catch IOException _
+               nil)
+             (finally
+               (rs/disconnect! remote-backend/hub conn-id))))))}))
+
+(defmethod api "remote" [_ req [route]]
+  (cond
+    (and (= "ws" route) (ws/upgrade-request? req))
+    {::ws/listener
+     (rs/ws-listener remote-backend/hub
+       (assoc remote-codec
+         :send-fn (fn [socket text]
+                    (try
+                      (ws/send socket text)
+                      (catch IOException _ nil)))
+         :ctx {}))}
+
+    (and (= :get (:request-method req)) (= "sse" route))
+    (remote-sse-response)
+
+    (and (= :post (:request-method req)) (= "elsewhere" route))
+    (do (remote-backend/write-from-elsewhere! 1 (str "from elsewhere @" (java.time.LocalTime/now)))
+        (edn-res {:ok true}))
+
+    (and (= :post (:request-method req)) (#{"read" "transact" "forget" "sync"} route))
+    (rs/ring-http-response remote-backend/hub {} remote-codec req route)
+
+    :else
+    not-found))
+
 (defn reset-all! []
   (reset! http-fx-db (http-fx-init))
   (reset! http-pull-db (http-pull-init))
   (reset! auth-sessions {})
   (reset! vlist-realized 300)
+  (remote-backend/reset-all!)
   ::reset)
 
 ;; dev-http entry

@@ -172,6 +172,19 @@
         (conj! acc [kv-table key]))
       (transient []))))
 
+(defn table-read?
+  "true when the mounted UI currently reads kv-table as a whole"
+  [kv-table]
+  (when-some [^TableIndex ti (km-get read-index kv-table)]
+    (some? (.-all ti))))
+
+(defn key-read?
+  "true when the mounted UI currently reads key in kv-table (directly or via whole-table read)"
+  [kv-table key]
+  (when-some [^TableIndex ti (km-get read-index kv-table)]
+    (or (some? (.-all ti))
+        (some? (km-get (.-keys ti) key)))))
+
 (defn read-tables
   "vector of the kv-tables the mounted UI currently reads as a whole,
    so it depends on every key of them"
@@ -415,7 +428,12 @@
               (merge-result tx-env ev handler-result)
 
               result
-              (call-interceptors (::sg/tx-after result) result)]
+              (call-interceptors (::sg/tx-after result) result)
+
+              result
+              (if-some [hooks (seq (::sg/tx-after-commit result))]
+                (call-interceptors hooks result)
+                result)]
 
           ;; FIXME: re-frame allows fx to edit db but we already committed it
           ;; currently not checking fx-fn return value at all since they supposed to run side effects only
@@ -513,7 +531,9 @@
    ^:mutable read-keys
    ;; array of kv-table, the tables it used seq on
    ^:mutable read-tables
-   ^:mutable result]
+   ^:mutable result
+   ^:mutable suspended?
+   ^:mutable demands]
 
   gp/IInvalidateSlot
   (invalidate! [this]
@@ -538,11 +558,29 @@
       (diff-reads! read-keys {} keys-del! this)
       (diff-tables! read-tables no-tables index-table-del! this)
       (set! read-keys {})
-      (set! read-tables no-tables)))
+      (set! read-tables no-tables)
+      (.set-demands! this nil)))
+
+  ;; a demand is whatever a query run said it needs via sg/demand!. handlers see
+  ;; them come and go, so something outside can tie a resource to the lifetime of queries
+  (set-demands! [this next-demands]
+    (when (not= demands next-demands)
+      (let [prev demands]
+        (set! demands next-demands)
+        (when-some [handlers (::sg/demand-handlers @rt-ref)]
+          (-kv-reduce
+            handlers
+            (fn [_ _ ^function handler]
+              (handler prev next-demands)
+              nil)
+            nil)))))
 
   (run! [this]
     (let [kv
           (::sg/kv @rt-ref)
+
+          demands-ref
+          (volatile! nil)
 
           ^not-native query-env
           (-kv-reduce
@@ -550,7 +588,8 @@
             (fn [query-env kv-table ^not-native kv]
               (-assoc query-env kv-table (kv/observed kv)))
             {::sg/runtime-ref rt-ref
-             ::sg/previous-result result})
+             ::sg/previous-result result
+             ::sg/demands demands-ref})
 
           next-result
           (apply (-nth query-key 0) query-env (-nth query-key 1))
@@ -588,13 +627,18 @@
       (set! read-keys next-keys)
       (set! read-tables next-tables)
       (set! invalidated false)
-      (set! result next-result))
+      (set! result next-result)
+      (set! suspended? (not rt/*ready*))
+      (.set-demands! this @demands-ref))
 
     js/undefined)
 
   (get-result [this]
-    (when invalidated
-      (.run! this))
+    (if invalidated
+      (.run! this)
+      ;; the query didn't run for this slot, it still has to wait for the same thing
+      (when suspended?
+        (set! rt/*ready* false)))
 
     result
     ))
@@ -608,6 +652,8 @@
             0
             {}
             no-tables
+            nil
+            false
             nil)]
     (swap! active-queries-ref assoc query-key q)
     q))

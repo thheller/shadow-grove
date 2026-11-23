@@ -5,6 +5,7 @@
     [shadow.arborist.common :as common]
     [shadow.grove :as-alias sg]
     [shadow.grove.protocols :as gp]
+    [shadow.grove.trace :as trace]
     [shadow.esm :as esm]
     ))
 
@@ -70,16 +71,20 @@
       (do (gp/did-suspend! scheduler this)
           (-> (esm/load-by-name loadable-name)
               (.then (fn [res]
-                       (set! this -result res)
-                       (.render! this)
+                       ;; async callback, outside any scheduler work. needs its own trace
+                       (let [t (trace/render-direct)]
+                         (try
+                           (set! this -result res)
+                           (.render! this)
 
-                       (when-some [parent-el (.-parentElement marker)]
-                         (ap/dom-insert managed parent-el marker)
-                         (when dom-entered?
-                           (ap/dom-entered! managed)))
+                           (when-some [parent-el (.-parentElement marker)]
+                             (ap/dom-insert managed parent-el marker)
+                             (when dom-entered?
+                               (ap/dom-entered! managed)))
 
-                       (gp/did-finish! scheduler this)
-                       ))))))
+                           (gp/did-finish! scheduler this)
+                           (finally
+                             (trace/render-direct-done t)))))))))))
 
   (render! [this]
     ;; (js/console.log ::render! this (lazy/ready? loadable))

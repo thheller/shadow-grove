@@ -6,6 +6,7 @@
     [shadow.grove.runtime :as rt]
     [shadow.grove.protocols :as gp]
     [shadow.grove.components :as comp]
+    [shadow.grove.trace :as trace]
     [shadow.grove.ui.util :as util]))
 
 (set! *warn-on-infer* false)
@@ -185,13 +186,18 @@
   (did-timeout! [this]
     (set! timeout nil)
     (when offscreen
-      (let [fallback (ap/as-managed (:fallback opts) parent-env)
-            old-display display]
-        ;; (js/console.log "using fallback after timeout")
-        (set! display (common/fragment-replace old-display fallback))
-        (when dom-entered?
-          (ap/dom-entered! display)
-          ))))
+      ;; called from setTimeout, so outside any scheduler work. needs its own trace
+      ;; since replacing the display destroys components
+      (let [t (trace/render-direct)]
+        (try
+          (let [fallback (ap/as-managed (:fallback opts) parent-env)
+                old-display display]
+            ;; (js/console.log "using fallback after timeout")
+            (set! display (common/fragment-replace old-display fallback))
+            (when dom-entered?
+              (ap/dom-entered! display)))
+          (finally
+            (trace/render-direct-done t))))))
 
   (tree-did-finish! [this]
     (ap/dom-insert offscreen (.-parentElement marker) marker)

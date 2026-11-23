@@ -58,6 +58,29 @@
   [query-fn & args]
   (impl/slot-query args query-fn))
 
+(defn demand!
+  "called while a query runs, env is the env of the query. records that this run needs
+   demand, any value. handlers registered via reg-demand-handler! are called as (handler prev next)
+   with the sets of two runs, and with next nil once the query is gone"
+  [{::keys [demands] :as env} demand]
+  (when-not demands
+    (throw (ex-info "demand! can only be used while a query runs" {:demand demand})))
+  (vswap! demands (fn [x] (conj (or x #{}) demand)))
+  env)
+
+(defn reg-demand-handler!
+  "registers a handler called as (handler prev-demands next-demands) when any query's demands change"
+  [rt-ref handler-id handler]
+  {:pre [(keyword? handler-id)
+         (fn? handler)]}
+  (swap! rt-ref assoc-in [::demand-handlers handler-id] handler)
+  rt-ref)
+
+(defn unreg-demand-handler!
+  [rt-ref handler-id]
+  (swap! rt-ref update ::demand-handlers dissoc handler-id)
+  rt-ref)
+
 (defn- kv-lookups-query [env kv-table keys]
   (select-keys (get env kv-table) keys))
 
@@ -533,6 +556,14 @@
 (defn queue-after-interceptor [tx-env interceptor]
   {:pre [(fn? interceptor)]}
   (update tx-env ::tx-after conj interceptor))
+
+(defn queue-after-commit
+  "queues a callback to run synchronously after kv-interceptor commits the transaction
+   and attaches ::sg/tx-info. never runs if the handler or an earlier interceptor throws.
+   must return tx-env (may queue additional fx)."
+  [tx-env callback]
+  {:pre [(fn? callback)]}
+  (update tx-env ::tx-after-commit vec-conj callback))
 
 (defn fx-timeout [env timeout-id timeout ev]
   (queue-fx env
