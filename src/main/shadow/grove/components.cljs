@@ -97,6 +97,15 @@
     ([this a1 a2 a3 a4 a5 a6]
      (check-arity! this 6)
      (ComponentInit. this (.args-fn this a1 a2 a3 a4 a5 a6)))
+    ([this a1 a2 a3 a4 a5 a6 a7]
+     (check-arity! this 7)
+     (ComponentInit. this (.args-fn this a1 a2 a3 a4 a5 a6 a7)))
+    ([this a1 a2 a3 a4 a5 a6 a7 a8]
+     (check-arity! this 8)
+     (ComponentInit. this (.args-fn this a1 a2 a3 a4 a5 a6 a7 a8)))
+    ([this a1 a2 a3 a4 a5 a6 a7 a8 a9]
+     (check-arity! this 9)
+     (ComponentInit. this (.args-fn this a1 a2 a3 a4 a5 a6 a7 a8 a9)))
     ;; FIXME: add more, user should really use maps at this point
     ))
 
