@@ -579,10 +579,95 @@
                    :read? (contains? read-keys k)
                    :val (kv-cached kv-row-cache v kv-guard-row-val*)})))}))
 
+(defn kv-fn-name [f]
+  ;; "home$admin$db$_QMARK_devices" -> "home.admin.db/?devices"
+  (let [n (when (fn? f) (.-name f))]
+    (if-not (and (string? n) (not= "" n))
+      (if (fn? f) "anonymous fn" (pr-str f))
+      (let [s (demunge n)
+            i (str/last-index-of s "/")]
+        (if (nil? i)
+          s
+          (str (str/replace (subs s 0 i) "/" ".") (subs s i)))))))
+
+(defn kv-guard-arg [v]
+  (kv-cached kv-row-cache v kv-guard-row-val*))
+
+(defn kv-component-path
+  "component names from the root down to component"
+  [component]
+  (loop [c component
+         path ()]
+    (if (nil? c)
+      (vec path)
+      (recur (::comp/component (.-parent-env c))
+        (conj path (.-component-name (.-config c)))))))
+
+(defn kv-describe-slot-ref
+  "the slot a read happens in, a component bind usually"
+  [ref]
+  (let [provider (when (instance? rt/SlotRef ref) (.-provider ^rt/SlotRef ref))
+        slot-idx (when (instance? rt/SlotRef ref) (.-idx ^rt/SlotRef ref))]
+    (if-not (instance? comp/ManagedComponent provider)
+      ;; a custom slot provider, or something that isn't a slot
+      {:provider (pr-str (type (or provider ref)))}
+      (let [config (.-config provider)
+            debug-info (.-debug-info config)
+            slot-debug-info (some-> (.-slots config) (aget slot-idx) (.-debug-info))
+            args (.-args provider)]
+        {:instance-id (.-instance-id provider)
+         :component (.-component-name config)
+         :file (:file debug-info)
+         :line (or (:line slot-debug-info) (:line debug-info))
+         :column (or (:column slot-debug-info) (:column debug-info))
+         :slot (:name slot-debug-info)
+         :path (kv-component-path provider)
+         :args
+         (reduce-kv
+           (fn [v idx arg-name]
+             (conj v {:name arg-name :val (kv-guard-arg (nth args idx nil))}))
+           []
+           (or (:args debug-info) []))}))))
+
+(defn kv-subs->vec [subs]
+  ;; one reader as is, a js/Set for more, see impl/subs-add
+  (cond
+    (nil? subs) []
+    (instance? js/Set subs) (let [arr (array)] (.forEach subs #(.push arr %)) (vec arr))
+    :else [subs]))
+
+(defn kv-key-readers
+  "readers of key in kv-table, straight from the read index in impl"
+  [kv-table key]
+  (if-some [^impl/TableIndex ti (impl/km-get impl/read-index kv-table)]
+    (kv-subs->vec (impl/km-get (.-keys ti) key))
+    []))
+
+(defn kv-table-readers [kv-table]
+  (if-some [^impl/TableIndex ti (impl/km-get impl/read-index kv-table)]
+    (kv-subs->vec (.-all ti))
+    []))
+
+(defn kv-describe-reader
+  "a reader is the slot ref of a sg/kv-lookup, or a query shared by the slots using it"
+  [reader]
+  (if (instance? impl/Query reader)
+    (let [[query-fn query-args] (.-query-key ^impl/Query reader)]
+      {:query (kv-fn-name query-fn)
+       ;; the rest args of sg/query, a seq
+       :query-args (let [args (kv-guard-arg query-args)]
+                     (if (seq? args) (vec args) args))
+       :slots (mapv kv-describe-slot-ref (kv-subs->vec (.-subs ^impl/Query reader)))})
+    (kv-describe-slot-ref reader)))
+
 (defn kv-push! [runtime read-index summary client-id {:keys [sub-id app-id kv-table entry] prev :last :as sub}]
   (let [data (when kv-table (kv-table-data app-id kv-table))
         read-keys (get read-index kv-table #{})
-        entry-val (when (and data entry) (get data (first entry)))]
+        entry-val (when (and data entry) (get data (first entry)))
+        ;; who reads, only for what is shown. readers can change while the read keys stay
+        ;; the same, another component starting to read a key that already was
+        table-readers (when data (mapv kv-describe-reader (kv-table-readers kv-table)))
+        entry-readers (when (and data entry) (mapv kv-describe-reader (kv-key-readers kv-table (first entry))))]
 
     ;; most txs and renders don't change what a sub shows
     (when-not (and prev
@@ -590,14 +675,18 @@
                    (identical? data (:data prev))
                    (identical? entry-val (:entry-val prev))
                    (= read-keys (:read-keys prev))
-                   (= summary (:summary prev)))
+                   (= summary (:summary prev))
+                   (= table-readers (:table-readers prev))
+                   (= entry-readers (:entry-readers prev)))
 
       (swap! kv-subs-ref assoc-in [client-id :last]
         {:sub-id sub-id
          :data data
          :entry-val entry-val
          :read-keys read-keys
-         :summary summary})
+         :summary summary
+         :table-readers table-readers
+         :entry-readers entry-readers})
 
       (shared/relay-msg runtime
         {:op ::m/kv-update
@@ -607,13 +696,14 @@
          :table
          (when data
            (-> (kv-table-state kv-table data read-keys sub)
-               (assoc :app-id app-id)))
+               (assoc :app-id app-id :table-readers table-readers)))
          :entry
          (when (and data entry)
            (let [key (first entry)]
              {:key key
               :found? (contains? data key)
               :read? (contains? read-keys key)
+              :readers entry-readers
               :val (kv-guard entry-val kv-entry-print-limit)}))}))))
 
 (def kv-push-tick false)

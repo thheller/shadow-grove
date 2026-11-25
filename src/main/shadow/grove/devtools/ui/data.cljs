@@ -3,6 +3,7 @@
    currently reads (sg/kv-lookup, sg/query, see impl/read-keys) are highlighted.
    the preload pushes what this shows after every tx and render, see kv-sub there."
   (:require
+    [clojure.string :as str]
     [shadow.grove.devtools :as-alias m]
     [shadow.grove.devtools.relay-ws :as relay-ws]
     [shadow.grove.events :as ev]
@@ -398,6 +399,89 @@
               (fn [row]
                 (ui-row ctx row (= entry [(:key row)]))))]]))))
 
+;; readers, see kv-describe-reader in the preload
+
+(defn short-name [s]
+  ;; "home.admin.ui.knx/ui-device-row" -> "ui-device-row"
+  (let [s (str s)
+        i (.lastIndexOf s "/")]
+    (if (neg? i) s (subs s (inc i)))))
+
+(defn reader-label [{:keys [query slots component slot provider]}]
+  (cond
+    query (str (short-name query) " in " (str/join ", " (map reader-label slots)))
+    provider provider
+    :else (str (short-name component) (when slot (str " bind " slot)))))
+
+(def $muted (css :text-xs :text-gray-500))
+
+(def $file-link
+  (css :text-xs :text-gray-500 :cursor-pointer :underline [:hover {:color "#1d4ed8"}]))
+
+(def $args
+  (css :font-mono :text-xs :pt-0.5
+    {:display "grid"
+     :grid-template-columns "max-content minmax(0, 1fr)"
+     :column-gap "0.75rem"}))
+
+(defn ui-slot-reader
+  "a component slot, the sg/kv-lookup itself or one using a query.
+   hovering outlines the component in the page"
+  [target-id {:keys [instance-id component file line column slot path args provider]}]
+  (if provider
+    (<< [:div {:class (css :py-1 :px-2)} [:span {:class $muted} (str "a slot of " provider)]])
+    (<< [:div {:class (css :py-1 :px-2 :rounded [:hover :bg-gray-100])
+               :on-mouseenter {:e ::m/highlight! :target-id target-id :item instance-id}
+               :on-mouseleave {:e ::m/remove-highlight! :target-id target-id}}
+         [:div {:class (css :flex :items-baseline :flex-wrap {:column-gap "0.5rem"})}
+          [:span {:class (css :font-semibold :font-mono)} (short-name component)]
+          (when slot
+            (<< [:span {:class $muted} (str "bind " slot)]))
+          (when file
+            (<< [:span {:class $file-link
+                        :title "open in editor"
+                        :on-click {:e ::m/open-in-editor! :file file :line line :column column}}
+                 (str file ":" line)]))]
+         [:div {:class (css :text-xs :text-gray-400 :truncate) :title (str/join " > " path)}
+          (str/join " › " (map short-name path))]
+         (when (seq args)
+           (<< [:div {:class $args}
+                (sg/simple-seq args
+                  (fn [{:keys [name val]}]
+                    (<< [:div {:class (css :text-gray-500)} name]
+                        [:div {:class (css :truncate)} (ui-value val)])))]))])))
+
+(defn ui-query-reader [target-id {:keys [query query-args slots]}]
+  (<< [:div {:class (css :py-1 :px-2)}
+       [:div {:class (css :flex :items-baseline {:gap "0.5rem"})}
+        [:span {:class (str $badge " " (css :bg-blue-100 {:color "#1e40af"}))} "query"]
+        [:span {:class (css :font-semibold :font-mono :whitespace-nowrap)} (short-name query)]
+        (when (seq query-args)
+          (<< [:span {:class (css :font-mono :text-xs :truncate :min-w-0)} (ui-value query-args)]))]
+       [:div {:class (css :text-xs :text-gray-400 :truncate)} query]
+       [:div {:class (css :mt-1 {:margin-left "4px" :border-left "2px solid #dbeafe"})}
+        (sg/simple-seq slots #(ui-slot-reader target-id %1))]]))
+
+(defn ui-reader [target-id reader]
+  (if (:query reader)
+    (ui-query-reader target-id reader)
+    (ui-slot-reader target-id reader)))
+
+(def $section-title
+  (css :px-2 :pb-1 :text-xs :font-semibold :text-gray-500))
+
+(defn ui-readers [target-id readers table-readers]
+  (<< [:div {:class (css :overflow-auto :py-2 :border-l {:width "45%" :flex-shrink "0"})}
+       [:div {:class $section-title} (str "Read by (" (count readers) ")")]
+       (if (seq readers)
+         (sg/simple-seq readers #(ui-reader target-id %1))
+         (<< [:div {:class (css :px-2 :text-xs :text-gray-400)}
+              "No sg/kv-lookup or sg/query reads this key directly."]))
+       (when (seq table-readers)
+         (<< [:div {:class (str $section-title " " (css :pt-3))}
+              (str "Read with the whole table (" (count table-readers) ")")]
+             (sg/simple-seq table-readers #(ui-reader target-id %1))))]))
+
 ;; selected entry
 
 (def $button
@@ -434,37 +518,42 @@
                       :on-click {:e ::kv-close-entry! :target-id target-id}}
              "close"]]
 
-           [:div {:class (css :flex-1 :overflow-auto :p-2)}
-            (cond
-              (nil? entry-state)
-              (<< [:div {:class (css :text-gray-400)} "loading …"])
+           [:div {:class (css :flex-1 :flex :overflow-hidden)}
+            [:div {:class (css :flex-1 :min-w-0 :overflow-auto :p-2)}
+             (cond
+               (nil? entry-state)
+               (<< [:div {:class (css :text-gray-400)} "loading …"])
 
-              (not found?)
-              nil
+               (not found?)
+               nil
 
-              (truncated? val)
-              (<< [:div {:class (css :p-2)}
-                   [:div {:class (css :font-semibold :pb-2)} "too large to send, use log in console"]
-                   [:div {:class (css :font-mono :text-xs {:word-break "break-all"})} (::m/truncated val)]])
+               (truncated? val)
+               (<< [:div {:class (css :p-2)}
+                    [:div {:class (css :font-semibold :pb-2)} "too large to send, use log in console"]
+                    [:div {:class (css :font-mono :text-xs {:word-break "break-all"})} (::m/truncated val)]])
 
-              ;; attrs as rows, references link to their table
-              (map? val)
-              (<< [:div {:class (css :font-mono :text-xs
-                                  {:display "grid"
-                                   :grid-template-columns "max-content minmax(0, 1fr)"
-                                   :column-gap "1rem"
-                                   :row-gap "2px"})}
-                   (sg/simple-seq (edn/attempt-to-sort (keys val))
-                     (fn [attr]
-                       (let [v (get val attr)]
-                         (<< [:div {:class (css :py-0.5 {:color "#660e7a"})} (str attr)]
-                             [:div {:class (css :py-0.5 :overflow-auto)}
-                              (if-some [ref-table (get refs attr)]
-                                (ui-ref-value ctx ref-table v)
-                                (edn/render-edn v))]))))])
+               ;; attrs as rows, references link to their table
+               (map? val)
+               (<< [:div {:class (css :font-mono :text-xs
+                                   {:display "grid"
+                                    :grid-template-columns "max-content minmax(0, 1fr)"
+                                    :column-gap "1rem"
+                                    :row-gap "2px"})}
+                    (sg/simple-seq (edn/attempt-to-sort (keys val))
+                      (fn [attr]
+                        (let [v (get val attr)]
+                          (<< [:div {:class (css :py-0.5 {:color "#660e7a"})} (str attr)]
+                              [:div {:class (css :py-0.5 :overflow-auto)}
+                               (if-some [ref-table (get refs attr)]
+                                 (ui-ref-value ctx ref-table v)
+                                 (edn/render-edn v))]))))])
 
-              :else
-              (edn/render-edn val))]]))))
+               :else
+               (edn/render-edn val))]
+
+            ;; a key that isn't in the table can still be read, waiting for it to show up
+            (when entry-state
+              (ui-readers target-id (:readers entry-state) (:table-readers table)))]]))))
 
 ;; panel
 
@@ -533,8 +622,10 @@
 
              (when table-read?
                (<< [:div {:class (css :px-3 :py-1 :text-xs :border-b {:background-color "#fefce8"})}
-                    "The UI reads this table as a whole, (sg/kv-lookup table) or a query using seq on it. "
-                    "Every change to it re-runs those readers."]))
+                    "Read as a whole, (sg/kv-lookup table) or a query using seq on it, by "
+                    [:span {:class (css :font-semibold)}
+                     (str/join "; " (map reader-label (:table-readers table)))]
+                    ". Every change to the table re-runs those."]))
 
              [:div {:class (css :flex-1 :overflow-auto)}
               (cond
