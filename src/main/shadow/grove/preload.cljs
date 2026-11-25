@@ -7,6 +7,7 @@
     [clojure.core.protocols :as cp]
     [shadow.grove.db.ident :as ident]
     [shadow.grove.impl :as impl]
+    [shadow.grove.kv :as kv]
     [shadow.remote.runtime.api :as p]
     [shadow.remote.runtime.shared :as shared]
     [shadow.remote.runtime.writer :as lw]
@@ -427,6 +428,247 @@
          :diff (make-tx-diff tx)}
         ))))
 
+;; data view support. a devtools UI subscribes with what it shows (a table, a filter,
+;; the selected entry). this pushes that after a tx or a render, when it changed.
+;; one sub per devtools client, a new kv-sub replaces the previous one.
+
+;; {client-id sub}
+(defonce kv-subs-ref (atom {}))
+
+(def kv-row-limit 1000)
+
+;; values are sent as data. one that prints longer than the limit is replaced by a
+;; {::m/truncated "preview"} map. maps get a limit per attribute, so one large
+;; attribute doesn't take the whole row with it.
+(def kv-row-print-limit 5000)
+(def kv-attr-print-limit 1000)
+(def kv-entry-print-limit 100000)
+(def kv-search-print-limit 10000)
+
+;; values are immutable, so guarded and printed versions are cached per value
+(defonce kv-row-cache (js/WeakMap.))
+(defonce kv-search-cache (js/WeakMap.))
+
+(defn kv-cached [^js cache v f]
+  (if-not (coll? v)
+    (f v)
+    (let [cached (.get cache v)]
+      (if-not (undefined? cached)
+        cached
+        (let [res (f v)]
+          (.set cache v res)
+          res)))))
+
+(defn kv-guard [v limit]
+  (cond
+    (string? v)
+    (if (> (.-length v) limit)
+      {::m/truncated (subs v 0 limit)}
+      v)
+
+    (or (nil? v) (number? v) (boolean? v) (keyword? v) (symbol? v) (uuid? v))
+    v
+
+    :else
+    (let [s (lw/pr-str-limit v limit)]
+      (if (str/starts-with? s "1,")
+        {::m/truncated (subs s 2)}
+        v))))
+
+(defn kv-guard-row-val* [v]
+  (let [guarded (kv-guard v kv-row-print-limit)]
+    (if (and (map? v) (not (identical? guarded v)))
+      (reduce-kv
+        (fn [m k v]
+          (assoc m k (kv-guard v kv-attr-print-limit)))
+        {}
+        v)
+      guarded)))
+
+(defn kv-search-text* [v]
+  (str/lower-case (subs (lw/pr-str-limit v kv-search-print-limit) 2)))
+
+(defn kv-matches? [needle k v]
+  (or (str/includes? (kv-cached kv-search-cache k kv-search-text*) needle)
+      (str/includes? (kv-cached kv-search-cache v kv-search-text*) needle)))
+
+(defn kv-read-index
+  "{kv-table #{key}} of what the mounted UI reads. the read index doesn't know runtimes,
+   two runtimes with a table of the same name share its entries"
+  []
+  (impl/reduce-read-keys
+    (fn [m kv-table key]
+      (update m kv-table (fnil conj #{}) key))
+    {}))
+
+(defn kv-table-data [app-id kv-table]
+  (some-> (get @rt/known-runtimes-ref app-id) (deref) (::sg/kv) (get kv-table)))
+
+(defn kv-table-refs
+  "{attr other-table} from :joins and :attrs {attr {:references other-table}}"
+  [config]
+  (reduce-kv
+    (fn [m attr {:keys [references]}]
+      (if references
+        (assoc m attr references)
+        m))
+    (or (:joins config) {})
+    (or (:attrs config) {})))
+
+(defn kv-summary [read-index]
+  (->> (for [[app-id rt-ref] @rt/known-runtimes-ref
+             [kv-table data] (::sg/kv @rt-ref)]
+         {:app-id app-id
+          :kv-table kv-table
+          :count (count data)
+          :read-count (count (get read-index kv-table))
+          :table-read? (boolean (impl/table-read? kv-table))})
+       ;; namespaced tables usually belong to libraries, those go last
+       (sort-by (fn [{:keys [app-id kv-table]}]
+                  [(str app-id)
+                   (boolean (and (keyword? kv-table) (namespace kv-table)))
+                   (str kv-table)]))
+       (vec)))
+
+(defn kv-sort-entries [entries]
+  (try
+    (vec (sort-by first entries))
+    (catch :default e
+      ;; keys of mixed types don't compare
+      (vec (sort-by #(pr-str (first %)) entries)))))
+
+(defn kv-table-state [kv-table data read-keys {filter-text :filter :keys [only-read?]}]
+  (let [needle
+        (when (seq filter-text)
+          (str/lower-case filter-text))
+
+        entries
+        (persistent!
+          (reduce-kv
+            (fn [acc k v]
+              (if (and (or (not only-read?) (contains? read-keys k))
+                       (or (nil? needle) (kv-matches? needle k v)))
+                (conj! acc [k v])
+                acc))
+            (transient [])
+            data))
+
+        matched
+        (count entries)
+
+        entries
+        (if (<= matched kv-row-limit)
+          entries
+          ;; keep the rows the UI reads when cutting
+          (let [{read true other false} (group-by #(contains? read-keys (first %)) entries)]
+            (into [] (take kv-row-limit) (concat read other))))
+
+        config
+        (::kv/config (meta data))]
+
+    {:kv-table kv-table
+     :count (count data)
+     :matched matched
+     :primary-key (:primary-key config)
+     :refs (kv-table-refs config)
+     :table-read? (boolean (impl/table-read? kv-table))
+     :rows
+     (->> (kv-sort-entries entries)
+          (mapv (fn [[k v]]
+                  {:key k
+                   :read? (contains? read-keys k)
+                   :val (kv-cached kv-row-cache v kv-guard-row-val*)})))}))
+
+(defn kv-push! [runtime read-index summary client-id {:keys [sub-id app-id kv-table entry] prev :last :as sub}]
+  (let [data (when kv-table (kv-table-data app-id kv-table))
+        read-keys (get read-index kv-table #{})
+        entry-val (when (and data entry) (get data (first entry)))]
+
+    ;; most txs and renders don't change what a sub shows
+    (when-not (and prev
+                   (= sub-id (:sub-id prev))
+                   (identical? data (:data prev))
+                   (identical? entry-val (:entry-val prev))
+                   (= read-keys (:read-keys prev))
+                   (= summary (:summary prev)))
+
+      (swap! kv-subs-ref assoc-in [client-id :last]
+        {:sub-id sub-id
+         :data data
+         :entry-val entry-val
+         :read-keys read-keys
+         :summary summary})
+
+      (shared/relay-msg runtime
+        {:op ::m/kv-update
+         :to client-id
+         :sub-id sub-id
+         :tables summary
+         :table
+         (when data
+           (-> (kv-table-state kv-table data read-keys sub)
+               (assoc :app-id app-id)))
+         :entry
+         (when (and data entry)
+           (let [key (first entry)]
+             {:key key
+              :found? (contains? data key)
+              :read? (contains? read-keys key)
+              :val (kv-guard entry-val kv-entry-print-limit)}))}))))
+
+(def kv-push-tick false)
+(def kv-push-timeout nil)
+(def kv-push-last 0)
+
+(defn kv-push-all! []
+  (set! kv-push-tick false)
+  (when kv-push-timeout
+    (js/clearTimeout kv-push-timeout)
+    (set! kv-push-timeout nil))
+  (set! kv-push-last (js/Date.now))
+  (let [subs @kv-subs-ref
+        runtime (:runtime @devtools-ref)]
+    (when (and runtime (seq subs))
+      (let [read-index (kv-read-index)
+            summary (kv-summary read-index)]
+        (reduce-kv
+          (fn [_ client-id sub]
+            ;; this runs after every tx, a failure shouldn't take the next sub with it
+            (try
+              (kv-push! runtime read-index summary client-id sub)
+              (catch :default e
+                (js/console.warn "devtools data view update failed" e))))
+          nil
+          subs)))))
+
+(defn schedule-kv-push! []
+  (when (and (not kv-push-tick) (seq @kv-subs-ref))
+    (let [wait (- (+ kv-push-last 100) (js/Date.now))]
+      (if (pos? wait)
+        ;; at most one push per 100ms. the timeout makes sure the last change goes out,
+        ;; but the app tab is usually in the background while looking at the devtools,
+        ;; where timers are throttled to 1s. in a busy app the next tx or render after
+        ;; the 100ms gets here first and pushes right away.
+        (when-not kv-push-timeout
+          (set! kv-push-timeout (js/setTimeout kv-push-all! wait)))
+        ;; next-tick runs after the render microtask of a tx, both go out as one update
+        (do (set! kv-push-tick true)
+            (rt/next-tick kv-push-all!))))))
+
+(defn kv-sub [svc {:keys [from] :as msg}]
+  (swap! kv-subs-ref assoc from (select-keys msg [:sub-id :app-id :kv-table :filter :only-read? :entry]))
+  ;; someone is waiting for this one
+  (set! kv-push-last 0)
+  (schedule-kv-push!))
+
+(defn kv-unsub [svc {:keys [from] :as msg}]
+  (swap! kv-subs-ref dissoc from))
+
+(defn kv-log-entry [svc {:keys [app-id kv-table key] :as msg}]
+  (js/console.group "DEVTOOLS" (str kv-table) (pr-str key))
+  (js/console.log (get (kv-table-data app-id kv-table) key))
+  (js/console.groupEnd))
+
 (defn tx-reporter [report]
   (let [tx-id
         (swap! tx-seq-ref inc)
@@ -439,6 +681,9 @@
     ;; store so that devtools can query db diff on demand
     ;; FIXME: should really garbage collect these at some point, they are going to pile up quick
     (swap! tx-ref assoc tx-id report)
+
+    ;; a tx can change tables the UI doesn't read, so it doesn't always cause a render
+    (schedule-kv-push!)
 
     (when-some [devtools @devtools-ref]
       (let [streams-ref (:streams-ref devtools)
@@ -557,6 +802,9 @@
     (swap! traces-ref assoc (:trace-id trace) trace)
 
     (set! active-trace nil)
+
+    ;; renders mount and unmount readers, which changes what the data view highlights
+    (schedule-kv-push!)
 
     ;; sending snapshots can be done async. mostly to separate sending
     ;; from actual work done. tracing overhead so far is already too big
@@ -727,16 +975,28 @@
           ::m/stream-sub #(stream-sub svc %)
           ::m/request-log #(request-log svc %)
           ::m/highlight-component #(highlight-component svc %)
-          ::m/remove-highlight #(remove-highlight svc %)}
+          ::m/remove-highlight #(remove-highlight svc %)
+          ::m/kv-sub #(kv-sub svc %)
+          ::m/kv-unsub #(kv-unsub svc %)
+          ::m/kv-log-entry #(kv-log-entry svc %)}
+
+         ;; a devtools UI that went away without kv-unsub
+         :on-client-not-found
+         (fn [{:keys [client-id]}]
+           (swap! kv-subs-ref dissoc client-id))
 
          :on-disconnect
          (fn []
            (reset! streams-ref #{})
+           (reset! kv-subs-ref {})
            (set! impl/tx-reporter nil)
            (set! broadcast-trace (fn [trace])))
 
          :on-welcome
          (fn []
+           ;; :on-disconnect removed it, a reconnect after a server restart needs it back
+           (set! impl/tx-reporter tx-reporter)
+
            (js/console.log "shadow-grove devtools ready!"
              (str (client-env/get-url-base)
                   "/classpath/shadow/grove/devtools.html?runtime="

@@ -39,6 +39,10 @@
   (sg/add-kv-table rt-ref ::m/event
     {:primary-key :event-id})
 
+  ;; data view state and what the target pushed for it, see ui.data
+  (sg/add-kv-table rt-ref ::m/kv-view
+    {:primary-key :target-id})
+
   (sg/add-kv-table rt-ref ::m/work-snapshot
     ;; might get traces from different runtimes with same id, just an int
     {:primary-key [:target-id :trace-id]})
