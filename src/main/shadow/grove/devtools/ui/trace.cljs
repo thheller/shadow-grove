@@ -195,33 +195,31 @@
                   :else "\uD83C\uDF33" ;; tree
                   )]
                [:div component-name]
-               (sg/simple-seq (:args component-info)
-                 (fn [arg-name]
-                   (<< [:div (css :bg-gray-100) arg-name])))
-               (sg/simple-seq (:slots component-info)
-                 (fn [slot idx]
-                   (let [slot-info (get-in instance-info [:slots idx])]
+               (sg/each (:args component-info) [arg-name]
+                 (<< [:div (css :bg-gray-100) arg-name]))
+               (sg/each (:slots component-info) [slot idx]
+                 (let [slot-info (get-in instance-info [:slots idx])]
 
-                     (<< [:div
-                          {:class (cond
-                                    (nil? slot-info) ;; did not execute
-                                    (css :bg-gray-100)
+                   (<< [:div
+                        {:class (cond
+                                  (nil? slot-info) ;; did not execute
+                                  (css :bg-gray-100)
 
-                                    (:created instance-info) ;; show all as changed when component first mounts
-                                    (css :bg-orange-200)
-                                    (:equal slot-info) ;; execute and equal
-                                    (css :bg-green-100)
+                                  (:created instance-info) ;; show all as changed when component first mounts
+                                  (css :bg-orange-200)
+                                  (:equal slot-info) ;; execute and equal
+                                  (css :bg-green-100)
 
-                                    (:cleanup slot-info) ;; destroy cleanup
-                                    (css :bg-red-100)
+                                  (:cleanup slot-info) ;; destroy cleanup
+                                  (css :bg-red-100)
 
-                                    :else
-                                    (css :bg-orange-200))}
+                                  :else
+                                  (css :bg-orange-200))}
 
-                          (:name slot)
+                        (:name slot)
 
-                          (when (and slot-info (false? (:ready slot-info)))
-                            " \uD83D\uDCA4")]))))
+                        (when (and slot-info (false? (:ready slot-info)))
+                          " \uD83D\uDCA4")])))
 
                (cond
                  (:rendered instance-info)
@@ -283,6 +281,5 @@
 
   (render
     (<< [:div {:class (css :flex-1 :overflow-auto :font-sans)}
-         (sg/simple-seq snapshots
-           (fn [trace-id]
-             (ui-trace target-id trace-id)))])))
+         (sg/each snapshots [trace-id]
+           (ui-trace target-id trace-id))])))

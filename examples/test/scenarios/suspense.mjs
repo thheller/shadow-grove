@@ -1,8 +1,5 @@
 // suspense: offscreen vs in place, :timeout, chrome beside, suspend! with a default, no boundary
 export default async (t) => {
-  // known issue: the fallback swap after :timeout runs from a setTimeout outside any devtools trace,
-  // shadow.grove.preload logs "not tracing?" for the component destroy it does
-  t.expectConsoleError(/not tracing\?/);
   await t.goto("/suspense/");
   await t.waitFor(`document.querySelectorAll("[data-page]").length === 2`, { message: "both pages rendered" });
   const page = (where) => t.evaluate(`document.querySelector("[data-page=${where}]")?.innerText ?? null`);
@@ -37,5 +34,4 @@ export default async (t) => {
   await t.sleep(1500);
   const late = await t.exists("#late");
   t.assert(late, "without a suspense ancestor the component mounts once its data arrived");
-  t.knownIssue(t.logs.some((l) => /not tracing\?/.test(l)), 'the fallback swap after :timeout logs "not tracing?" with the devtools preload');
 };

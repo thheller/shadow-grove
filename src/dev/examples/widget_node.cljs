@@ -278,7 +278,7 @@
             [:button {:class c/$btn :on-click ::more!} "add a value to the first"]
             [:button {:class c/$btn :on-click ::show!} (if show? "hide" "show")]]
            (when show?
-             (sg/keyed-seq charts :id (fn [{:keys [id data]}] (ui-chart id data)))))
+             (sg/each charts :id [{:keys [id data]}] (ui-chart id data))))
 
        "IConstruct via metadata"
        [:div {:class c/$row}

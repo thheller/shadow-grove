@@ -92,7 +92,7 @@
 ;;
 ;; Calling a component, `(ui-kind-a x)`, runs no user code apart from destructuring its
 ;; args. It returns a cheap **seed**: the definition plus the args vector. A seed only
-;; starts computing when something attaches it: a fragment, `simple-seq` / `keyed-seq`,
+;; starts computing when something attaches it: a fragment, `sg/each` or a `*-seq` fn,
 ;; `suspense`, `portal` or `sg/render`.
 ;;
 ;; When a parent renders again and produces a seed at the same position:

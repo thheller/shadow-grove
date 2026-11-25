@@ -82,7 +82,7 @@
   (bind ids (sg/query ?item-ids))
   (render
     (<< [:div {:data-checklist ""}
-         (sg/keyed-seq ids identity ui-item)
+         (sg/each ids identity [id] (ui-item id))
          (ui-summary)
          [:div {:class c/$muted} "checklist rendered " (c/render-count ::checklist)]])))
 

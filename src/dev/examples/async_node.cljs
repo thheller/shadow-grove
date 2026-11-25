@@ -108,12 +108,11 @@
 
 ;; keyed by round: a new round is a new boundary
 (defn two-delayed [round]
-  (sg/keyed-seq [round] identity
-    (fn [r]
-      (sg/suspense {:fallback (<< [:div#fallback "waiting for both ..."]) :timeout 0}
-        (<< [:div#content
-             (delayed 300 (<< [:div#fast "fast content, round " r]))
-             (delayed 900 (<< [:div#slow "slow content, round " r]))])))))
+  (sg/each [round] identity [r]
+    (sg/suspense {:fallback (<< [:div#fallback "waiting for both ..."]) :timeout 0}
+      (<< [:div#content
+           (delayed 300 (<< [:div#fast "fast content, round " r]))
+           (delayed 900 (<< [:div#slow "slow content, round " r]))]))))
 
 ;; # page
 

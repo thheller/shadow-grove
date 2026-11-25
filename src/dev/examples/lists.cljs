@@ -1,8 +1,10 @@
 (ns examples.lists
-  "Collections render through `sg/simple-seq`, `sg/diff-seq`, `sg/diff-seq-by-value`,
-   `sg/keyed-seq` or `sg/each`, never as lazy seqs (fragments assert that in dev). They differ in how
-   they match old items to new ones, which decides what happens to a row's DOM when the
-   collection changes. All of them mount every item: for hundreds of rows and more, see
+  "Collections render through `sg/each`, never as lazy seqs (fragments assert that in
+   dev). `sg/each` takes the render fn body inline and matches items by position, or by
+   key with a key-fn. It builds on `sg/simple-seq` and `sg/keyed-seq`, which take a render
+   fn, as do `sg/diff-seq` and `sg/diff-seq-by-value`. They differ in how they match old
+   items to new ones, which decides what happens to a row's DOM when the collection
+   changes. All of them mount every item: for hundreds of rows and more, see
    [vlist](/vlist/)."
   (:require
     [examples.common :as c]
@@ -39,6 +41,9 @@
 ;;   exception is `sg/each` with a body not using `idx`, see below.
 ;; - **duplicate a key**: keys must be unique. `keyed-seq` throws in dev builds, release
 ;;   builds don't check.
+;;
+;; `(sg/each items [item] ...)` matches like `simple-seq`, `(sg/each items :id [item] ...)`
+;; like `keyed-seq`. There is no `sg/each` for the `diff-seq*` matching.
 
 (defonce instance-seq (volatile! 0))
 
@@ -65,26 +70,6 @@
        [:div#diff-value {:class (css :flex-1)} (column "diff-seq-by-value (=)" (sg/diff-seq-by-value items ui-row))]
        [:div#keyed {:class (css :flex-1)} (column "keyed-seq (:id)" (sg/keyed-seq items :id ui-row))]]))
 
-;; ## render fns
-;;
-;; ```
-;; (sg/simple-seq items ui-row)                    ;; a defc directly
-;; (sg/simple-seq items (fn [item idx] (<< ...)))  ;; inline
-;; (sg/keyed-seq items :id ui-row)
-;; (sg/keyed-seq items :id
-;;   (fn [item] (ui-row item other-local)))        ;; closing over a local
-;; ```
-;;
-;; - `simple-seq` and `diff-seq*` call the render fn with `[item idx]`, `keyed-seq` with
-;;   `[item idx key]`. A one-arg fn is fine. Return a fragment or a component call.
-;; - The render fn can be a `defc` directly, no wrapper fn needed unless it closes over
-;;   other locals.
-;; - An item renders again only when its data, its `idx` or the render fn changed. An
-;;   inline `(fn ...)` is new on every render of the parent, so every item renders again
-;;   on every invalidation of the parent. That is still correct, but wasted work. Use a
-;;   top-level fn, `(bind row-fn (fn ...))`, or `sg/each` below. The clj-kondo config
-;;   shadow-grove exports warns about inline fns (`:shadow.grove/inline-seq-render-fn`).
-
 ;; ## each
 ;;
 ;; ```
@@ -93,7 +78,13 @@
 ;;   (ui-row item marked))
 ;; ```
 ;;
-;; `sg/each` is a macro taking the render fn body inline. It finds the outer locals the
+;; `sg/each` is a macro taking the render fn body inline, the args are `[item idx]`, keyed
+;; `[item idx key]`. Bind only what the body uses, `[item]` is fine. The body returns a
+;; fragment or a component call.
+;;
+;; An item renders again only when its data, its `idx` or the render fn changed. An inline
+;; `(fn ...)` is new on every render of the parent, so passing one to `keyed-seq` renders
+;; every item on every render of the parent. `sg/each` doesn't compare the fn. It finds the outer locals the
 ;; body uses (`marked` above, never `item` or names the body binds itself) and compares
 ;; those with `=` instead of comparing the fn. Same values as last render: only items
 ;; whose data or `idx` changed render again. If nothing changed at all the parent
@@ -118,12 +109,30 @@
 ;; - Locals are compared by value. `@some-atom` in the body is not a dep, only the atom
 ;;   itself is.
 
+;; ## render fns
+;;
+;; ```
+;; (sg/keyed-seq items :id ui-row)                 ;; a defc directly
+;; (sg/diff-seq items ui-row)
+;; ```
+;;
+;; The plain fns take a render fn, called with `[item idx]`, `keyed-seq` with
+;; `[item idx key]`. Use them for `diff-seq*` matching, or when there is nothing to gain:
+;; a top-level fn never changes, so only items whose data or `idx` changed render. A
+;; moved item still calls it again for its new `idx`, `sg/each` with `[item]` doesn't.
+;;
+;; Don't pass them an inline `(fn ...)`, or a fn made during render: every item renders
+;; again on every render of the parent. Use `sg/each`, or `(bind row-fn (fn ...))` in the
+;; component. The clj-kondo config shadow-grove exports warns about inline fns
+;; (`:shadow.grove/inline-seq-render-fn`).
+
 ;; ## picking one
 ;;
-;; - `simple-seq` is the default. Removing the first of 100 rows makes it render the next
-;;   item's data into each of the 99 rows after it. `diff-seq` and `keyed-seq` remove that
-;;   row's DOM and call the render fn for the 99 with their new `idx`. If a row doesn't
-;;   show `idx`, that call changes no DOM: about 8x faster at 100 rows and 10x at 1000.
+;; - By position (`sg/each` without key-fn, `simple-seq`) is the default. Removing the
+;;   first of 100 rows makes it render the next item's data into each of the 99 rows
+;;   after it. `diff-seq` and `keyed-seq` remove that row's DOM and call the render fn for
+;;   the 99 with their new `idx`. If a row doesn't show `idx`, that call changes no DOM:
+;;   about 8x faster at 100 rows and 10x at 1000.
 ;;   If it does, every shifted row writes its new `idx`. Keyed `sg/each` with a body not
 ;;   using `idx` skips those calls too, another 5x at 100 rows and 11x at 1000.
 ;; - `diff-seq` needs items that keep their identity across updates: unchanged entity maps
@@ -147,8 +156,8 @@
 ;; ## lists of ids
 ;;
 ;; When a query returns ids and each row does its own `kv-lookup`, use
-;; `(sg/keyed-seq ids identity ui-row)`: identity as `key-fn` is the "the collection is
-;; already keys" case, not a special API. `(sg/diff-seq ids ui-row)` doesn't guarantee a
+;; `(sg/each ids identity [id] (ui-row id))`: identity as `key-fn` is the "the collection
+;; is already keys" case, not a special API. `(sg/diff-seq ids ui-row)` doesn't guarantee a
 ;; row keeps its id: a new id that lines up with a removed one is rendered over that row,
 ;; so the row component gets a new id in place (the `^:stable` case in
 ;; [stable-args](/stable-args/)). [kv-reads](/kv-reads/) shows the pattern.

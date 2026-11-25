@@ -121,14 +121,16 @@
 (defmethod rewrite-hooks! 'effect
   [[hook & hooks]]
   (let [[_ event-when binding-vec & body] (:children hook)]
-    (when-not (or (api/vector-node? event-when)
-                  (and (api/keyword-node? event-when)
-                       (-valid-effect-events (api/sexpr event-when))))
+    ;; any value works as deps, the effect runs again when it is not= to the last one.
+    ;; only a keyword is suspicious, the runtime treats unknown ones as plain deps
+    ;; that never change, so :mountt silently runs once.
+    (when (and (api/keyword-node? event-when)
+               (not (-valid-effect-events (api/sexpr event-when))))
       (api/reg-finding!
         (assoc (meta event-when)
           :level :error
           :message
-          (format "Invalid effect trigger '%s'. Must be one of %s or a vector of dependencies"
+          (format "Invalid effect trigger '%s'. Must be one of %s, or deps (a value, the effect runs again when it changes)"
             (str (api/sexpr event-when))
             (str/join ", " -valid-effect-events))
           :type :shadow.grove/invalid-effect-deps)))

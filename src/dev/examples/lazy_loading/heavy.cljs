@@ -13,7 +13,6 @@
 (defn ^{:lazy-loadable "bar-chart"} bar-chart [{:keys [values]}]
   (let [w 24 h 100 top (max 1 (apply max values))]
     (<< [:svg#bar-chart {:width (* w (count values)) :height h :aria-label "bar chart"}
-         (sg/simple-seq values
-           (fn [v idx]
-             (let [bh (* h (/ v top))]
-               (<< [:rect {:x (* idx w) :y (- h bh) :width (- w 4) :height bh :fill "#3b82f6"}]))))])))
+         (sg/each values [v idx]
+           (let [bh (* h (/ v top))]
+             (<< [:rect {:x (* idx w) :y (- h bh) :width (- w 4) :height bh :fill "#3b82f6"}])))])))

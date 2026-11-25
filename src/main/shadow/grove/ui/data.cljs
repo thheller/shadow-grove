@@ -26,20 +26,18 @@
     (<< [:div.flex
          [:div "["]
          [:div
-          (sg/simple-seq obj
-            (fn [val idx]
-              (render* val)))]
+          (sg/each obj [val idx]
+            (render* val))]
          [:div.self-end "]"]])
 
     (map? obj)
     (<< [:div.flex
          [:div "{"]
          [:div.flex-1
-          (sg/simple-seq (try (sort (keys obj)) (catch :default e (keys obj)))
-            (fn [key idx]
-              (<< [:div {:class (when (pos? idx) "pt-2")} (render* key)]
-                  [:div (render* (get obj key))])
-              ))]
+          (sg/each (try (sort (keys obj)) (catch :default e (keys obj))) [key idx]
+            (<< [:div {:class (when (pos? idx) "pt-2")} (render* key)]
+                [:div (render* (get obj key))])
+            )]
          [:div.self-end "}"]])
 
     :else

@@ -86,23 +86,22 @@
       (edn-empty-coll "{}")
       (<< [:div {:class (css {:border-left "6px solid purple"})}
            [:table
-            (sg/simple-seq keys
-              (fn [k]
-                (let [v (get val k)
+            (sg/each keys [k]
+              (let [v (get val k)
 
-                      $map-key
-                      (css :align-top {:padding "1px 0.5rem 1px 0"})
+                    $map-key
+                    (css :align-top {:padding "1px 0.5rem 1px 0"})
 
-                      $map-val
-                      (css :p-0 :w-full)]
-                  (<< [:tr {:class (css :border-b
-                                     ["&:last-child" {:border "none"}])}
-                       [:td {:class $map-key}
-                        [:div {:class (css {:position "sticky" :top "0px"})}
-                         (render-edn k)]]
-                       [:td {:class $map-val}
-                        (render-edn v)]])
-                  )))]]))))
+                    $map-val
+                    (css :p-0 :w-full)]
+                (<< [:tr {:class (css :border-b
+                                   ["&:last-child" {:border "none"}])}
+                     [:td {:class $map-key}
+                      [:div {:class (css {:position "sticky" :top "0px"})}
+                       (render-edn k)]]
+                     [:td {:class $map-val}
+                      (render-edn v)]])
+                ))]]))))
 
 ;; not super wide, but kinda unreadable
 (defc edn-map-not-so-wide [val]
@@ -124,20 +123,19 @@
                               ;; :display "grid"
                               ;; :grid-template-columns "min-content 1fr"
                               })}
-           (sg/simple-seq keys
-             (fn [k]
-               (let [v (get val k)
+           (sg/each keys [k]
+             (let [v (get val k)
 
-                     $map-key
-                     (css :align-top {:padding "1px 0.5rem 1px 0"})
+                   $map-key
+                   (css :align-top {:padding "1px 0.5rem 1px 0"})
 
-                     $map-val
-                     (css :p-0 :pl-2 :w-full :border-b #_{:border-left "6px solid #eee"})]
-                 (<< [:div {:class (css :py-1 #_{:position "sticky" :top "0px"})}
-                      (render-edn k)]
-                     [:div {:class $map-val}
-                      (render-edn v)])
-                 )))]))))
+                   $map-val
+                   (css :p-0 :pl-2 :w-full :border-b #_{:border-left "6px solid #eee"})]
+               (<< [:div {:class (css :py-1 #_{:position "sticky" :top "0px"})}
+                    (render-edn k)]
+                   [:div {:class $map-val}
+                    (render-edn v)])
+               ))]))))
 
 (defc edn-vec [val]
   (render
@@ -146,16 +144,14 @@
       (<< [:div {:class (css {:border-left "6px solid green"
                               :display "grid"
                               :grid-template-columns "min-content 1fr"})}
-           (sg/simple-seq
-             val
-             (fn [item idx]
-               (let [$seq-val (css :pl-1 :border-b
-                                ["&:last-child" {:border "none"}])]
-                 (<< [:div {:class (css :border-b)}
-                      [:div {:class (css :px-1 :text-right :text-gray-500 {:position "sticky" :top "0px" :width "30px"})}
-                       idx]]
-                     [:div {:class $seq-val} (render-edn item)]))
-               ))]))))
+           (sg/each val [item idx]
+             (let [$seq-val (css :pl-1 :border-b
+                              ["&:last-child" {:border "none"}])]
+               (<< [:div {:class (css :border-b)}
+                    [:div {:class (css :px-1 :text-right :text-gray-500 {:position "sticky" :top "0px" :width "30px"})}
+                     idx]]
+                   [:div {:class $seq-val} (render-edn item)]))
+             )]))))
 
 (defc edn-set [val]
   (bind items
@@ -165,12 +161,10 @@
     (if (empty? val)
       (edn-empty-coll "#{}")
       (<< [:div {:class (css {:border-left "6px solid blue"})}
-           (sg/simple-seq
-             items
-             (fn [item idx]
-               (let [$seq-val (css :pl-1 :border-b
-                                ["&:last-child" {:border "none"}])]
-                 (<< [:div {:class $seq-val} (render-edn item)]))))
+           (sg/each items [item idx]
+             (let [$seq-val (css :pl-1 :border-b
+                              ["&:last-child" {:border "none"}])]
+               (<< [:div {:class $seq-val} (render-edn item)])))
            ]))))
 
 (def large-string-cutoff 120)
@@ -277,73 +271,72 @@
   (render
     (<< [:div {:class (css {:border-left "6px solid purple"})}
          [:table
-          (sg/simple-seq keys
-            (fn [k]
-              (let [lv (get left k NOT-FOUND)
-                    rv (get right k NOT-FOUND)
+          (sg/each keys [k]
+            (let [lv (get left k NOT-FOUND)
+                  rv (get right k NOT-FOUND)
 
-                    [$map-key $map-val]
+                  [$map-key $map-val]
+                  (cond
+                    ;; new key
+                    (identical? lv NOT-FOUND)
+                    [(css :align-top {:padding "1px 0.5rem 1px 0"})
+                     (css :p-0 :w-full)]
+
+                    ;; removed key
+                    (identical? rv NOT-FOUND)
+                    [(css :align-top {:padding "1px 0.5rem 1px 0"})
+                     (css :p-0 :w-full)]
+
+                    (= lv rv)
+                    [(css :align-top {:opacity "0.5" :padding "1px 0.5rem 1px 0"})
+                     (css :p-0 :w-full {:opacity "0.5"})]
+
+                    :else-is-update
+                    [(css :align-top {:opacity "0.5" :padding "1px 0.5rem 1px 0"})
+                     (css :p-0 :w-full)])]
+
+
+              (<< [:tr {:class (css :border-b
+                                 ["&:last-child" {:border "none"}])}
+                   [:td {:class (css :align-top)}
+                    [:div
+                     {:class (css :px-1 {:position "sticky" :top "0px"})}
+                     (cond
+                       ;; new key
+                       (identical? lv NOT-FOUND)
+                       "+"
+
+                       ;; removed key
+                       (identical? rv NOT-FOUND)
+                       "-"
+
+                       (= lv rv)
+                       "="
+
+                       :else-is-update
+                       "%")]]
+
+                   [:td {:class $map-key}
+                    [:div {:class (css {:position "sticky" :top "0px"})}
+                     (render-edn k)]]
+
+                   [:td {:class $map-val}
                     (cond
                       ;; new key
                       (identical? lv NOT-FOUND)
-                      [(css :align-top {:padding "1px 0.5rem 1px 0"})
-                       (css :p-0 :w-full)]
+                      (<< [:div {:class (css {:border "2px solid green"})}
+                           (render-edn rv)])
 
                       ;; removed key
                       (identical? rv NOT-FOUND)
-                      [(css :align-top {:padding "1px 0.5rem 1px 0"})
-                       (css :p-0 :w-full)]
+                      (click-to-show "key was removed from map" lv)
 
                       (= lv rv)
-                      [(css :align-top {:opacity "0.5" :padding "1px 0.5rem 1px 0"})
-                       (css :p-0 :w-full {:opacity "0.5"})]
+                      (render-edn rv)
 
                       :else-is-update
-                      [(css :align-top {:opacity "0.5" :padding "1px 0.5rem 1px 0"})
-                       (css :p-0 :w-full)])]
-
-
-                (<< [:tr {:class (css :border-b
-                                   ["&:last-child" {:border "none"}])}
-                     [:td {:class (css :align-top)}
-                      [:div
-                       {:class (css :px-1 {:position "sticky" :top "0px"})}
-                       (cond
-                         ;; new key
-                         (identical? lv NOT-FOUND)
-                         "+"
-
-                         ;; removed key
-                         (identical? rv NOT-FOUND)
-                         "-"
-
-                         (= lv rv)
-                         "="
-
-                         :else-is-update
-                         "%")]]
-
-                     [:td {:class $map-key}
-                      [:div {:class (css {:position "sticky" :top "0px"})}
-                       (render-edn k)]]
-
-                     [:td {:class $map-val}
-                      (cond
-                        ;; new key
-                        (identical? lv NOT-FOUND)
-                        (<< [:div {:class (css {:border "2px solid green"})}
-                             (render-edn rv)])
-
-                        ;; removed key
-                        (identical? rv NOT-FOUND)
-                        (click-to-show "key was removed from map" lv)
-
-                        (= lv rv)
-                        (render-edn rv)
-
-                        :else-is-update
-                        (edn-diff lv rv))]])
-                )))]])))
+                      (edn-diff lv rv))]])
+              ))]])))
 
 (defc edn-diff-vec [left right]
   (bind indexes
@@ -353,46 +346,44 @@
     (<< [:div {:class (css {:border-left "6px solid green"
                             :display "grid"
                             :grid-template-columns "min-content 1fr"})}
-         (sg/simple-seq
-           indexes
-           (fn [idx]
-             (let [lv (get left idx NOT-FOUND)
-                   rv (get right idx NOT-FOUND)
+         (sg/each indexes [idx]
+           (let [lv (get left idx NOT-FOUND)
+                 rv (get right idx NOT-FOUND)
 
-                   $seq-val
-                   (css :pl-1 :border-b ["&:last-child" {:border "none"}])]
+                 $seq-val
+                 (css :pl-1 :border-b ["&:last-child" {:border "none"}])]
 
-               (<< [:div {:class (css :border-b)}
-                    [:div {:class (css :px-1 :text-right :text-gray-500 {:position "sticky" :top "0px" :width "40px"})}
-                     [:div
-                      (cond
-                        (identical? lv NOT-FOUND)
-                        (str idx " +")
-
-                        (identical? rv NOT-FOUND)
-                        (str idx " -")
-
-                        (= lv rv)
-                        (str idx " =")
-
-                        :else
-                        (str idx " %"))]]]
-
-                   [:div {:class $seq-val
-                          :style/opacity (when (= lv rv) "0.5")}
+             (<< [:div {:class (css :border-b)}
+                  [:div {:class (css :px-1 :text-right :text-gray-500 {:position "sticky" :top "0px" :width "40px"})}
+                   [:div
                     (cond
                       (identical? lv NOT-FOUND)
-                      (render-edn rv)
+                      (str idx " +")
 
                       (identical? rv NOT-FOUND)
-                      (click-to-show "value was removed" lv)
+                      (str idx " -")
 
                       (= lv rv)
-                      (render-edn rv)
+                      (str idx " =")
 
                       :else
-                      (edn-diff lv rv))]))
-             ))])))
+                      (str idx " %"))]]]
+
+                 [:div {:class $seq-val
+                        :style/opacity (when (= lv rv) "0.5")}
+                  (cond
+                    (identical? lv NOT-FOUND)
+                    (render-edn rv)
+
+                    (identical? rv NOT-FOUND)
+                    (click-to-show "value was removed" lv)
+
+                    (= lv rv)
+                    (render-edn rv)
+
+                    :else
+                    (edn-diff lv rv))]))
+           )])))
 
 (defn edn-diff [left right]
   (cond

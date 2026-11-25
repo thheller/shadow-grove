@@ -65,10 +65,9 @@
                :class [(css :flex-1 :border :rounded :p-2 [:focus :outline-none :border-blue-500])
                        (when active? (css :bg-blue-50))]}
          [:div (css :text-sm :font-semibold) label (when active? " (active)")]
-         (sg/simple-seq (range 5)
-           (fn [i]
-             (<< [:div {:class (when (= i focus) (css :bg-blue-200)) :data-focus (when (= i focus) "true")}
-                  "row " i])))])))
+         (sg/each (range 5) [i]
+           (<< [:div {:class (when (= i focus) (css :bg-blue-200)) :data-focus (when (= i focus) "true")}
+                "row " i]))])))
 
 ;; ## nested listeners
 ;;

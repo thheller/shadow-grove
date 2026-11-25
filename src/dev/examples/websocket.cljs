@@ -148,7 +148,7 @@
        (sort-by :client-id)
        (vec)))
 
-(defc ui-client [{:keys [client-id client-info disconnected]} idx]
+(defc ui-client [{:keys [client-id client-info disconnected]}]
   (bind own-id (sg/kv-lookup :ui :client-id))
   (render
     (<< [:li {:data-client client-id :class (when disconnected c/$muted)}
@@ -186,7 +186,7 @@
     {:op :ws/describe-client :client-id client-id}
     (describe-result! client-id)))
 
-(defc ui-describe [{:keys [client-id description]} idx]
+(defc ui-describe [{:keys [client-id description]}]
   (bind connected? (sg/kv-lookup :ui :connected?))
   (render
     (<< [:div {:class c/$row :data-describe client-id}
@@ -252,10 +252,10 @@
            [:div#messages {:class c/$muted} "received: " (pr-str messages)])
 
        "welcome and server push"
-       [:ul#clients (sg/keyed-seq clients :client-id ui-client)]
+       [:ul#clients (sg/each clients :client-id [client] (ui-client client))]
 
        "calls"
-       [:div#describe (sg/keyed-seq clients :client-id ui-describe)]
+       [:div#describe (sg/each clients :client-id [client] (ui-describe client))]
 
        "losing the connection"
        (<< (when-not connected?

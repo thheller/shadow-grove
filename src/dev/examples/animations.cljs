@@ -75,7 +75,7 @@
   (bind ids (sg/query ?toast-ids))
   (render
     (<< [:div (css :fixed :right-4 :bottom-4 :w-80 :z-50)
-         (sg/keyed-seq ids identity ui-toast)])))
+         (sg/each ids identity [id] (ui-toast id))])))
 
 ;; ## sg/animate
 ;;

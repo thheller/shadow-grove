@@ -89,18 +89,17 @@
                             :grid-row-gap "0"})}
             (when (seq args)
               (<< [:div {:class $section-label} "Arguments"]
-                  (sg/simple-seq args #(ui-slot target-id item %1 %2 :arg))))
+                  (sg/each args [arg idx] (ui-slot target-id item arg idx :arg))))
 
             (when (seq slots)
               (<< [:div {:class $section-label} "Slots"]
-                  (sg/simple-seq slots #(ui-slot target-id item %1 %2 :slot))))]]))))
+                  (sg/each slots [slot idx] (ui-slot target-id item slot idx :slot))))]]))))
 
 (declare ui-node)
 
 (defn ui-node-children [ctx item]
-  (sg/simple-seq (:children item)
-    (fn [item idx]
-      (ui-node (update ctx :path conj idx) item))))
+  (sg/each (:children item) [item idx]
+    (ui-node (update ctx :path conj idx) item)))
 
 (defc ui-node [ctx item]
   (bind {:keys [selected]}
@@ -211,7 +210,7 @@
 
   (render
     (<< [:div {:class (css :flex-1 :overflow-auto :pl-2)}
-         (sg/simple-seq snapshot #(ui-node ctx %1))])))
+         (sg/each snapshot [node] (ui-node ctx node))])))
 
 (defc ui-panel [^:stable target-id]
   (bind {:keys [last-update last-snapshot work-tasks] :as target}

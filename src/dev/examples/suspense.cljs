@@ -42,10 +42,6 @@
 ;; Try it: "fast" (200ms) keeps the home page up until the fast page is ready, no
 ;; fallback. "slow" (1500ms) shows the old page for 500ms, then the fallback, then the
 ;; slow page. "forget loaded data" makes the pages suspend again.
-;;
-;; Known issue: the fallback swap after `:timeout` runs from a timer outside any
-;; devtools trace, so with `shadow.grove.preload` loaded the console shows
-;; `"not tracing?"`. It is harmless.
 
 (def pages
   {:home {:delay 0}

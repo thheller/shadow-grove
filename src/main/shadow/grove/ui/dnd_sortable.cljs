@@ -89,13 +89,12 @@
   Object
   (render [this]
     (ap/update! root
-      (sg/keyed-seq items key-fn
-        (fn [item idx key]
-          (item-fn item
-            {::idx idx
-             ::dragging (= drag-idx idx)
-             ::hovering (= hover-idx idx)})
-          ))))
+      (sg/each items key-fn [item idx key]
+        (item-fn item
+          {::idx idx
+           ::dragging (= drag-idx idx)
+           ::hovering (= hover-idx idx)})
+        )))
 
   (add-target [this ^js node idx]
     (set! (. node -ondragover)

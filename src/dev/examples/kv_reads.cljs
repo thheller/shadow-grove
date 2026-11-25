@@ -120,7 +120,7 @@
 ;; - A component reading only one entity and one UI flag doesn't render when another
 ;;   entity changes. Split large components when parts depend on different data.
 ;; - Lists of ids: the query returns ids, each row `kv-lookup`s its entity, rendered with
-;;   `(sg/keyed-seq ids identity ui-row)` ([lists](/lists/)). Changing one entity then
+;;   `(sg/each ids identity [id] (ui-row id))` ([lists](/lists/)). Changing one entity then
 ;;   renders one row.
 
 ;; ## what not to do

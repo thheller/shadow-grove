@@ -80,8 +80,8 @@
 ;;   node from a `:mount` effect ([forms](/forms/)). Don't set `:value` "just in case".
 ;; - `:dom/ref` takes a volatile, `(ref node)` in a `defc`, and fills it with the node
 ;;   after mount ([refs](/refs/)).
-;; - `:key` is not a thing on elements. List identity comes from `keyed-seq`
-;;   ([lists](/lists/)).
+;; - `:key` is not a thing on elements. List identity comes from a key-fn,
+;;   `(sg/each items :id [item] ...)` ([lists](/lists/)).
 ;; - `[:a {:href "/page"}]` is an in-app link once `history/init!` runs, `:ui/href` with a
 ;;   path prefix ([routing](/routing/)). `:on-*` values: [dom-events](/dom-events/).
 ;;   Namespaced attributes like `::keyboard/listen` have registered handlers
@@ -111,14 +111,14 @@
 ;;
 ;; - `nil` children are fine and render nothing. `false` is not special, use `when` so the
 ;;   branch is nil.
-;; - Never put lazy seqs in fragments. Use `simple-seq` / `keyed-seq`
-;;   ([lists](/lists/)), or `vec` first. Fragments assert this in dev.
+;; - Never put lazy seqs in fragments. Use `sg/each` ([lists](/lists/)), or `vec` first.
+;;   Fragments assert this in dev.
 
 (defn branches [on? items]
   (<< (when on?
         (<< [:div#when-branch {:class $chip} "rendered by a when branch"]))
       (if (seq items)
-        (<< [:ul (sg/simple-seq items (fn [x] (<< [:li x])))])
+        (<< [:ul (sg/each items [x] (<< [:li x]))])
         (<< [:div "empty"]))
       nil
       [:div {:class c/$muted} "nil renders nothing"]))

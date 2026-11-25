@@ -213,10 +213,9 @@
 
     (coll? v)
     (<< "["
-        (sg/simple-seq v
-          (fn [key idx]
-            (<< (when (pos? idx) " ")
-                (ui-ref-link ctx kv-table key))))
+        (sg/each v [key idx]
+          (<< (when (pos? idx) " ")
+              (ui-ref-link ctx kv-table key)))
         "]")
 
     :else
@@ -283,15 +282,13 @@
 
   (render
     (<< [:div {:class $sidebar}
-         (sg/simple-seq groups
-           (fn [tables]
-             (let [group-app (:app-id (first tables))]
-               (<< [:div {:class $app-header} (str "runtime " group-app)]
-                   (sg/simple-seq tables
-                     (fn [table]
-                       (ui-table-item target-id table
-                         (and (= group-app app-id)
-                              (= kv-table (:kv-table table))))))))))])))
+         (sg/each groups [tables]
+           (let [group-app (:app-id (first tables))]
+             (<< [:div {:class $app-header} (str "runtime " group-app)]
+                 (sg/each tables [table]
+                   (ui-table-item target-id table
+                     (and (= group-app app-id)
+                          (= kv-table (:kv-table table))))))))])))
 
 ;; table
 
@@ -350,14 +347,13 @@
              (<< [:td {:class $cell :col-span (count columns)} (ui-value val)])
 
              :else
-             (sg/simple-seq columns
-               (fn [col]
-                 (<< [:td {:class $cell}
-                      (when (contains? val col)
-                        (let [v (get val col)]
-                          (if-some [ref-table (get refs col)]
-                            (ui-ref-value ctx ref-table v)
-                            (ui-value v))))]))))
+             (sg/each columns [col]
+               (<< [:td {:class $cell}
+                    (when (contains? val col)
+                      (let [v (get val col)]
+                        (if-some [ref-table (get refs col)]
+                          (ui-ref-value ctx ref-table v)
+                          (ui-value v))))])))
            [:td {:class $filler}]]))))
 
 (defn sort-label [[sort-col dir] col label]
@@ -386,18 +382,16 @@
               (sort-label sorting ::key (if (keyword? primary-key) (str primary-key) "key"))]
              (if-not columns
                (<< [:th {:class $th :on-click (sort-ev ::val)} (sort-label sorting ::val "value")])
-               (sg/simple-seq columns
-                 (fn [col]
-                   (<< [:th {:class $th
-                             :title (when-some [ref-table (get refs col)]
-                                      (str "references " ref-table))
-                             :on-click (sort-ev col)}
-                        (sort-label sorting col (str col (when (contains? refs col) " →")))]))))
+               (sg/each columns [col]
+                 (<< [:th {:class $th
+                           :title (when-some [ref-table (get refs col)]
+                                    (str "references " ref-table))
+                           :on-click (sort-ev col)}
+                      (sort-label sorting col (str col (when (contains? refs col) " →")))])))
              [:th {:class $th-filler}]]]
            [:tbody
-            (sg/keyed-seq rows :key
-              (fn [row]
-                (ui-row ctx row (= entry [(:key row)]))))]]))))
+            (sg/each rows :key [row]
+              (ui-row ctx row (= entry [(:key row)])))]]))))
 
 ;; readers, see kv-describe-reader in the preload
 
@@ -446,10 +440,9 @@
           (str/join " › " (map short-name path))]
          (when (seq args)
            (<< [:div {:class $args}
-                (sg/simple-seq args
-                  (fn [{:keys [name val]}]
-                    (<< [:div {:class (css :text-gray-500)} name]
-                        [:div {:class (css :truncate)} (ui-value val)])))]))])))
+                (sg/each args [{:keys [name val]}]
+                  (<< [:div {:class (css :text-gray-500)} name]
+                      [:div {:class (css :truncate)} (ui-value val)]))]))])))
 
 (defn ui-query-reader [target-id {:keys [query query-args slots]}]
   (<< [:div {:class (css :py-1 :px-2)}
@@ -460,7 +453,7 @@
           (<< [:span {:class (css :font-mono :text-xs :truncate :min-w-0)} (ui-value query-args)]))]
        [:div {:class (css :text-xs :text-gray-400 :truncate)} query]
        [:div {:class (css :mt-1 {:margin-left "4px" :border-left "2px solid #dbeafe"})}
-        (sg/simple-seq slots #(ui-slot-reader target-id %1))]]))
+        (sg/each slots [slot] (ui-slot-reader target-id slot))]]))
 
 (defn ui-reader [target-id reader]
   (if (:query reader)
@@ -474,13 +467,13 @@
   (<< [:div {:class (css :overflow-auto :py-2 :border-l {:width "45%" :flex-shrink "0"})}
        [:div {:class $section-title} (str "Read by (" (count readers) ")")]
        (if (seq readers)
-         (sg/simple-seq readers #(ui-reader target-id %1))
+         (sg/each readers [reader] (ui-reader target-id reader))
          (<< [:div {:class (css :px-2 :text-xs :text-gray-400)}
               "No sg/kv-lookup or sg/query reads this key directly."]))
        (when (seq table-readers)
          (<< [:div {:class (str $section-title " " (css :pt-3))}
               (str "Read with the whole table (" (count table-readers) ")")]
-             (sg/simple-seq table-readers #(ui-reader target-id %1))))]))
+             (sg/each table-readers [reader] (ui-reader target-id reader))))]))
 
 ;; selected entry
 
@@ -539,14 +532,13 @@
                                     :grid-template-columns "max-content minmax(0, 1fr)"
                                     :column-gap "1rem"
                                     :row-gap "2px"})}
-                    (sg/simple-seq (edn/attempt-to-sort (keys val))
-                      (fn [attr]
-                        (let [v (get val attr)]
-                          (<< [:div {:class (css :py-0.5 {:color "#660e7a"})} (str attr)]
-                              [:div {:class (css :py-0.5 :overflow-auto)}
-                               (if-some [ref-table (get refs attr)]
-                                 (ui-ref-value ctx ref-table v)
-                                 (edn/render-edn v))]))))])
+                    (sg/each (edn/attempt-to-sort (keys val)) [attr]
+                      (let [v (get val attr)]
+                        (<< [:div {:class (css :py-0.5 {:color "#660e7a"})} (str attr)]
+                            [:div {:class (css :py-0.5 :overflow-auto)}
+                             (if-some [ref-table (get refs attr)]
+                               (ui-ref-value ctx ref-table v)
+                               (edn/render-edn v))])))])
 
                :else
                (edn/render-edn val))]

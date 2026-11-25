@@ -134,7 +134,7 @@
        (when (> (count toc) 1)
          (<< [:nav {:data-doc "" :class (css :mb-2 :text-sm)}
               [:ol (css :pl-6 {:list-style "decimal"})
-               (sg/simple-seq toc toc-item)]]))
+               (sg/each toc [entry] (toc-item entry))]]))
        chapters
        (when log? (log-panel))]))
 

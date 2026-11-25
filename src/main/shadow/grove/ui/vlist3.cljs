@@ -344,14 +344,12 @@
 
           content
           (if key-fn
-            (sg/keyed-seq slice key-fn
-              (fn [item i key]
-                (let [idx (+ slice-offset i)]
-                  (item-fn item {:idx idx :key key :focus (and focused? (= focus idx))}))))
-            (sg/simple-seq slice
-              (fn [item i]
-                (let [idx (+ slice-offset i)]
-                  (item-fn item {:idx idx :focus (and focused? (= focus idx))})))))]
+            (sg/each slice key-fn [item i key]
+              (let [idx (+ slice-offset i)]
+                (item-fn item {:idx idx :key key :focus (and focused? (= focus idx))})))
+            (sg/each slice [item i]
+              (let [idx (+ slice-offset i)]
+                (item-fn item {:idx idx :focus (and focused? (= focus idx))}))))]
 
       (<< [:div {:dom/ref container
                  ::keyboard/listen true

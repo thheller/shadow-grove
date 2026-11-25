@@ -81,9 +81,8 @@
   (bind items (sg/query ?items))
   (render
     (<< [:ul#list
-         (sg/simple-seq items
-           (fn [{:keys [id label]}]
-             (<< [:li [:button {:class c/$link :on-click {:e ::select! :id id}} label]])))])))
+         (sg/each items [{:keys [id label]}]
+           (<< [:li [:button {:class c/$link :on-click {:e ::select! :id id}} label]]))])))
 
 (defc ui-detail [^:stable id]
   (bind _ (pull-item id))

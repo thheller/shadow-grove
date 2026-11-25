@@ -113,11 +113,10 @@
 
   (render
     (<< [:div {:dom/ref container :class (css :h-32 :overflow-y-auto :border :border-gray-200 :rounded)}
-         (sg/simple-seq items
-           (fn [label idx]
-             (<< [:div {:class [(css :px-2) (when (= idx active) (css :bg-blue-100))]
-                        :data-active (when (= idx active) "true")}
-                  label])))])))
+         (sg/each items [label idx]
+           (<< [:div {:class [(css :px-2) (when (= idx active) (css :bg-blue-100))]
+                      :data-active (when (= idx active) "true")}
+                label]))])))
 
 ;; # page
 

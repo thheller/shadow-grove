@@ -194,9 +194,8 @@
   (render
     (<< [:h3 (css :font-semibold :mb-2) "Items"]
         [:ul
-         (sg/simple-seq items
-           (fn [{:keys [id label]}]
-             (<< [:li [:a {:class c/$link :ui/href (str "/item/" id)} label]])))
+         (sg/each items [{:keys [id label]}]
+           (<< [:li [:a {:class c/$link :ui/href (str "/item/" id)} label]]))
          [:li [:a {:class c/$link :ui/href "/item/999"} "an item that doesn't exist"]]
          [:li [:a {:class c/$link :ui/href "/nowhere"} "an unknown URL"]]])))
 

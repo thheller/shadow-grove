@@ -20,8 +20,8 @@
 ;; instead of updating it, so `:mount` runs again for the new item.
 ;;
 ;; Use `^:stable` for the identity a page or editor displays: the entity id. It matters
-;; when one position (a page `case` calling `(ui-editor id)`) gets a new id. `keyed-seq`
-;; already remounts on a key change ([lists](/lists/)).
+;; when one position (a page `case` calling `(ui-editor id)`) gets a new id. A keyed
+;; `sg/each` already remounts on a key change ([lists](/lists/)).
 
 (defc ui-editor-updates [id]
   (ref input)

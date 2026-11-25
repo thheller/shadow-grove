@@ -159,7 +159,7 @@
       (run-steps done
         (-> [(fn []
                (sg/render rt-ref root
-                 (sg/keyed-seq typed-keys identity #(ui-typed log-ref %)))
+                 (sg/each typed-keys identity [k] (ui-typed log-ref k)))
                (is (= "0;0;0;0;0;0;" (.-textContent root)))
                (is (= (set (map #(vector ::typed %) typed-keys)) (read-keys ::typed)))
                (take-log! log-ref))]

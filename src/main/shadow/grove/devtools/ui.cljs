@@ -103,12 +103,11 @@
       :else
       (<< [:div {:class (css :p-4 :overflow-auto)}
            [:h1 {:class (css :font-bold :text-2xl :pb-4)} "Runtimes"]
-           (sg/simple-seq targets
-             (fn [{:keys [target-id target-info] :as target}]
-               (<< [:div {:class (css :cursor-pointer :border :p-2 :mb-2 [:hover :border-green-500])
-                          :on-click
-                          {:e ::m/select-target!
-                           :target-id target-id}}
-                    (str "#" target-id " - " (pr-str (dissoc target-info :since :proc-id)))
-                    ])))
+           (sg/each targets [{:keys [target-id target-info] :as target}]
+             (<< [:div {:class (css :cursor-pointer :border :p-2 :mb-2 [:hover :border-green-500])
+                        :on-click
+                        {:e ::m/select-target!
+                         :target-id target-id}}
+                  (str "#" target-id " - " (pr-str (dissoc target-info :since :proc-id)))
+                  ]))
            ]))))
