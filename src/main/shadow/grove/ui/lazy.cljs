@@ -84,7 +84,7 @@
 
                            (gp/did-finish! scheduler this)
                            (finally
-                             (trace/render-direct-done t)))))))))))
+                             (trace/render-direct-done t))))))))))
 
   (render! [this]
     ;; (js/console.log ::render! this (lazy/ready? loadable))
