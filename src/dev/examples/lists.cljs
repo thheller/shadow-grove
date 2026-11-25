@@ -113,13 +113,17 @@
 ;;
 ;; ```
 ;; (sg/keyed-seq items :id ui-row)                 ;; a defc directly
+;; (sg/keyed-seq items :id ui-chip true)           ;; ui-chip doesn't use idx
 ;; (sg/diff-seq items ui-row)
 ;; ```
 ;;
 ;; The plain fns take a render fn, called with `[item idx]`, `keyed-seq` with
 ;; `[item idx key]`. Use them for `diff-seq*` matching, or when there is nothing to gain:
 ;; a top-level fn never changes, so only items whose data or `idx` changed render. A
-;; moved item still calls it again for its new `idx`, `sg/each` with `[item]` doesn't.
+;; moved item still calls it again for its new `idx`, unless the render fn doesn't use
+;; `idx` and says so with `keyed-seq`'s optional last arg `true`. Then a moved item only
+;; moves, as with `sg/each` and `[item]`. It is a promise: a render fn that shows `idx`
+;; anyway keeps showing the old one after a move.
 ;;
 ;; Don't pass them an inline `(fn ...)`, or a fn made during render: every item renders
 ;; again on every render of the parent. Use `sg/each`, or `(bind row-fn (fn ...))` in the
@@ -134,7 +138,8 @@
 ;;   the 99 with their new `idx`. If a row doesn't show `idx`, that call changes no DOM:
 ;;   about 8x faster at 100 rows and 10x at 1000.
 ;;   If it does, every shifted row writes its new `idx`. Keyed `sg/each` with a body not
-;;   using `idx` skips those calls too, another 5x at 100 rows and 11x at 1000.
+;;   using `idx`, or `keyed-seq` with `true` as the last arg, skips those calls too,
+;;   another 5x at 100 rows and 11x at 1000.
 ;; - `diff-seq` needs items that keep their identity across updates: unchanged entity maps
 ;;   from KV tables, strings, numbers. Keywords, UUIDs and vectors match by instance, not
 ;;   value. A query building fresh maps (`(map #(assoc % ...))`) defeats it, it then costs

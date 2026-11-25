@@ -56,8 +56,11 @@
 (defn render-seq [coll key-fn render-fn]
   (coll/keyed-seq coll key-fn render-fn))
 
-(defn keyed-seq [coll key-fn render-fn]
-  (coll/keyed-seq coll key-fn render-fn))
+(defn keyed-seq
+  ([coll key-fn render-fn]
+   (coll/keyed-seq coll key-fn render-fn false))
+  ([coll key-fn render-fn idx-free?]
+   (coll/keyed-seq coll key-fn render-fn idx-free?)))
 
 (defn update! [x next]
   (p/update! x next))

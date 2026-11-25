@@ -208,7 +208,7 @@
          #_[:div {:class (css :flex)}
             [:div {:class (css :text-center {:width "140px"})} "Changes"]
             [:div {:class (css :flex-1 :pl-2)} "Event"]]
-         (sg/keyed-seq events identity ui-log-item)]
+         (sg/keyed-seq events identity ui-log-item true)]
 
         [:div {:class (css :flex :flex-col :overflow-auto
                         {:border-top "4px solid #eee"})

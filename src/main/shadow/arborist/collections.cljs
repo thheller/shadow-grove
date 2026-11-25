@@ -11,8 +11,9 @@
 ;; so it counts as unchanged. site is nil for the plain *-seq fns, they only
 ;; compare the fn itself.
 ;;
-;; keyed-each also gets idx-free? when the body never uses idx. a moved item then
-;; only moves, it doesn't render again just to see its new idx.
+;; idx-free? says the render fn never uses idx, a moved item then only moves, it
+;; doesn't render again just to see its new idx. keyed-each gets it from the macro
+;; when the body doesn't use idx, keyed-seq takes it as an optional arg.
 
 (defn- deps-equiv [^array a ^array b]
   (or (identical? a b)
@@ -218,8 +219,7 @@
 ;; matched items skip rendering when render-fn is identical, the data is
 ;; identical (or = in by-value mode) and the idx is unchanged. an item that
 ;; moved always renders again, so the idx it last rendered with is current.
-;; unless idx-free? (keyed-each with a body not using idx), then a move is
-;; only a DOM move.
+;; unless idx-free? (a render fn not using idx), then a move is only a DOM move.
 ;; items array positions are coll positions, so an old item's idx is its
 ;; position in the old items array.
 
@@ -461,6 +461,7 @@
    ^:mutable key-fn
    ^:mutable site
    ^:mutable ^array deps
+   ^boolean ^:mutable idx-free?
    ^:mutable ^array items
    marker-before
    marker-after
@@ -488,7 +489,9 @@
          (identical? (nil? key-fn) (nil? (.-key-fn ^DiffCollectionInit next)))))
 
   (dom-sync! [this ^DiffCollectionInit next]
-    (let [rfn-identical? (rfn-same? render-fn site deps (.-render-fn next) (.-site next) (.-deps next))
+    (let [rfn-identical? (and (rfn-same? render-fn site deps (.-render-fn next) (.-site next) (.-deps next))
+                              ;; items moved while idx-free? may show a stale idx
+                              (identical? idx-free? (.-idx-free? next)))
           ^not-native old-coll coll
           ^not-native new-coll (.-coll next)]
 
@@ -502,6 +505,7 @@
           (set! key-fn (.-key-fn next))
           (set! site (.-site next))
           (set! deps (.-deps next))
+          (set! idx-free? (.-idx-free? next))
 
           (let [keyed? (some? key-fn)
                 by-value? (.-by-value? next)
@@ -509,8 +513,8 @@
                 equiv? (or keyed? by-value?)
                 ;; key match implies data match, so render can be skipped
                 skip-equiv? (and by-value? (not keyed?))
-                ;; same site, so the flag is the one the items last rendered with
-                idx-free? (and rfn-identical? (.-idx-free? next))
+                ;; only skip with the same render fn, a new one renders everything anyway
+                idx-free? (and rfn-identical? idx-free?)
 
                 ^function rfn (if keyed? (common/ifn3-wrap render-fn) (common/ifn2-wrap render-fn))
                 ^function kfn (when keyed? (common/ifn1-wrap key-fn))
@@ -668,7 +672,7 @@
       (fn [^DiffItem item]
         (p/destroy! ^not-native (.-managed item) false)))))
 
-(defn construct-diff-seq [env coll render-fn key-fn site deps]
+(defn construct-diff-seq [env coll render-fn key-fn site deps idx-free?]
   (let [keyed? (some? key-fn)
         marker-before (common/dom-marker env (if keyed? "keyed-seq-start" "diff-seq-start"))
         marker-after (common/dom-marker env (if keyed? "keyed-seq-end" "diff-seq-end"))
@@ -683,18 +687,19 @@
       nil
       coll)
 
-    (DiffCollection. env coll render-fn key-fn site deps arr marker-before marker-after false)))
+    (DiffCollection. env coll render-fn key-fn site deps idx-free? arr marker-before marker-after false)))
 
 (deftype DiffCollectionInit [coll render-fn ^boolean by-value? key-fn site deps ^boolean idx-free?]
   p/IConstruct
   (as-managed [this env]
-    (construct-diff-seq env coll render-fn key-fn site deps))
+    (construct-diff-seq env coll render-fn key-fn site deps idx-free?))
 
   IEquiv
   (-equiv [this ^DiffCollectionInit other]
     (and (instance? DiffCollectionInit other)
          (rfn-same? render-fn site deps (.-render-fn other) (.-site other) (.-deps other))
          (identical? by-value? (.-by-value? other))
+         (identical? idx-free? (.-idx-free? other))
          ;; could be a keyword, can't use identical?
          (keyword-identical? key-fn (.-key-fn other))
          (= coll (.-coll other)))))
@@ -719,22 +724,28 @@
 (defn keyed-seq
   "renders (render-fn item idx key) per item, key is (key-fn item).
    DOM for a key is only ever updated for that same key, moved or destroyed.
-   keys must be unique, duplicates only throw in dev builds."
-  [coll key-fn render-fn]
-  {:pre [(or (nil? coll) (sequential? coll))
-         (ifn? key-fn)
-         (ifn? render-fn)]}
-  ;; handling nil and empty colls, can skip a lot of work
-  (when-not (empty? coll)
-    ;; we always need compatible collections, it should already be a vector in most cases
-    ;; it must not allow lazy sequences since the sequence may not be used immediately
-    ;; some item may suspend and whatever the lazy seq did will happen in totally different phases
-    ;; cannot guarantee that some other data it previously may have relied upon is still valid
-    (let [coll (vec coll)]
-      (when ^boolean js/goog.DEBUG
-        (when (not= (count coll) (count (into #{} (map key-fn) coll)))
-          (throw (ex-info "collection contains duplicated keys" {:coll coll}))))
-      (DiffCollectionInit. coll render-fn false key-fn nil nil false))))
+   keys must be unique, duplicates only throw in dev builds.
+
+   idx-free? true says render-fn doesn't use idx, so a moved item only moves
+   instead of rendering again with its new idx."
+  ([coll key-fn render-fn]
+   (keyed-seq coll key-fn render-fn false))
+  ([coll key-fn render-fn idx-free?]
+   {:pre [(or (nil? coll) (sequential? coll))
+          (ifn? key-fn)
+          (ifn? render-fn)
+          (boolean? idx-free?)]}
+   ;; handling nil and empty colls, can skip a lot of work
+   (when-not (empty? coll)
+     ;; we always need compatible collections, it should already be a vector in most cases
+     ;; it must not allow lazy sequences since the sequence may not be used immediately
+     ;; some item may suspend and whatever the lazy seq did will happen in totally different phases
+     ;; cannot guarantee that some other data it previously may have relied upon is still valid
+     (let [coll (vec coll)]
+       (when ^boolean js/goog.DEBUG
+         (when (not= (count coll) (count (into #{} (map key-fn) coll)))
+           (throw (ex-info "collection contains duplicated keys" {:coll coll}))))
+       (DiffCollectionInit. coll render-fn false key-fn nil nil idx-free?)))))
 
 (defn keyed-each
   "keyed-seq for the each macro. idx-free? when the render fn never uses idx"

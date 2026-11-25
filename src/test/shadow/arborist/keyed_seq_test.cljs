@@ -217,3 +217,36 @@
       (sa/update! root (idx-view [2 3]))
       (is (= "2@03@1" (.-textContent node)))
       (is (= 5 @render-count)))))
+
+;; keyed-seq idx-free? arity
+
+(defn idx-row [x idx]
+  (counted x (str "@" idx)))
+
+(deftest keyed-seq-idx-free-only-moves
+  (with-test-node
+    (fn [node root]
+      (reset! render-count 0)
+      (sa/update! root (sg/keyed-seq [1 2 3] identity idx-row true))
+      (is (= 3 @render-count))
+      ;; moved items keep what they rendered, idx is stale on purpose here
+      (sa/update! root (sg/keyed-seq [3 1 2] identity idx-row true))
+      (is (= "3@21@02@1" (.-textContent node)))
+      (is (= 3 @render-count))
+      ;; without the flag the same fn renders the moved items again
+      (sa/update! root (sg/keyed-seq [2 3 1] identity idx-row false))
+      (is (= "2@03@11@2" (.-textContent node)))
+      (is (= 6 @render-count)))))
+
+(deftest keyed-seq-idx-free-flag-change-renders-all
+  (with-test-node
+    (fn [node root]
+      (reset! render-count 0)
+      (sa/update! root (sg/keyed-seq [1 2 3] identity idx-row true))
+      (sa/update! root (sg/keyed-seq [2 3] identity idx-row true))
+      (is (= "2@13@2" (.-textContent node)))
+      (is (= 3 @render-count))
+      ;; same fn, same order, flag dropped: rows that showed a stale idx render again
+      (sa/update! root (sg/keyed-seq [2 3] identity idx-row false))
+      (is (= "2@03@1" (.-textContent node)))
+      (is (= 5 @render-count)))))

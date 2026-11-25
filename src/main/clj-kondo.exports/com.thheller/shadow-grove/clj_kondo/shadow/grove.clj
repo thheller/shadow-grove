@@ -228,7 +228,11 @@
   new on every render of the parent, so every item renders again every time.
   Use a defc/defn directly, or (bind render-fn (fn [...] ...)) in the component."
   [{:keys [node]}]
-  (let [render-fn (last (rest (:children node)))]
+  (let [[f & args] (:children node)
+        ;; (keyed-seq coll key-fn render-fn idx-free?), the others (x-seq coll render-fn)
+        render-fn (if (contains? #{"keyed-seq" "render-seq"} (name (api/sexpr f)))
+                    (nth args 2 nil)
+                    (nth args 1 nil))]
     (when (and render-fn (-creates-fn? render-fn))
       (api/reg-finding!
         (assoc (meta render-fn)

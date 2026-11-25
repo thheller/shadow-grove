@@ -184,8 +184,13 @@
 (defn simple-seq [coll render-fn]
   (sc/simple-seq coll render-fn))
 
-(defn keyed-seq [coll key-fn render-fn]
-  (sc/keyed-seq coll key-fn render-fn))
+(defn keyed-seq
+  "renders (render-fn item idx key) per item, key is (key-fn item).
+   idx-free? true says render-fn doesn't use idx, a moved item then only moves."
+  ([coll key-fn render-fn]
+   (sc/keyed-seq coll key-fn render-fn false))
+  ([coll key-fn render-fn idx-free?]
+   (sc/keyed-seq coll key-fn render-fn idx-free?)))
 
 (defn diff-seq [coll render-fn]
   (sc/diff-seq coll render-fn))
