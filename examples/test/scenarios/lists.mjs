@@ -49,6 +49,40 @@ export default async (t) => {
   t.assert(a2["diff-value"][0][1] === b2["diff-value"].at(-1)[1], "diff-seq-by-value: fresh equal maps still match");
   await idxCurrent("reverse as fresh maps");
 
+  // sg/each: an inline fn renders every row on every parent render, each only what changed
+  const renders = (col) => t.evaluate(`[...document.querySelectorAll("#${col} [data-renders]")].map((r) => Number(r.dataset.renders))`);
+  const ticks = () => t.evaluate(`document.querySelector("[data-ticks]").dataset.ticks`);
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const inc = (xs, by) => xs.map((x, i) => x + by[i]);
+  let inline0 = await renders("rows-inline"), each0 = await renders("rows-each");
+  t.assert(same(inline0, [1, 1, 1]) && same(each0, [1, 1, 1]), `each demo: every row rendered once, ${inline0} ${each0}`);
+
+  await t.click({ text: "render parent", selector: "#each-demo button" });
+  await t.waitFor(`document.querySelector("[data-ticks]").dataset.ticks === "1"`);
+  t.assert(same(await renders("rows-inline"), inc(inline0, [1, 1, 1])), "inline fn: parent render renders every row");
+  t.assert(same(await renders("rows-each"), each0), "sg/each: parent render renders no row");
+
+  inline0 = await renders("rows-inline"); each0 = await renders("rows-each");
+  await t.click({ text: "rename first", selector: "#each-demo button" });
+  await t.settle(50);
+  t.assert(same(await renders("rows-inline"), inc(inline0, [1, 1, 1])), "inline fn: renaming one item renders every row");
+  t.assert(same(await renders("rows-each"), inc(each0, [1, 0, 0])), "sg/each: renaming one item renders only that row");
+
+  inline0 = await renders("rows-inline"); each0 = await renders("rows-each");
+  await t.click({ text: "mark next", selector: "#each-demo button" });
+  await t.settle(50);
+  t.assert(same(await renders("rows-each"), inc(each0, [1, 1, 1])), "sg/each: a changed dep renders every row");
+
+  // keyed rows move, the body doesn't use idx
+  const labels = (col) => t.evaluate(`[...document.querySelectorAll("#${col} [data-label]")].map((r) => r.dataset.label)`);
+  const labels0 = await labels("rows-each");
+  inline0 = await renders("rows-inline"); each0 = await renders("rows-each");
+  await t.click({ text: "reverse", selector: "#each-demo button" });
+  await t.settle(50);
+  t.assert(same(await labels("rows-each"), [...labels0].reverse()), "sg/each: reverse moved the rows");
+  t.assert(same(await renders("rows-inline"), inc([...inline0].reverse(), [1, 1, 1])), "inline fn: reverse renders every row");
+  t.assert(same(await renders("rows-each"), [...each0].reverse()), "sg/each without idx: moved rows don't render");
+
   t.expectConsoleError(/duplicate|key/i);
   await t.click({ text: "duplicate a key", selector: "button" });
   await t.settle(50);

@@ -1,4 +1,15 @@
 {:hooks
  {:analyze-call
   {shadow.grove/defc clj-kondo.shadow.grove/defc
-   shadow.grove/deftx clj-kondo.shadow.grove/deftx}}}
+   shadow.grove/deftx clj-kondo.shadow.grove/deftx
+   shadow.grove/each clj-kondo.shadow.grove/each
+   shadow.grove/simple-seq clj-kondo.shadow.grove/seq-render-fn
+   shadow.grove/keyed-seq clj-kondo.shadow.grove/seq-render-fn
+   shadow.grove/diff-seq clj-kondo.shadow.grove/seq-render-fn
+   shadow.grove/diff-seq-by-value clj-kondo.shadow.grove/seq-render-fn
+   shadow.arborist/simple-seq clj-kondo.shadow.grove/seq-render-fn
+   shadow.arborist/keyed-seq clj-kondo.shadow.grove/seq-render-fn
+   shadow.arborist/render-seq clj-kondo.shadow.grove/seq-render-fn}}
+
+ :linters
+ {:shadow.grove/inline-seq-render-fn {:level :warning}}}

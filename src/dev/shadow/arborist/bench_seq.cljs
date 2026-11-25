@@ -128,6 +128,8 @@
 (def impls
   [{:id "simple-seq" :make (fn [xs rfn] (coll/simple-seq xs rfn))}
    {:id "keyed-seq" :keyed true :make (fn [xs rfn] (coll/keyed-seq xs :id rfn))}
+   ;; what (sg/each xs :id [item] ...) emits: fixed site, no deps, row doesn't use idx
+   {:id "keyed-each" :keyed true :make (fn [xs rfn] (coll/keyed-each xs :id "bench-each" nil true rfn))}
    {:id "diff-seq" :make (fn [xs rfn] (coll/diff-seq xs rfn))}
    {:id "diff-seq =" :make (fn [xs rfn] (coll/diff-seq-by-value xs rfn))}])
 

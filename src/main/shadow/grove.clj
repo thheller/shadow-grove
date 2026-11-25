@@ -1,5 +1,7 @@
 (ns shadow.grove
-  (:require [clojure.spec.alpha :as s]))
+  (:require
+    [clojure.spec.alpha :as s]
+    [shadow.grove.components :as comp]))
 
 ;; just for convenience, less imports for the user
 
@@ -36,6 +38,66 @@
     (let [{:keys [line column file]} (meta &form)]
       `(when-not (nil? shadow.grove/dev-log-handler)
          (shadow.grove/dev-log-handler {:ns ~(str *ns*) :line ~line :column ~column :file ~file} [~@args])))))
+
+(s/def ::each-args
+  (s/cat
+    :coll any?
+    :key-fn (s/? (complement vector?))
+    :args vector?
+    :body (s/* any?)))
+
+(s/fdef each :args ::each-args)
+
+(defmacro each
+  "(each coll [item idx] body)         like simple-seq
+   (each coll key-fn [item idx key] body) like keyed-seq
+
+   body is the render fn, without the fn. unlike an inline (fn ...) passed to
+   keyed-seq, items only render again if their data or idx changed, or one of the
+   outer locals the body uses is not = to what it was last render.
+
+   keyed: if the body never uses idx, a moved item doesn't render again."
+  [& args]
+  (let [{:keys [coll key-fn args body]}
+        (s/conform ::each-args args)
+
+        ;; all locals at the call site, find-used-bindings skips the fn args and
+        ;; names the body binds itself (let, loop, fn). anything else it misses
+        ;; only adds a dep, which only means extra renders.
+        deps
+        (->> (comp/find-used-bindings #{} (:locals &env) (list* 'fn args body))
+             (sort-by str)
+             (vec))
+
+        ;; idx is the second arg. unused if not bound, bound to _ or never used by the
+        ;; body. & before it means it ends up in a rest arg, count that as used.
+        idx-sym (second args)
+        idx-free?
+        (and (not= '& (first args))
+             (or (nil? idx-sym)
+                 (= '_ idx-sym)
+                 (and (simple-symbol? idx-sym)
+                      (not= '& idx-sym)
+                      ;; the fn with idx replaced by _, so idx counts as an outer local
+                      ;; and other args shadow it as they would
+                      (empty? (comp/find-used-bindings #{} {idx-sym {}}
+                                (list* 'fn (assoc args 1 '_) body))))))
+
+        {:keys [line column]} (meta &form)
+
+        ;; unique per call site, also per compile so hot reload renders again
+        site
+        (str (gensym (str *ns* "/each@" line ":" column "_")))
+
+        deps-arr
+        (when (seq deps)
+          `(cljs.core/array ~@deps))]
+
+    (with-meta
+      (if (nil? key-fn)
+        `(shadow.arborist.collections/simple-each ~coll ~site ~deps-arr (fn ~args ~@body))
+        `(shadow.arborist.collections/keyed-each ~coll ~key-fn ~site ~deps-arr ~idx-free? (fn ~args ~@body)))
+      (meta &form))))
 
 (s/def ::deftx-args
   (s/cat

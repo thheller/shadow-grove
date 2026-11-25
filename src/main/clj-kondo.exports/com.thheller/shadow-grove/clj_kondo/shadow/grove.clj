@@ -208,3 +208,49 @@
         (api/list-node
           (into [(api/token-node 'fn) tx-args]
             more))])}))
+
+(def -fn-creating-syms
+  "Calls that create a new fn every time they run."
+  #{'fn 'fn* 'partial 'comp})
+
+(defn- -creates-fn? [node]
+  (or (= :fn (api/tag node)) ;; #(...)
+      (and (api/list-node? node)
+           (let [head (first (:children node))]
+             (and (api/token-node? head)
+                  (symbol? (api/sexpr head))
+                  (contains? -fn-creating-syms (symbol (name (api/sexpr head)))))))))
+
+(defn seq-render-fn
+  "Warns about (sg/keyed-seq coll key-fn (fn [...] ...)) and friends. The render fn is
+  new on every render of the parent, so every item renders again every time.
+  Use a defc/defn directly, or (bind render-fn (fn [...] ...)) in the component."
+  [{:keys [node]}]
+  (let [render-fn (last (rest (:children node)))]
+    (when (and render-fn (-creates-fn? render-fn))
+      (api/reg-finding!
+        (assoc (meta render-fn)
+          :message (str "Inline render fn: every item renders again on every render. "
+                        "Use a top-level fn, (bind render-fn (fn ...)) or sg/each.")
+          :type :shadow.grove/inline-seq-render-fn))))
+  nil)
+
+(defn each
+  "(each coll key-fn? [args] & body) -> (do coll key-fn (fn [args] & body))"
+  [{:keys [node]}]
+  (let [[_ coll & more] (:children node)
+        [key-fn [args & body]] (if (api/vector-node? (first more))
+                                 [nil more]
+                                 [(first more) (rest more)])]
+    (when-not (api/vector-node? args)
+      (api/reg-finding!
+        (assoc (meta (or args node))
+          :level :error
+          :message "each needs an arg vector: (each coll [item idx] ...) or (each coll key-fn [item idx key] ...)"
+          :type :shadow.grove/invalid-each)))
+    {:node
+     (api/list-node
+       (cond-> [(api/token-node 'do) coll]
+         key-fn (conj key-fn)
+         (api/vector-node? args)
+         (conj (api/list-node (list* (api/token-node 'fn) args body)))))}))

@@ -28,7 +28,7 @@
 (defn init
   "bypasses the empty check in diff-seq so syncing to/from empty is covered"
   ([xs] (init xs item false))
-  ([xs rfn by-value?] (coll/DiffCollectionInit. (vec xs) rfn by-value? nil)))
+  ([xs rfn by-value?] (coll/DiffCollectionInit. (vec xs) rfn by-value? nil nil nil false)))
 
 (defn text [node]
   (->> (.querySelectorAll node "b")
@@ -248,7 +248,7 @@
 
 (defn keyed-init
   ([xs] (keyed-init xs keyed-item))
-  ([xs rfn] (coll/DiffCollectionInit. (vec xs) rfn false :id)))
+  ([xs rfn] (coll/DiffCollectionInit. (vec xs) rfn false :id nil nil false)))
 
 (defn kv [id v] {:id id :v v})
 

@@ -1,6 +1,6 @@
 (ns examples.lists
-  "Collections render through `sg/simple-seq`, `sg/diff-seq`, `sg/diff-seq-by-value` or
-   `sg/keyed-seq`, never as lazy seqs (fragments assert that in dev). They differ in how
+  "Collections render through `sg/simple-seq`, `sg/diff-seq`, `sg/diff-seq-by-value`,
+   `sg/keyed-seq` or `sg/each`, never as lazy seqs (fragments assert that in dev). They differ in how
    they match old items to new ones, which decides what happens to a row's DOM when the
    collection changes. All of them mount every item: for hundreds of rows and more, see
    [vlist](/vlist/)."
@@ -35,7 +35,8 @@
 ;;   `diff-seq-by-value` still matches.
 ;; - **idx after a move**: an item whose `idx` changed always renders again, even when its
 ;;   data is identical, so a displayed `idx` (row numbers, odd/even classes) is always
-;;   current. Only an item with the same data at the same `idx` skips rendering.
+;;   current. Only an item with the same data at the same `idx` skips rendering. The
+;;   exception is `sg/each` with a body not using `idx`, see below.
 ;; - **duplicate a key**: keys must be unique. `keyed-seq` throws in dev builds, release
 ;;   builds don't check.
 
@@ -80,7 +81,42 @@
 ;;   other locals.
 ;; - An item renders again only when its data, its `idx` or the render fn changed. An
 ;;   inline `(fn ...)` is new on every render of the parent, so every item renders again
-;;   on every invalidation of the parent. That is still correct, keep the fn cheap.
+;;   on every invalidation of the parent. That is still correct, but wasted work. Use a
+;;   top-level fn, `(bind row-fn (fn ...))`, or `sg/each` below. The clj-kondo config
+;;   shadow-grove exports warns about inline fns (`:shadow.grove/inline-seq-render-fn`).
+
+;; ## each
+;;
+;; ```
+;; (sg/each items [item idx] (<< ...))             ;; like simple-seq
+;; (sg/each items :id [item idx key]               ;; like keyed-seq
+;;   (ui-row item marked))
+;; ```
+;;
+;; `sg/each` is a macro taking the render fn body inline. It finds the outer locals the
+;; body uses (`marked` above, never `item` or names the body binds itself) and compares
+;; those with `=` instead of comparing the fn. Same values as last render: only items
+;; whose data or `idx` changed render again. If nothing changed at all the parent
+;; fragment skips the collection completely.
+;;
+;; Below, the same rows once via `keyed-seq` with an inline fn and once via `sg/each`.
+;; Each row shows how often its render fn ran.
+;;
+;; - **render parent**: changes a counter only the header shows. The inline column renders
+;;   every row again, `sg/each` none.
+;; - **rename first**: the inline column renders every row, `sg/each` only the first.
+;; - **reverse**: keyed rows move. The inline column renders every row, `sg/each` none:
+;;   the body doesn't use `idx`, so a moved row has nothing new to show. Binding `idx`
+;;   (`[item idx]`) and using it in the body brings back the render for every row whose
+;;   `idx` changed. Not binding it, binding it to `_` or not using it all count as unused.
+;;   Without a key-fn `sg/each` matches by position, so `idx` never changes for an item.
+;; - **mark next**: `marked` is used by the body, so `sg/each` renders every row too. A
+;;   dep that changes on every render gives no gain. A local holding a fn created during
+;;   render is such a dep.
+;; - A body calling a `defc` is cheaper to render again than one building a fragment: the
+;;   component skips when its args are `=`. `sg/each` also skips that call.
+;; - Locals are compared by value. `@some-atom` in the body is not a dep, only the atom
+;;   itself is.
 
 ;; ## picking one
 ;;
@@ -88,7 +124,8 @@
 ;;   item's data into each of the 99 rows after it. `diff-seq` and `keyed-seq` remove that
 ;;   row's DOM and call the render fn for the 99 with their new `idx`. If a row doesn't
 ;;   show `idx`, that call changes no DOM: about 8x faster at 100 rows and 10x at 1000.
-;;   If it does, every shifted row writes its new `idx`.
+;;   If it does, every shifted row writes its new `idx`. Keyed `sg/each` with a body not
+;;   using `idx` skips those calls too, another 5x at 100 rows and 11x at 1000.
 ;; - `diff-seq` needs items that keep their identity across updates: unchanged entity maps
 ;;   from KV tables, strings, numbers. Keywords, UUIDs and vectors match by instance, not
 ;;   value. A query building fresh maps (`(map #(assoc % ...))`) defeats it, it then costs
@@ -120,6 +157,45 @@
 
 (defn make-items []
   (mapv (fn [i] {:id i :label (str "item " i)}) (range 1 6)))
+
+(defonce render-counts (volatile! {}))
+
+(defn ui-counted-row [column item marked]
+  ;; side effect in render, only to show how often this runs
+  (let [n (get (vswap! render-counts update [column (:id item)] (fnil inc 0)) [column (:id item)])]
+    (<< [:div {:class (css :flex :gap-2 :py-1 :border-b :border-gray-100 :text-sm)
+               :data-label (:label item)}
+         [:span (css :w-20 :font-semibold) (:label item) (when (= marked (:id item)) " *")]
+         [:span {:class c/$muted :data-renders n} "rendered " n "x"]])))
+
+(defc ui-each-demo []
+  (ref state (atom {:items (subvec (make-items) 0 3) :ticks 0 :marked 1}))
+  (bind {:keys [items ticks marked]} (sg/watch state))
+
+  (event ::tick! [env ev e]
+    (swap! state update :ticks inc))
+  (event ::rename-first-each! [env ev e]
+    (swap! state update-in [:items 0 :label] #(str % "!")))
+  (event ::mark-next! [env ev e]
+    (swap! state update :marked #(inc (mod % 3))))
+  (event ::reverse-each! [env ev e]
+    (swap! state update :items #(vec (rseq %))))
+
+  (render
+    (<< [:div#each-demo {:class [c/$row (css :mb-4)]}
+         [:button {:class c/$btn :on-click ::tick!} "render parent"]
+         [:button {:class c/$btn :on-click ::rename-first-each!} "rename first"]
+         [:button {:class c/$btn :on-click ::mark-next!} "mark next"]
+         [:button {:class c/$btn :on-click ::reverse-each!} "reverse"]
+         [:span {:class c/$muted :data-ticks ticks} "parent rendered " ticks]]
+        [:div {:class (css :flex :gap-4)}
+         [:div#rows-inline {:class (css :flex-1)}
+          (column "keyed-seq, inline fn"
+            #_{:clj-kondo/ignore [:shadow.grove/inline-seq-render-fn]}
+            (sg/keyed-seq items :id (fn [item] (ui-counted-row :inline item marked))))]
+         [:div#rows-each {:class (css :flex-1)}
+          (column "sg/each"
+            (sg/each items :id [item] (ui-counted-row :each item marked)))]])))
 
 (defc ui-root []
   (ref state (atom {:items (make-items) :next-id 6}))
@@ -158,7 +234,9 @@
             [:button {:class c/$btn :on-click ::rename-first!} "rename first"]
             [:button {:class c/$btn :on-click ::duplicate-key!} "duplicate a key"]
             [:button {:class c/$btn :on-click ::reset!} "reset"]]
-           (four-lists items))})))
+           (four-lists items))
+       "each"
+       (ui-each-demo)})))
 
 (defn init []
   (c/render! app (ui-root)))

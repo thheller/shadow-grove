@@ -5,12 +5,40 @@
 
 (declare SimpleCollectionInit)
 
+;; each (the sg/each macro) creates its render-fn inline on every render. the
+;; macro passes a site (unique per call site) and deps (the outer locals the fn
+;; body uses). same site and = deps means the new fn does what the old one did,
+;; so it counts as unchanged. site is nil for the plain *-seq fns, they only
+;; compare the fn itself.
+;;
+;; keyed-each also gets idx-free? when the body never uses idx. a moved item then
+;; only moves, it doesn't render again just to see its new idx.
+
+(defn- deps-equiv [^array a ^array b]
+  (or (identical? a b)
+      (and (some? a)
+           (some? b)
+           (== (alength a) (alength b))
+           (loop [i 0]
+             (cond
+               (== i (alength a)) true
+               (= (aget a i) (aget b i)) (recur (inc i))
+               :else false)))))
+
+(defn- rfn-same? [rfn site deps next-rfn next-site next-deps]
+  (or (identical? rfn next-rfn)
+      (and (some? site)
+           (identical? site next-site)
+           (deps-equiv deps next-deps))))
+
 (deftype SimpleItem [data managed])
 
 (deftype SimpleCollection
   [env
    ^:mutable coll
    ^:mutable ^function render-fn
+   ^:mutable site
+   ^:mutable ^array deps
    ^:mutable ^array items
    marker-before
    marker-after
@@ -36,7 +64,7 @@
     (instance? SimpleCollectionInit next))
 
   (dom-sync! [this ^SimpleCollectionInit next]
-    (let [rfn-identical? (identical? render-fn (.-render-fn next))
+    (let [rfn-identical? (rfn-same? render-fn site deps (.-render-fn next) (.-site next) (.-deps next))
 
           ^not-native old-coll coll
           ^not-native new-coll (.-coll next)]
@@ -57,6 +85,8 @@
 
           (set! coll new-coll)
           (set! render-fn (.-render-fn next))
+          (set! site (.-site next))
+          (set! deps (.-deps next))
 
           (let [^function rfn (common/ifn2-wrap render-fn)]
 
@@ -117,7 +147,7 @@
         (p/destroy! ^not-native (.-managed item) false)))
     ))
 
-(defn construct-simple-seq [env coll render-fn]
+(defn construct-simple-seq [env coll render-fn site deps]
   (let [marker-before (common/dom-marker env "simple-seq-start")
         marker-after (common/dom-marker env "simple-seq-end")
         arr (js/Array. (count coll))
@@ -129,19 +159,18 @@
       nil
       coll)
 
-    (SimpleCollection. env coll render-fn arr marker-before marker-after false)))
+    (SimpleCollection. env coll render-fn site deps arr marker-before marker-after false)))
 
-(deftype SimpleCollectionInit [coll render-fn]
+(deftype SimpleCollectionInit [coll render-fn site deps]
   p/IConstruct
   (as-managed [this env]
-    (construct-simple-seq env coll render-fn))
+    (construct-simple-seq env coll render-fn site deps))
 
   IEquiv
   (-equiv [this ^SimpleCollectionInit other]
     (and (instance? SimpleCollectionInit other)
-         ;; could be a keyword, can't use identical?
-         ;; FIXME: this makes it never equal if fn is created in :render fn
-         (identical? render-fn (.-render-fn other))
+         ;; never equal for an inline fn, unless it comes from each with the same deps
+         (rfn-same? render-fn site deps (.-render-fn other) (.-site other) (.-deps other))
          ;; compare coll last since its pointless if the others changed and typically more expensive to compare
          (= coll (.-coll other)))))
 
@@ -151,7 +180,14 @@
   ;; skip work if no coll or empty coll
   (when-not (empty? coll)
     ;; forced vec, eliminates lazy seqs and allows skipping checks later
-    (SimpleCollectionInit. (vec coll) render-fn)))
+    (SimpleCollectionInit. (vec coll) render-fn nil nil)))
+
+(defn simple-each
+  "simple-seq for the each macro"
+  [coll site deps render-fn]
+  {:pre [(or (nil? coll) (sequential? coll))]}
+  (when-not (empty? coll)
+    (SimpleCollectionInit. (vec coll) render-fn site deps)))
 
 ;; keyed-seq / diff-seq
 ;;
@@ -182,6 +218,8 @@
 ;; matched items skip rendering when render-fn is identical, the data is
 ;; identical (or = in by-value mode) and the idx is unchanged. an item that
 ;; moved always renders again, so the idx it last rendered with is current.
+;; unless idx-free? (keyed-each with a body not using idx), then a move is
+;; only a DOM move.
 ;; items array positions are coll positions, so an old item's idx is its
 ;; position in the old items array.
 
@@ -221,9 +259,9 @@
 
 (defn- diff-item-sync!
   "renders item at idx, unless unchanged? (render-fn and data match what it
-   last rendered) and old-idx is the idx it last rendered with"
-  [env ^DiffItem item key data old-idx idx ^function rfn ^boolean keyed? ^boolean unchanged? ^boolean dom-entered?]
-  (when-not (and unchanged? (== old-idx idx))
+   last rendered) and old-idx is the idx it last rendered with, or idx-free?"
+  [env ^DiffItem item key data old-idx idx ^function rfn ^boolean keyed? ^boolean unchanged? ^boolean idx-free? ^boolean dom-entered?]
+  (when-not (and unchanged? (or idx-free? (== old-idx idx)))
     (let [^not-native managed (.-managed item)
           rendered (diff-render rfn keyed? data idx key)]
       (if (p/supports? managed rendered)
@@ -287,7 +325,7 @@
    in the DOM the remaining old items sit between the final head and the final tail."
   [env dom-parent marker-after ^array old-items ^not-native new-coll ^array new-items
    os oe ns ne ^function rfn ^function kfn new-keys
-   ^boolean equiv? ^boolean keyed? ^boolean skip-equiv? ^boolean rfn-identical? ^boolean dom-entered?]
+   ^boolean equiv? ^boolean keyed? ^boolean skip-equiv? ^boolean rfn-identical? ^boolean idx-free? ^boolean dom-entered?]
   (let [om (inc (- oe os))
         nm (inc (- ne ns))
         anchor-after (diff-anchor new-items ne marker-after)
@@ -406,6 +444,7 @@
                   (and rfn-identical?
                        (== 1 (aget matched j))
                        (or skip-equiv? (identical? data (.-data item))))
+                  idx-free?
                   dom-entered?)
                 (let [^not-native managed (.-managed item)]
                   (when (and moved? (not stays?))
@@ -420,6 +459,8 @@
    ^:mutable coll
    ^:mutable ^function render-fn
    ^:mutable key-fn
+   ^:mutable site
+   ^:mutable ^array deps
    ^:mutable ^array items
    marker-before
    marker-after
@@ -447,7 +488,7 @@
          (identical? (nil? key-fn) (nil? (.-key-fn ^DiffCollectionInit next)))))
 
   (dom-sync! [this ^DiffCollectionInit next]
-    (let [rfn-identical? (identical? render-fn (.-render-fn next))
+    (let [rfn-identical? (rfn-same? render-fn site deps (.-render-fn next) (.-site next) (.-deps next))
           ^not-native old-coll coll
           ^not-native new-coll (.-coll next)]
 
@@ -459,6 +500,8 @@
           (set! coll new-coll)
           (set! render-fn (.-render-fn next))
           (set! key-fn (.-key-fn next))
+          (set! site (.-site next))
+          (set! deps (.-deps next))
 
           (let [keyed? (some? key-fn)
                 by-value? (.-by-value? next)
@@ -466,6 +509,8 @@
                 equiv? (or keyed? by-value?)
                 ;; key match implies data match, so render can be skipped
                 skip-equiv? (and by-value? (not keyed?))
+                ;; same site, so the flag is the one the items last rendered with
+                idx-free? (and rfn-identical? (.-idx-free? next))
 
                 ^function rfn (if keyed? (common/ifn3-wrap render-fn) (common/ifn2-wrap render-fn))
                 ^function kfn (when keyed? (common/ifn1-wrap key-fn))
@@ -489,14 +534,14 @@
                               (cond
                                 ;; hot path, no key work needed. item stays unless its idx changed
                                 (identical? (.-data item) data)
-                                (do (when-not (and rfn-identical? (== o n))
-                                      (diff-item-sync! env item (.-key item) data o n rfn keyed? false dom-entered?))
+                                (do (when-not (and rfn-identical? (or idx-free? (== o n)))
+                                      (diff-item-sync! env item (.-key item) data o n rfn keyed? false false dom-entered?))
                                     (aset new-items n item)
                                     (recur (inc h)))
 
                                 (and equiv? (= (.-key item) (if keyed? (diff-new-key kfn new-keys new-coll n) data)))
                                 (do (diff-item-sync! env item (if keyed? (diff-new-key kfn new-keys new-coll n) data) data o n rfn keyed?
-                                      (and rfn-identical? skip-equiv?) dom-entered?)
+                                      (and rfn-identical? skip-equiv?) idx-free? dom-entered?)
                                     (aset new-items n item)
                                     (recur (inc h)))
 
@@ -516,14 +561,14 @@
                               (cond
                                 ;; hot path, no key work needed. item stays unless its idx changed
                                 (identical? (.-data item) data)
-                                (do (when-not (and rfn-identical? (== o n))
-                                      (diff-item-sync! env item (.-key item) data o n rfn keyed? false dom-entered?))
+                                (do (when-not (and rfn-identical? (or idx-free? (== o n)))
+                                      (diff-item-sync! env item (.-key item) data o n rfn keyed? false false dom-entered?))
                                     (aset new-items n item)
                                     (recur (inc t)))
 
                                 (and equiv? (= (.-key item) (if keyed? (diff-new-key kfn new-keys new-coll n) data)))
                                 (do (diff-item-sync! env item (if keyed? (diff-new-key kfn new-keys new-coll n) data) data o n rfn keyed?
-                                      (and rfn-identical? skip-equiv?) dom-entered?)
+                                      (and rfn-identical? skip-equiv?) idx-free? dom-entered?)
                                     (aset new-items n item)
                                     (recur (inc t)))
 
@@ -564,6 +609,7 @@
                       (let [data (-nth new-coll ne)]
                         (diff-item-sync! env os-item (diff-new-key kfn new-keys new-coll ne) data os ne rfn keyed?
                           (and rfn-identical? (or skip-equiv? (identical? data (.-data os-item))))
+                          idx-free?
                           dom-entered?)
                         (p/dom-insert ^not-native (.-managed os-item) dom-parent
                           (diff-anchor new-items ne marker-after))
@@ -575,6 +621,7 @@
                       (let [data (-nth new-coll ns)]
                         (diff-item-sync! env oe-item (diff-new-key kfn new-keys new-coll ns) data oe ns rfn keyed?
                           (and rfn-identical? (or skip-equiv? (identical? data (.-data oe-item))))
+                          idx-free?
                           dom-entered?)
                         (p/dom-insert ^not-native (.-managed oe-item) dom-parent
                           (p/dom-first ^not-native (.-managed os-item)))
@@ -587,7 +634,7 @@
                                (and (< os oe) (< ns ne)
                                     (diff-match? equiv? kfn new-keys (aget old-items (inc os)) new-coll (inc ns)))))
                       (let [data (-nth new-coll ns)]
-                        (diff-item-sync! env os-item data data os ns rfn false false dom-entered?)
+                        (diff-item-sync! env os-item data data os ns rfn false false false dom-entered?)
                         (aset new-items ns os-item)
                         (recur (inc os) oe (inc ns) ne))
 
@@ -596,7 +643,7 @@
                            (< os oe) (< ns ne)
                            (diff-match? equiv? kfn new-keys (aget old-items (dec oe)) new-coll (dec ne)))
                       (let [data (-nth new-coll ne)]
-                        (diff-item-sync! env oe-item data data oe ne rfn false false dom-entered?)
+                        (diff-item-sync! env oe-item data data oe ne rfn false false false dom-entered?)
                         (aset new-items ne oe-item)
                         (recur os (dec oe) ns (dec ne)))
 
@@ -604,7 +651,7 @@
                       :else
                       (diff-sync-range! env dom-parent marker-after old-items new-coll new-items
                         os oe ns ne rfn kfn new-keys
-                        equiv? keyed? skip-equiv? rfn-identical? dom-entered?))))))
+                        equiv? keyed? skip-equiv? rfn-identical? idx-free? dom-entered?))))))
 
             (set! items new-items)))))
 
@@ -621,7 +668,7 @@
       (fn [^DiffItem item]
         (p/destroy! ^not-native (.-managed item) false)))))
 
-(defn construct-diff-seq [env coll render-fn key-fn]
+(defn construct-diff-seq [env coll render-fn key-fn site deps]
   (let [keyed? (some? key-fn)
         marker-before (common/dom-marker env (if keyed? "keyed-seq-start" "diff-seq-start"))
         marker-after (common/dom-marker env (if keyed? "keyed-seq-end" "diff-seq-end"))
@@ -636,17 +683,17 @@
       nil
       coll)
 
-    (DiffCollection. env coll render-fn key-fn arr marker-before marker-after false)))
+    (DiffCollection. env coll render-fn key-fn site deps arr marker-before marker-after false)))
 
-(deftype DiffCollectionInit [coll render-fn ^boolean by-value? key-fn]
+(deftype DiffCollectionInit [coll render-fn ^boolean by-value? key-fn site deps ^boolean idx-free?]
   p/IConstruct
   (as-managed [this env]
-    (construct-diff-seq env coll render-fn key-fn))
+    (construct-diff-seq env coll render-fn key-fn site deps))
 
   IEquiv
   (-equiv [this ^DiffCollectionInit other]
     (and (instance? DiffCollectionInit other)
-         (identical? render-fn (.-render-fn other))
+         (rfn-same? render-fn site deps (.-render-fn other) (.-site other) (.-deps other))
          (identical? by-value? (.-by-value? other))
          ;; could be a keyword, can't use identical?
          (keyword-identical? key-fn (.-key-fn other))
@@ -659,7 +706,7 @@
   {:pre [(or (nil? coll) (sequential? coll))
          (ifn? render-fn)]}
   (when-not (empty? coll)
-    (DiffCollectionInit. (vec coll) render-fn false nil)))
+    (DiffCollectionInit. (vec coll) render-fn false nil nil nil false)))
 
 (defn diff-seq-by-value
   "like diff-seq, but items match by ="
@@ -667,7 +714,7 @@
   {:pre [(or (nil? coll) (sequential? coll))
          (ifn? render-fn)]}
   (when-not (empty? coll)
-    (DiffCollectionInit. (vec coll) render-fn true nil)))
+    (DiffCollectionInit. (vec coll) render-fn true nil nil nil false)))
 
 (defn keyed-seq
   "renders (render-fn item idx key) per item, key is (key-fn item).
@@ -687,4 +734,16 @@
       (when ^boolean js/goog.DEBUG
         (when (not= (count coll) (count (into #{} (map key-fn) coll)))
           (throw (ex-info "collection contains duplicated keys" {:coll coll}))))
-      (DiffCollectionInit. coll render-fn false key-fn))))
+      (DiffCollectionInit. coll render-fn false key-fn nil nil false))))
+
+(defn keyed-each
+  "keyed-seq for the each macro. idx-free? when the render fn never uses idx"
+  [coll key-fn site deps idx-free? render-fn]
+  {:pre [(or (nil? coll) (sequential? coll))
+         (ifn? key-fn)]}
+  (when-not (empty? coll)
+    (let [coll (vec coll)]
+      (when ^boolean js/goog.DEBUG
+        (when (not= (count coll) (count (into #{} (map key-fn) coll)))
+          (throw (ex-info "collection contains duplicated keys" {:coll coll}))))
+      (DiffCollectionInit. coll render-fn false key-fn site deps idx-free?))))
