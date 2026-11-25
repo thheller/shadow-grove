@@ -22,10 +22,18 @@
    ;; pushes authoritative row updates directly to subscribed clients.
    (defmethod rs/transact :item/rename [ctx params] ...)
 
+   ;; Optional live server-pushed subscription:
+   ;; Returns {:read (fn [ctx] val) :tags #{...} :mode :throttle|:interval
+   ;;          :min-interval-ms n :default-interval-ms n :shared? bool}
+   ;; or {:start (fn [emit!] stop-fn) ...}.
+   (defmethod rs/subscribe :home/summary [ctx params] ...)
+
    Zero external dependencies: callers pass :read-str and :write-str (Transit or EDN)
    and wire into Ring HTTP, SSE, or WebSocket as needed."
   (:require
-    [shadow.grove.remote :as-alias r]))
+    [shadow.grove.remote :as-alias r])
+  (:import
+    [java.util.concurrent Executors ScheduledExecutorService ScheduledFuture ThreadFactory TimeUnit]))
 
 ;; ---------------------------------------------------------------------------
 ;; Multimethods
@@ -52,32 +60,70 @@
 (defmethod transact :default [ctx params]
   (throw (ex-info "unknown transact" {:tx (::tx ctx)})))
 
+(defmulti subscribe
+  "Named live subscription dispatched on (::sub ctx) with arbitrary params map.
+
+   Returns a descriptor map:
+   :read                (fn [ctx]) -> value  (snapshot producer)
+   :tags                optional set/seq of tags whose notify! marks this subscription dirty
+   :poll?               optional boolean; defaults to true when :tags is empty and :read is given
+   :mode                :throttle (leading+trailing, default) or :interval (strict periodic)
+   :min-interval-ms     minimum allowed interval in ms (default 0)
+   :max-interval-ms     optional maximum allowed interval in ms
+   :default-interval-ms default interval in ms when client omits :interval (default 5000)
+   :shared?             if true, compute :read once per [sub params] per flush tick across connections
+   :start               optional (fn [emit!]) -> stop-fn for custom push-native sources
+
+   Or returns {:error err} to reject the subscription."
+  (fn [ctx params] (::sub ctx)))
+
+(defmethod subscribe :default [ctx _params]
+  (throw (ex-info "unknown subscription" {:sub (::sub ctx)})))
+
 ;; ---------------------------------------------------------------------------
-;; Hub: inverted-index pub/sub + cursor ring buffer
+;; Hub: inverted-index pub/sub + cursor ring buffer + subscriptions
 ;; ---------------------------------------------------------------------------
 
 (def default-log-size 2048)
 
+(def ^:private unset ::unset)
+
+(declare schedule-next-tick! flush-subscriptions! mark-subs-dirty! missed-tags-since)
+
 (defn make-hub
   "Creates a hub tracking live connections, their subscribed tags (inverted index),
-   and a ring buffer of recent changes for reconnect catch-up.
+   a ring buffer of recent changes for reconnect catch-up, and live push subscriptions.
 
    opts:
    :log-size     max entries kept in the reconnect ring buffer (default 2048)
-   :dispatch-fn  optional (fn [thunk]) used to offload notify! sends off the caller thread"
+   :dispatch-fn  optional (fn [thunk]) used to offload notify! sends off the caller thread
+   :now-fn       optional (fn []) -> epoch ms (default #(System/currentTimeMillis); useful for tests)
+   :scheduler?   whether to run the background subscription scheduler (default true)"
   ([]
    (make-hub {}))
-  ([{:keys [log-size dispatch-fn] :or {log-size default-log-size}}]
+  ([{:keys [log-size dispatch-fn now-fn scheduler?]
+     :or {log-size default-log-size
+          now-fn #(System/currentTimeMillis)
+          scheduler? true}}]
    (atom {:epoch (str (random-uuid))
           :cursor 0
           :log-size log-size
           :dispatch-fn dispatch-fn
+          :now-fn now-fn
+          :scheduler? (boolean scheduler?)
+          :sched-lock (Object.)
+          :executor nil
+          :scheduled-task nil
+          :scheduled-at nil
+          :stopped? false
           ;; vector of {:cursor n :stale #{...} :push {:tags #{...} :data ... :retract ...}}
           :log []
-          ;; conn-id -> {:send fn :tags #{...} :fixed-tags #{...} :owner any}
+          ;; conn-id -> {:send fn :ctx-fn fn :tags #{...} :fixed-tags #{...} :owner any :subs {sid sub-entry}}
           :conns {}
           ;; tag -> #{conn-id ...}
-          :tag->conns {}})))
+          :tag->conns {}
+          ;; tag -> #{[conn-id sid] ...}
+          :sub-tag->conns {}})))
 
 (defn- add-conn-tags [state conn-id tags]
   (if (or (empty? tags) (not (contains? (:conns state) conn-id)))
@@ -117,26 +163,57 @@
                   idx
                   removable))))))))
 
+(defn- remove-sub-tags [sub-tag->conns conn-id sid tags]
+  (reduce
+    (fn [idx tag]
+      (let [left (disj (get idx tag) [conn-id sid])]
+        (if (empty? left)
+          (dissoc idx tag)
+          (assoc idx tag left))))
+    sub-tag->conns
+    tags))
+
+(defn- add-sub-tags [sub-tag->conns conn-id sid tags]
+  (reduce
+    (fn [idx tag]
+      (update idx tag (fnil conj #{}) [conn-id sid]))
+    sub-tag->conns
+    tags))
+
+(defn- safe-stop-fn! [stop-fn]
+  (when (fn? stop-fn)
+    (try
+      (stop-fn)
+      (catch Throwable _
+        nil))))
+
 (defn connect!
   "Registers a connection with send-fn (called with Clojure message maps).
    Optional :topics (set/seq of tags) are permanently subscribed for the lifetime
    of this connection (e.g. user/workspace channels for SSE).
    Optional :owner binds this conn-id to an owner value (matched against ::conn-owner in ctx
    on HTTP requests to prevent x-grove-conn spoofing).
+   Optional :ctx (map or (fn [] ctx)) provides ctx when evaluating live subscriptions on tick.
    Sends ::r/hello and returns conn-id."
   ([hub send-fn]
    (connect! hub send-fn nil))
-  ([hub send-fn {:keys [topics conn-id owner]}]
+  ([hub send-fn {:keys [topics conn-id owner ctx]}]
    (let [conn-id (or conn-id (str (random-uuid)))
          fixed (set topics)
+         ctx-fn (cond
+                  (fn? ctx) ctx
+                  (some? ctx) (constantly ctx)
+                  :else nil)
          state (swap! hub
                  (fn [state]
                    (-> state
                        (assoc-in [:conns conn-id]
                          (cond-> {:send send-fn
                                   :tags #{}
-                                  :fixed-tags fixed}
-                           (some? owner) (assoc :owner owner)))
+                                  :fixed-tags fixed
+                                  :subs {}}
+                           (some? owner) (assoc :owner owner)
+                           (some? ctx-fn) (assoc :ctx-fn ctx-fn)))
                        (add-conn-tags conn-id fixed))))]
      (send-fn {:op ::r/hello
                :conn-id conn-id
@@ -145,25 +222,69 @@
      conn-id)))
 
 (defn disconnect!
-  "Removes conn-id from the hub and cleans up all its inverted-index entries."
+  "Removes conn-id from the hub and cleans up all its inverted-index entries and subscriptions."
   [hub conn-id]
-  (swap! hub
-    (fn [state]
-      (if-some [{:keys [tags]} (get-in state [:conns conn-id])]
-        (-> state
-            (update :tag->conns
-              (fn [idx]
-                (reduce
-                  (fn [idx tag]
-                    (let [left (disj (get idx tag) conn-id)]
-                      (if (empty? left)
-                        (dissoc idx tag)
-                        (assoc idx tag left))))
-                  idx
-                  tags)))
-            (update :conns dissoc conn-id))
-        state)))
+  (let [stop-fns (volatile! [])]
+    (swap! hub
+      (fn [state]
+        (if-some [{:keys [tags subs]} (get-in state [:conns conn-id])]
+          (do
+            (vreset! stop-fns (into [] (keep :stop-fn) (vals subs)))
+            (-> state
+                (update :tag->conns
+                  (fn [idx]
+                    (reduce
+                      (fn [idx tag]
+                        (let [left (disj (get idx tag) conn-id)]
+                          (if (empty? left)
+                            (dissoc idx tag)
+                            (assoc idx tag left))))
+                      idx
+                      tags)))
+                (update :sub-tag->conns
+                  (fn [idx]
+                    (reduce-kv
+                      (fn [idx sid {:keys [tags]}]
+                        (remove-sub-tags idx conn-id sid tags))
+                      idx
+                      subs)))
+                (update :conns dissoc conn-id)))
+          state)))
+    (doseq [f @stop-fns]
+      (safe-stop-fn! f))
+    (schedule-next-tick! hub))
   nil)
+
+(defn stop-hub!
+  "Stops the hub's subscription scheduler (if started) and cleans up all active subscriptions."
+  [hub]
+  (let [stop-fns (volatile! [])
+        {:keys [sched-lock]} @hub]
+    (locking sched-lock
+      (let [prev (swap! hub
+                   (fn [{:keys [conns] :as state}]
+                     (vreset! stop-fns
+                       (into []
+                         (for [[_ {:keys [subs]}] conns
+                               sub (vals subs)
+                               :let [f (:stop-fn sub)]
+                               :when (fn? f)]
+                           f)))
+                     (assoc state
+                       :stopped? true
+                       :conns {}
+                       :tag->conns {}
+                       :sub-tag->conns {}
+                       :scheduled-task nil
+                       :scheduled-at nil
+                       :executor nil)))]
+        (when-some [^ScheduledFuture task (:scheduled-task prev)]
+          (.cancel task false))
+        (when-some [^ScheduledExecutorService exec (:executor prev)]
+          (.shutdownNow exec))))
+    (doseq [f @stop-fns]
+      (safe-stop-fn! f))
+    nil))
 
 (defn subscribe-tags!
   "Server-side only: subscribes conn-id to authorized tags."
@@ -276,7 +397,20 @@
                   {:op ::r/stale
                    :epoch epoch
                    :cursor cursor
-                   :tags remaining})))))))))
+                   :tags remaining})))))
+
+        ;; 3. Mark matching live subscriptions dirty (includes mutating conn-id too,
+        ;;    since transact replies do not deliver subscription snapshots).
+        (let [sub-tags (cond-> stale-set
+                         push-data? (into (concat
+                                            push-tags
+                                            (:stale push)
+                                            (:retract push)
+                                            (for [[t rows] (:data push)
+                                                  id (keys rows)]
+                                              [t id]))))]
+          (when (seq sub-tags)
+            (mark-subs-dirty! hub sub-tags)))))))
 
 (defn sync-since
   "Reconnect catch-up: given [req-epoch req-cursor], returns missed stale tags
@@ -676,12 +810,461 @@
                 :data (ex-data e)}})))
 
 ;; ---------------------------------------------------------------------------
+;; Live Subscriptions: dirty-marking, scheduling, flushing, subscribe/unsubscribe
+;; ---------------------------------------------------------------------------
+
+(defn- clamp-interval [requested min-ms max-ms default-ms]
+  (let [raw (if (and (number? requested) (>= (double requested) 0.0))
+              (long requested)
+              (long (or default-ms 5000)))
+        lo (long (max 0 (long (or min-ms 0))))
+        hi (when (number? max-ms) (long (max lo (long max-ms))))
+        v (max lo raw)]
+    (if hi (min hi v) v)))
+
+(defn- next-due-at
+  "Computes the next flush timestamp when a subscription becomes dirty at `now`."
+  [mode now next-at interval-ms]
+  (let [now (long now)
+        next-at (long next-at)
+        interval-ms (long interval-ms)]
+    (if (and (= :interval mode) (pos? interval-ms))
+      (if (< now next-at)
+        next-at
+        (+ next-at (* (inc (quot (- now next-at) interval-ms)) interval-ms)))
+      ;; :throttle (leading+trailing) or interval-ms == 0
+      (if (>= now next-at)
+        now
+        next-at))))
+
+(defn- earliest-due-at [state]
+  (reduce-kv
+    (fn [best _ {:keys [subs]}]
+      (reduce-kv
+        (fn [best _ {:keys [dirty? poll? next-at]}]
+          (if (or dirty? poll?)
+            (let [t (long next-at)]
+              (if (or (nil? best) (< t (long best))) t best))
+            best))
+        best
+        subs))
+    nil
+    (:conns state)))
+
+(defn- ensure-executor! ^ScheduledExecutorService [hub]
+  (or (:executor @hub)
+      (let [tf (reify ThreadFactory
+                 (newThread [_ r]
+                   (doto (Thread. r "shadow-grove-remote-hub")
+                     (.setDaemon true))))
+            exec (Executors/newSingleThreadScheduledExecutor tf)]
+        (swap! hub assoc :executor exec)
+        exec)))
+
+(defn- schedule-next-tick! [hub]
+  (let [{:keys [scheduler? stopped? sched-lock]} @hub]
+    (when (and scheduler? (not stopped?))
+      (locking sched-lock
+        (let [{:keys [stopped? scheduled-task scheduled-at now-fn] :as state} @hub]
+          (when-not stopped?
+            (let [earliest (earliest-due-at state)]
+              (cond
+                (nil? earliest)
+                (when scheduled-task
+                  (.cancel ^ScheduledFuture scheduled-task false)
+                  (swap! hub assoc :scheduled-task nil :scheduled-at nil))
+
+                (and scheduled-task
+                     (not (.isDone ^ScheduledFuture scheduled-task))
+                     (some? scheduled-at)
+                     (<= (long scheduled-at) (long earliest)))
+                nil
+
+                :else
+                (do
+                  (when scheduled-task
+                    (.cancel ^ScheduledFuture scheduled-task false))
+                  (let [exec (ensure-executor! hub)
+                        delay-ms (max 0 (- (long earliest) (long (now-fn))))
+                        task-box (volatile! nil)
+                        ^Runnable task-fn
+                        (fn []
+                          (locking sched-lock
+                            (when (identical? (:scheduled-task @hub) @task-box)
+                              (swap! hub assoc :scheduled-task nil :scheduled-at nil)))
+                          (try
+                            (flush-subscriptions! hub)
+                            (catch Throwable _
+                              nil)))
+                        fut (.schedule exec task-fn (long delay-ms) TimeUnit/MILLISECONDS)]
+                    (vreset! task-box fut)
+                    (swap! hub assoc :scheduled-task fut :scheduled-at earliest))))))))))
+  nil)
+
+(defn- mark-subs-dirty! [hub tags]
+  (let [state @hub
+        sub-tag->conns (:sub-tag->conns state)
+        targets (reduce
+                  (fn [acc tag]
+                    (if-some [entries (get sub-tag->conns tag)]
+                      (into acc entries)
+                      acc))
+                  #{}
+                  tags)]
+    (when (seq targets)
+      (let [now (long ((:now-fn state)))]
+        (swap! hub
+          (fn [state]
+            (reduce
+              (fn [state [conn-id sid]]
+                (if-some [{:keys [mode next-at interval-ms]} (get-in state [:conns conn-id :subs sid])]
+                  (let [due (next-due-at mode now next-at interval-ms)]
+                    (update-in state [:conns conn-id :subs sid] assoc
+                      :dirty? true
+                      :next-at due))
+                  state))
+              state
+              targets)))
+        (schedule-next-tick! hub))))
+  nil)
+
+(defn- emit-sub-value! [hub conn-id sid gen val]
+  (let [now (long ((:now-fn @hub)))
+        updated? (volatile! false)]
+    (swap! hub
+      (fn [state]
+        (if-some [{:keys [mode next-at interval-ms] sub-gen :gen} (get-in state [:conns conn-id :subs sid])]
+          (if (identical? gen sub-gen)
+            (do
+              (vreset! updated? true)
+              (update-in state [:conns conn-id :subs sid] assoc
+                :dirty? true
+                :has-pending? true
+                :pending-val val
+                :next-at (next-due-at mode now next-at interval-ms)))
+            state)
+          state)))
+    (when @updated?
+      (schedule-next-tick! hub)))
+  nil)
+
+(defn- eval-sub-value [shared-cache {:keys [sub params read-fn shared? ctx-fn has-pending? pending-val]}]
+  (if has-pending?
+    {:ok? true :val pending-val}
+    (let [cache-key (when shared? [sub params])]
+      (if (and cache-key (contains? @shared-cache cache-key))
+        (get @shared-cache cache-key)
+        (let [res (try
+                    (let [ctx (if (fn? ctx-fn) (ctx-fn) {})]
+                      {:ok? true :val (read-fn (assoc ctx ::sub sub))})
+                    (catch Exception e
+                      {:ok? false
+                       :error {:message (or (.getMessage e) "subscription read failed")
+                               :data (ex-data e)}}))]
+          (when cache-key
+            (vswap! shared-cache assoc cache-key res))
+          res)))))
+
+(defn flush-subscriptions!
+  "Evaluates all due dirty or polling subscriptions in the hub, suppresses unchanged values,
+   and pushes batched ::r/sub-data / ::r/sub-error messages per connection.
+   Called automatically by the hub scheduler; can also be invoked directly in tests."
+  [hub]
+  (let [now (long ((:now-fn @hub)))
+        claimed (volatile! [])
+        state (swap! hub
+                (fn [state]
+                  (let [items (transient [])
+                        next-conns
+                        (reduce-kv
+                          (fn [conns conn-id {:keys [send ctx-fn subs] :as conn}]
+                            (if (empty? subs)
+                              conns
+                              (let [changed? (volatile! false)
+                                    next-subs
+                                    (reduce-kv
+                                      (fn [subs sid {:keys [dirty? poll? next-at interval-ms sub params
+                                                            read-fn shared? last-val gen
+                                                            has-pending? pending-val fallback-ctx-fn]
+                                                     :as entry}]
+                                        (if (and (or dirty? poll?)
+                                                 (<= (long next-at) now))
+                                          (do
+                                            (vreset! changed? true)
+                                            (conj! items
+                                              {:conn-id conn-id
+                                               :sid sid
+                                               :gen gen
+                                               :send send
+                                               :sub sub
+                                               :params params
+                                               :read-fn read-fn
+                                               :shared? shared?
+                                               :ctx-fn (or ctx-fn fallback-ctx-fn)
+                                               :last-val last-val
+                                               :has-pending? has-pending?
+                                               :pending-val pending-val})
+                                            (assoc subs sid
+                                              (assoc entry
+                                                :dirty? false
+                                                :has-pending? false
+                                                :pending-val nil
+                                                :next-at (+ now (long interval-ms)))))
+                                          subs))
+                                      subs
+                                      subs)]
+                                (if @changed?
+                                  (assoc conns conn-id (assoc conn :subs next-subs))
+                                  conns))))
+                          (:conns state)
+                          (:conns state))]
+                    (vreset! claimed (persistent! items))
+                    (assoc state :conns next-conns))))
+        {:keys [dispatch-fn]} state
+        due @claimed]
+
+    (when (seq due)
+      (let [shared-cache (volatile! {})
+            per-conn-values (volatile! {})
+            per-conn-errors (volatile! {})
+            last-val-updates (volatile! [])
+            send-fns (volatile! {})]
+
+        (doseq [{:keys [conn-id sid gen send last-val read-fn has-pending?] :as item} due
+                :when (or has-pending? (fn? read-fn))]
+          (let [{:keys [ok? val error]} (eval-sub-value shared-cache item)]
+            (if ok?
+              (when (or (identical? unset last-val) (not= last-val val))
+                (vswap! last-val-updates conj [conn-id sid gen val])
+                (vswap! per-conn-values assoc-in [conn-id sid] val)
+                (vswap! send-fns assoc conn-id send))
+              (do
+                (vswap! per-conn-errors assoc-in [conn-id sid] error)
+                (vswap! send-fns assoc conn-id send)))))
+
+        (when (seq @last-val-updates)
+          (swap! hub
+            (fn [state]
+              (reduce
+                (fn [state [conn-id sid gen val]]
+                  (if (identical? gen (get-in state [:conns conn-id :subs sid :gen]))
+                    (update-in state [:conns conn-id :subs sid] assoc
+                      :last-val val
+                      :last-sent-at now)
+                    state))
+                state
+                @last-val-updates))))
+
+        (doseq [[conn-id values] @per-conn-values
+                :let [send-fn (get @send-fns conn-id)]
+                :when send-fn]
+          (safe-send! hub dispatch-fn conn-id send-fn
+            {:op ::r/sub-data
+             :values values}))
+
+        (doseq [[conn-id errors] @per-conn-errors
+                :let [send-fn (get @send-fns conn-id)]
+                :when send-fn]
+          (safe-send! hub dispatch-fn conn-id send-fn
+            {:op ::r/sub-error
+             :errors errors}))))
+
+    (schedule-next-tick! hub)
+    nil))
+
+(defn handle-subscribe
+  "Registers or updates live subscriptions for conn-id and pushes initial snapshots."
+  [hub ctx conn-id subs]
+  (when (and hub conn-id (seq subs) (contains? (:conns @hub) conn-id))
+    (let [now (long ((:now-fn @hub)))
+          shared-cache (volatile! {})
+          init-values (volatile! {})
+          init-errors (volatile! {})
+          old-stop-fns (volatile! [])
+          starts-to-run (volatile! [])]
+
+      (doseq [{:keys [id sub params interval mode]} subs
+              :when (some? id)]
+        (let [existing (get-in @hub [:conns conn-id :subs id])]
+          (if (and existing
+                   (= sub (:sub existing))
+                   (= params (:params existing)))
+            ;; Idempotent update (e.g. client merged/relaxed interval or mode)
+            (let [{:keys [min-interval-ms max-interval-ms default-interval-ms spec-mode]} existing
+                  next-interval (clamp-interval interval min-interval-ms max-interval-ms default-interval-ms)
+                  next-mode (or mode spec-mode :throttle)]
+              (swap! hub
+                (fn [state]
+                  (if-some [{:keys [dirty? poll? last-sent-at next-at] :as cur}
+                            (get-in state [:conns conn-id :subs id])]
+                    (let [base-due (+ (long (or last-sent-at now)) (long next-interval))
+                          adjusted-due (cond
+                                         (and dirty? (= :throttle next-mode) (>= now base-due)) now
+                                         (or dirty? poll?) (min (long next-at) base-due)
+                                         :else base-due)]
+                      (assoc-in state [:conns conn-id :subs id]
+                        (assoc cur
+                          :interval-ms next-interval
+                          :mode next-mode
+                          :next-at adjusted-due)))
+                    state))))
+
+            ;; New subscription (or replacing a different sub under the same id)
+            (let [read-cursor (:cursor @hub)
+                  spec-res (try
+                             (let [res (subscribe (assoc ctx ::sub sub) params)]
+                               (if (and (map? res) (contains? res :error))
+                                 {:ok? false :error (:error res)}
+                                 {:ok? true :spec res}))
+                             (catch Exception e
+                               {:ok? false
+                                :error {:message (or (.getMessage e) "subscribe failed")
+                                        :data (ex-data e)}}))]
+              (if-not (:ok? spec-res)
+                (vswap! init-errors assoc id (:error spec-res))
+                (let [{:keys [read start tags poll? min-interval-ms max-interval-ms
+                              default-interval-ms shared?]
+                       spec-mode :mode} (:spec spec-res)
+                      tag-set (into #{} tags)
+                      poll? (if (some? poll?)
+                              (boolean poll?)
+                              (and (empty? tag-set) (fn? read)))
+                      eff-mode (or mode spec-mode :throttle)
+                      eff-interval (clamp-interval interval min-interval-ms max-interval-ms default-interval-ms)
+                      gen (Object.)
+                      fallback-ctx-fn (constantly ctx)
+                      init-read (when (fn? read)
+                                  (eval-sub-value shared-cache
+                                    {:sub sub
+                                     :params params
+                                     :read-fn read
+                                     :shared? shared?
+                                     :ctx-fn fallback-ctx-fn}))]
+                  (if (and init-read (not (:ok? init-read)))
+                    (vswap! init-errors assoc id (:error init-read))
+                    (let [has-init? (some? init-read)
+                          init-val (if has-init? (:val init-read) unset)
+                          missed (when (seq tag-set)
+                                   (missed-tags-since hub read-cursor tag-set))
+                          dirty? (boolean (seq missed))
+                          next-at (if dirty?
+                                    (next-due-at eff-mode now (+ now eff-interval) eff-interval)
+                                    (+ now eff-interval))
+                          entry {:id id
+                                 :gen gen
+                                 :sub sub
+                                 :params params
+                                 :read-fn read
+                                 :tags tag-set
+                                 :poll? poll?
+                                 :mode eff-mode
+                                 :spec-mode spec-mode
+                                 :min-interval-ms min-interval-ms
+                                 :max-interval-ms max-interval-ms
+                                 :default-interval-ms default-interval-ms
+                                 :interval-ms eff-interval
+                                 :shared? (boolean shared?)
+                                 :fallback-ctx-fn fallback-ctx-fn
+                                 :dirty? dirty?
+                                 :has-pending? false
+                                 :pending-val nil
+                                 :next-at next-at
+                                 :last-sent-at now
+                                 :last-val init-val
+                                 :stop-fn nil}
+                          installed? (volatile! false)]
+                      (swap! hub
+                        (fn [state]
+                          (if-not (contains? (:conns state) conn-id)
+                            state
+                            (let [prev (get-in state [:conns conn-id :subs id])]
+                              (when-some [f (:stop-fn prev)]
+                                (vswap! old-stop-fns conj f))
+                              (vreset! installed? true)
+                              (-> state
+                                  (cond-> prev
+                                    (update :sub-tag->conns remove-sub-tags conn-id id (:tags prev)))
+                                  (assoc-in [:conns conn-id :subs id] entry)
+                                  (update :sub-tag->conns add-sub-tags conn-id id tag-set))))))
+                      (when @installed?
+                        (when has-init?
+                          (vswap! init-values assoc id init-val))
+                        (when (fn? start)
+                          (vswap! starts-to-run conj [id gen start])))))))))))
+
+      (doseq [f @old-stop-fns]
+        (safe-stop-fn! f))
+
+      (let [conn-send (get-in @hub [:conns conn-id :send])]
+        (when conn-send
+          (when (seq @init-values)
+            (safe-send! hub nil conn-id conn-send
+              {:op ::r/sub-data
+               :values @init-values}))
+          (when (seq @init-errors)
+            (safe-send! hub nil conn-id conn-send
+              {:op ::r/sub-error
+               :errors @init-errors}))))
+
+      (doseq [[sid gen start-fn] @starts-to-run]
+        (let [emit! (fn [val] (emit-sub-value! hub conn-id sid gen val))
+              stop-fn (try
+                        (start-fn emit!)
+                        (catch Exception e
+                          (when-some [conn-send (get-in @hub [:conns conn-id :send])]
+                            (safe-send! hub nil conn-id conn-send
+                              {:op ::r/sub-error
+                               :errors {sid {:message (or (.getMessage e) "subscription start failed")
+                                             :data (ex-data e)}}}))
+                          nil))]
+          (when (fn? stop-fn)
+            (let [attached? (volatile! false)]
+              (swap! hub
+                (fn [state]
+                  (if (identical? gen (get-in state [:conns conn-id :subs sid :gen]))
+                    (do
+                      (vreset! attached? true)
+                      (assoc-in state [:conns conn-id :subs sid :stop-fn] stop-fn))
+                    state)))
+              (when-not @attached?
+                (safe-stop-fn! stop-fn))))))
+
+      (schedule-next-tick! hub)))
+  nil)
+
+(defn handle-unsubscribe
+  "Removes live subscriptions by client-assigned ids from conn-id."
+  [hub conn-id ids]
+  (when (and hub conn-id (seq ids))
+    (let [stop-fns (volatile! [])]
+      (swap! hub
+        (fn [state]
+          (if-not (contains? (:conns state) conn-id)
+            state
+            (reduce
+              (fn [state sid]
+                (if-some [{:keys [tags stop-fn]} (get-in state [:conns conn-id :subs sid])]
+                  (do
+                    (when (fn? stop-fn)
+                      (vswap! stop-fns conj stop-fn))
+                    (-> state
+                        (update-in [:conns conn-id :subs] dissoc sid)
+                        (update :sub-tag->conns remove-sub-tags conn-id sid tags)))
+                  state))
+              state
+              ids))))
+      (doseq [f @stop-fns]
+        (safe-stop-fn! f))
+      (schedule-next-tick! hub)))
+  nil)
+
+;; ---------------------------------------------------------------------------
 ;; Transport Adapters: WebSocket + HTTP POST + SSE
 ;; ---------------------------------------------------------------------------
 
 (defn handle-message
   "Dispatches a single wire message (used by both WebSocket and single-endpoint HTTP).
-   Returns the reply map, or nil for fire-and-forget ops like ::r/forget."
+   Returns the reply map, or nil for fire-and-forget ops like ::r/forget, ::r/subscribe, ::r/unsubscribe."
   [hub ctx conn-id {:keys [op call-id] :as msg}]
   (let [reply
         (case op
@@ -694,6 +1277,12 @@
           ::r/forget
           (do (forget-tags! hub conn-id (:tags msg))
               nil)
+
+          ::r/subscribe
+          (handle-subscribe hub ctx conn-id (:subs msg))
+
+          ::r/unsubscribe
+          (handle-unsubscribe hub conn-id (:ids msg))
 
           ::r/sync
           (if hub
@@ -725,7 +1314,7 @@
              topic-set (if (fn? topics) (topics open-ctx) topics)
              owner-val (if (fn? owner) (owner open-ctx) (or owner (::conn-owner open-ctx)))
              send-msg! (fn [msg] (send-fn socket (write-str msg)))
-             conn-id (connect! hub send-msg! {:topics topic-set :owner owner-val})]
+             conn-id (connect! hub send-msg! {:topics topic-set :owner owner-val :ctx get-ctx})]
          (vreset! conn-id-ref conn-id)
          nil))
 
@@ -769,7 +1358,7 @@
 (defn ring-http-response
   "Handles a Ring HTTP POST request for shadow.grove.remote.
    Supports either a single endpoint (body has :op) or subpath routing
-   (subpath \"read\", \"transact\", \"forget\", \"sync\").
+   (subpath \"read\", \"transact\", \"forget\", \"subscribe\", \"unsubscribe\", \"sync\").
 
    opts:
    :read-str     - (fn [string]) -> clj map
@@ -802,6 +1391,8 @@
                        "read" ::r/read
                        "transact" ::r/transact
                        "forget" ::r/forget
+                       "subscribe" ::r/subscribe
+                       "unsubscribe" ::r/unsubscribe
                        "sync" ::r/sync
                        nil)))
              reply (handle-message hub ctx conn-id msg)]
@@ -817,15 +1408,18 @@
   "Connects an SSE stream to the hub.
    write-event! is (fn [event-name data-str]) provided by the server (e.g. Ring/Jetty/shadow.http).
    Returns conn-id (pass to disconnect! in a finally block when the stream closes)."
-  [hub {:keys [write-str write-event! topics conn-id owner]}]
+  [hub {:keys [write-str write-event! topics conn-id owner ctx]}]
   (connect! hub
     (fn [msg]
       (let [ev-name (case (:op msg)
                       ::r/hello "hello"
                       ::r/stale "stale"
                       ::r/push "push"
+                      ::r/sub-data "sub-data"
+                      ::r/sub-error "sub-error"
                       "message")]
         (write-event! ev-name (write-str msg))))
     {:topics topics
      :conn-id conn-id
-     :owner owner}))
+     :owner owner
+     :ctx ctx}))

@@ -432,3 +432,284 @@
          :body (pr-str {:requests [{:op :query :query ::templates}]})}
         "read")
       (is (contains? (get-in @hub [:conns cid-u1 :tags]) ::templates)))))
+
+;; ---------------------------------------------------------------------------
+;; Live Subscriptions tests
+;; ---------------------------------------------------------------------------
+
+(defonce sub-state (atom {:power 100 :alert "ok" :reads 0 :poll-n 0}))
+
+(defmethod rs/subscribe ::power-summary [_ctx _params]
+  {:tags #{::power}
+   :mode :interval
+   :min-interval-ms 1000
+   :default-interval-ms 5000
+   :shared? true
+   :read (fn [_ctx]
+           (swap! sub-state update :reads inc)
+           {:power (:power @sub-state)})})
+
+(defmethod rs/subscribe ::alert-feed [_ctx _params]
+  {:tags #{::alert}
+   :mode :throttle
+   :min-interval-ms 0
+   :default-interval-ms 5000
+   :read (fn [_ctx]
+           {:alert (:alert @sub-state)})})
+
+(defmethod rs/subscribe ::poll-counter [_ctx _params]
+  {:default-interval-ms 2000
+   :read (fn [_ctx]
+           (:poll-n @sub-state))})
+
+(defmethod rs/subscribe ::tx-summary [_ctx _params]
+  {:tags #{::all-items}
+   :mode :throttle
+   :min-interval-ms 0
+   :default-interval-ms 1000
+   :read (fn [_ctx]
+           (get-in @test-db [:item 1 :item/label]))})
+
+(deftest subscriptions-interval-throttle-shared-and-transact
+  (reset! sub-state {:power 100 :alert "ok" :reads 0 :poll-n 0})
+  (let [clock (atom 10000)
+        hub (rs/make-hub {:now-fn #(deref clock) :scheduler? false})
+        sent-a (atom [])
+        sent-b (atom [])
+        cid-a (rs/connect! hub #(swap! sent-a conj %) {:ctx {:tenant :a}})
+        cid-b (rs/connect! hub #(swap! sent-b conj %) {:ctx {:tenant :a}})]
+    (reset! sent-a [])
+    (reset! sent-b [])
+
+    ;; Subscribe conn A to both ::power-summary (interval 10s) and ::alert-feed (throttle 5s)
+    ;; Also test clamping: conn B asks for 100ms on ::power-summary -> clamped to min 1000ms
+    (rs/handle-message hub {:tenant :a} cid-a
+      {:op ::r/subscribe
+       :subs [{:id 1 :sub ::power-summary :params nil :interval 10000}
+              {:id 2 :sub ::alert-feed :params nil :interval 5000}]})
+    (rs/handle-message hub {:tenant :a} cid-b
+      {:op ::r/subscribe
+       :subs [{:id 10 :sub ::power-summary :params nil :interval 100}]})
+
+    ;; Initial snapshots pushed in a single batched ::r/sub-data per conn!
+    (is (= 1 (count @sent-a)))
+    (is (= {:op ::r/sub-data :values {1 {:power 100} 2 {:alert "ok"}}} (first @sent-a)))
+    (is (= {:op ::r/sub-data :values {10 {:power 100}}} (first @sent-b)))
+    (is (= 1000 (get-in @hub [:conns cid-b :subs 10 :interval-ms])))
+    (reset! sent-a [])
+    (reset! sent-b [])
+
+    ;; Multiple rapid ::power updates at t=10500, t=12000:
+    ;; Neither conn gets ::r/stale!
+    (swap! sub-state assoc :power 200 :reads 0)
+    (reset! clock 10500)
+    (rs/notify! hub {:stale #{::power}})
+    (rs/flush-subscriptions! hub)
+    (is (empty? @sent-a))
+    (is (empty? @sent-b))
+
+    ;; At t=11000: conn B (clamped 1000ms) flushes, conn A (10000ms) still waits!
+    (reset! clock 11000)
+    (rs/flush-subscriptions! hub)
+    (is (empty? @sent-a))
+    (is (= [{:op ::r/sub-data :values {10 {:power 200}}}] @sent-b))
+    (reset! sent-b [])
+
+    ;; At t=20000: both conn A and conn B are due if power changes again -> :shared? true computes :read ONCE!
+    (swap! sub-state assoc :power 300 :reads 0)
+    (reset! clock 19500)
+    (rs/notify! hub {:stale #{::power}})
+    (reset! clock 20000)
+    (rs/flush-subscriptions! hub)
+    (is (= 1 (:reads @sub-state)))
+    (is (= [{:op ::r/sub-data :values {1 {:power 300}}}] @sent-a))
+    (is (= [{:op ::r/sub-data :values {10 {:power 300}}}] @sent-b))
+    (reset! sent-a [])
+    (reset! sent-b [])
+
+    ;; Value equality suppression: notify without actual value change sends nothing!
+    (reset! clock 25000)
+    (rs/notify! hub {:stale #{::power}})
+    (reset! clock 30000)
+    (rs/flush-subscriptions! hub)
+    (is (empty? @sent-a))
+    (is (empty? @sent-b))
+
+    ;; :mode :interval after quiet period stays aligned (last next-at was 30000; dirty at 45000 waits until 50000)
+    (swap! sub-state assoc :power 400)
+    (reset! clock 45000)
+    (rs/notify! hub {:stale #{::power}})
+    (rs/flush-subscriptions! hub)
+    (is (empty? @sent-a))
+    (reset! clock 50000)
+    (rs/flush-subscriptions! hub)
+    (is (= [{:op ::r/sub-data :values {1 {:power 400}}}] @sent-a))
+    (reset! sent-a [])
+
+    ;; :mode :throttle (leading + trailing): quiet since t=10000 (next-at=15000), dirty at t=50000 -> fires ASAP!
+    (swap! sub-state assoc :alert "door-open")
+    (rs/notify! hub {:stale #{::alert}})
+    (rs/flush-subscriptions! hub)
+    (is (= [{:op ::r/sub-data :values {2 {:alert "door-open"}}}] @sent-a))
+    (reset! sent-a [])
+
+    ;; Burst during cooldown (t=51000, t=52000) -> waits until t=55000 (trailing edge)!
+    (reset! clock 51000)
+    (swap! sub-state assoc :alert "window-1")
+    (rs/notify! hub {:stale #{::alert}})
+    (rs/flush-subscriptions! hub)
+    (is (empty? @sent-a))
+    (reset! clock 52000)
+    (swap! sub-state assoc :alert "window-2")
+    (rs/notify! hub {:stale #{::alert}})
+    (rs/flush-subscriptions! hub)
+    (is (empty? @sent-a))
+    (reset! clock 55000)
+    (rs/flush-subscriptions! hub)
+    (is (= [{:op ::r/sub-data :values {2 {:alert "window-2"}}}] @sent-a))
+    (reset! sent-a [])
+
+    ;; Idempotent interval update: relax conn A sub 1 to 2000ms without re-sending unchanged value
+    (rs/handle-message hub {:tenant :a} cid-a
+      {:op ::r/subscribe
+       :subs [{:id 1 :sub ::power-summary :params nil :interval 2000}]})
+    (is (empty? @sent-a))
+    (is (= 2000 (get-in @hub [:conns cid-a :subs 1 :interval-ms])))
+
+    ;; handle-transact with :except cid-a STILL marks cid-a's subscription dirty!
+    (rs/handle-message hub {:tenant :a} cid-a
+      {:op ::r/subscribe
+       :subs [{:id 3 :sub ::tx-summary :params nil :interval 0}]})
+    (is (= [{:op ::r/sub-data :values {3 "Alpha"}}] @sent-a))
+    (reset! sent-a [])
+    (reset! clock 56000)
+    (let [reply (rs/handle-transact hub {:tenant :a} cid-a {:tx ::rename :params {:id 1 :label "Alpha New"}})]
+      (is (:ok? reply)))
+    (rs/flush-subscriptions! hub)
+    (is (= [{:op ::r/sub-data :values {3 "Alpha New"}}] @sent-a))
+    (reset! sent-a [])
+
+    ;; Unsubscribe & disconnect clean up inverted index completely
+    (rs/handle-message hub {:tenant :a} cid-a {:op ::r/unsubscribe :ids [1 2 3]})
+    (is (empty? (get-in @hub [:conns cid-a :subs])))
+    (rs/disconnect! hub cid-a)
+    (rs/disconnect! hub cid-b)
+    (is (empty? (:conns @hub)))
+    (is (empty? (:sub-tag->conns @hub)))))
+
+(deftest subscriptions-polling-custom-source-errors-sse-and-scheduler
+  (reset! sub-state {:power 100 :alert "ok" :reads 0 :poll-n 1})
+  (let [clock (atom 1000)
+        hub (rs/make-hub {:now-fn #(deref clock) :scheduler? false})
+        stopped? (atom false)
+        emitter (atom nil)
+        sent (atom [])]
+    (defmethod rs/subscribe ::custom-stream [_ctx _params]
+      {:mode :throttle
+       :min-interval-ms 0
+       :default-interval-ms 1000
+       :start (fn [emit!]
+                (reset! emitter emit!)
+                (fn [] (reset! stopped? true)))})
+
+    (let [cid (rs/connect! hub #(swap! sent conj %) {:ctx {:tenant :a}})]
+      (reset! sent [])
+      ;; Subscribe to polling sub, custom stream, and unknown sub in one batch
+      (rs/handle-message hub {:tenant :a} cid
+        {:op ::r/subscribe
+         :subs [{:id 1 :sub ::poll-counter :params nil :interval 2000}
+                {:id 2 :sub ::custom-stream :params nil :interval 1000}
+                {:id 3 :sub ::no-such-sub :params nil}]})
+      ;; Initial value for poll-counter + error for unknown sub
+      (is (= {:op ::r/sub-data :values {1 1}} (first @sent)))
+      (is (= ::r/sub-error (:op (second @sent))))
+      (is (contains? (:errors (second @sent)) 3))
+      (reset! sent [])
+
+      ;; Poll at t=3000 with unchanged value -> nothing sent
+      (reset! clock 3000)
+      (rs/flush-subscriptions! hub)
+      (is (empty? @sent))
+
+      ;; Poll at t=5000 with changed value -> pushed!
+      (swap! sub-state assoc :poll-n 2)
+      (reset! clock 5000)
+      (rs/flush-subscriptions! hub)
+      (is (= [{:op ::r/sub-data :values {1 2}}] @sent))
+      (reset! sent [])
+
+      ;; Custom push source emits twice within cooldown -> throttled to 1 leading + 1 trailing
+      (@emitter :ev-1)
+      (rs/flush-subscriptions! hub)
+      (is (= [{:op ::r/sub-data :values {2 :ev-1}}] @sent))
+      (reset! sent [])
+      (reset! clock 5200)
+      (@emitter :ev-2)
+      (@emitter :ev-3)
+      (rs/flush-subscriptions! hub)
+      (is (empty? @sent))
+      (reset! clock 6000)
+      (rs/flush-subscriptions! hub)
+      (is (= [{:op ::r/sub-data :values {2 :ev-3}}] @sent))
+
+      ;; Disconnect stops custom source!
+      (rs/disconnect! hub cid)
+      (is (true? @stopped?)))
+
+    ;; HTTP + SSE adapter test
+    (let [sse-events (atom [])
+          codec {:read-str edn/read-string :write-str pr-str :content-type "application/edn; charset=utf-8"}
+          cid (rs/sse-connect! hub
+                {:write-str pr-str
+                 :write-event! (fn [ev data] (swap! sse-events conj [ev (edn/read-string data)]))
+                 :ctx {:tenant :a}})]
+      (reset! sse-events [])
+      (let [resp (rs/ring-http-response hub {:tenant :a} codec
+                   {:headers {"x-grove-conn" cid}
+                    :body (pr-str {:subs [{:id 1 :sub ::poll-counter :params nil :interval 1000}]})}
+                   "subscribe")]
+        (is (= 204 (:status resp)))
+        (is (= [["sub-data" {:op ::r/sub-data :values {1 2}}]] @sse-events)))
+      (let [resp (rs/ring-http-response hub {:tenant :a} codec
+                   {:headers {"x-grove-conn" cid}
+                    :body (pr-str {:ids [1]})}
+                   "unsubscribe")]
+        (is (= 204 (:status resp))))
+      (rs/disconnect! hub cid)))
+
+  ;; Real background scheduler test (async push on daemon ScheduledExecutorService)
+  (reset! sub-state {:power 10 :alert "ok" :reads 0 :poll-n 0})
+  (let [hub (rs/make-hub)
+        p (promise)
+        cid (rs/connect! hub
+              (fn [msg]
+                (when (and (= ::r/sub-data (:op msg))
+                           (= {:power 99} (get-in msg [:values 1])))
+                  (deliver p msg)))
+              {:ctx {:tenant :a}})]
+    (try
+      (rs/handle-message hub {:tenant :a} cid
+        {:op ::r/subscribe
+         :subs [{:id 1 :sub ::alert-feed :params nil :interval 25}]})
+      ;; Also test real scheduled flush with 30ms interval
+      (let [p2 (promise)]
+        (defmethod rs/subscribe ::fast-tick [_ctx _params]
+          {:tags #{::fast}
+           :mode :interval
+           :min-interval-ms 20
+           :default-interval-ms 25
+           :read (fn [_ctx] {:power (:power @sub-state)})})
+        (let [cid2 (rs/connect! hub
+                     (fn [msg]
+                       (when (and (= ::r/sub-data (:op msg))
+                                  (= {:power 99} (get-in msg [:values 7])))
+                         (deliver p2 msg)))
+                     {:ctx {:tenant :a}})]
+          (rs/handle-message hub {:tenant :a} cid2
+            {:op ::r/subscribe
+             :subs [{:id 7 :sub ::fast-tick :params nil :interval 25}]})
+          (swap! sub-state assoc :power 99)
+          (rs/notify! hub {:stale #{::fast}})
+          (is (= {:op ::r/sub-data :values {7 {:power 99}}} (deref p2 1000 :timeout)))))
+      (finally
+        (rs/stop-hub! hub)))))

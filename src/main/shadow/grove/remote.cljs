@@ -18,6 +18,7 @@
      (remote/entity :item id :detail)
      (remote/query env :app/stats)
      (remote/query :items/search {:q text} {:suspend? false})
+     (remote/subscribe :home/summary nil {:interval 10000 :suspend? false})
      (remote/window env :items/all {:filter f} window {:page-size 50})
 
    Writing (inside deftx):
@@ -710,6 +711,121 @@
         (mark-stale-in-tx tx-env rt-ref state-ref stale)
         tx-env))))
 
+;; ---------------------------------------------------------------------------
+;; Live Subscriptions (client demand tracking, interval merging, push apply)
+;; ---------------------------------------------------------------------------
+
+(declare flush-subs!)
+
+(defn- schedule-sub-flush! [rt-ref state-ref]
+  (when-not (:sub-flush-queued? @state-ref)
+    (swap! state-ref assoc :sub-flush-queued? true)
+    (rt/next-tick #(flush-subs! rt-ref state-ref))))
+
+(defn- effective-sub-spec [readers]
+  (let [intervals (into []
+                    (keep (fn [[[interval _] cnt]]
+                            (when (and (pos? cnt) (number? interval))
+                              interval)))
+                    readers)
+        modes (into #{}
+                (keep (fn [[[_ mode] cnt]]
+                        (when (and (pos? cnt) (some? mode))
+                          mode)))
+                readers)]
+    {:interval (when (seq intervals) (apply min intervals))
+     :mode (cond
+             (contains? modes :throttle) :throttle
+             (contains? modes :interval) :interval
+             :else nil)}))
+
+(defn- flush-subs! [rt-ref state-ref]
+  (when (identical? state-ref (::state @rt-ref))
+    (swap! state-ref assoc :sub-flush-queued? false)
+
+    (let [{:keys [transport sub-grace-ms]} @state-ref
+          ready? (if-some [f (or (:sub-ready? transport) (:ready? transport))]
+                   (f)
+                   true)
+          to-sub (volatile! [])
+          to-unsub (volatile! [])
+          evict-subs (volatile! [])]
+
+      (swap! state-ref
+        (fn [{:keys [subs] :as state}]
+          (reduce-kv
+            (fn [state sub-key {:keys [id sub params refs readers sent] :as entry}]
+              (cond
+                (pos? (or refs 0))
+                (if-not ready?
+                  state
+                  (let [desired (effective-sub-spec readers)]
+                    (if (= sent desired)
+                      state
+                      (do
+                        (vswap! to-sub conj
+                          (cond-> {:id id :sub sub :params params}
+                            (some? (:interval desired)) (assoc :interval (:interval desired))
+                            (some? (:mode desired)) (assoc :mode (:mode desired))))
+                        (assoc-in state [:subs sub-key :sent] desired)))))
+
+                (<= (or sub-grace-ms 0) 0)
+                (do
+                  (when (some? sent)
+                    (vswap! to-unsub conj id))
+                  (vswap! evict-subs conj sub-key)
+                  (-> state
+                      (update :subs dissoc sub-key)
+                      (update :sid->sub-key dissoc id)))
+
+                :else
+                state))
+            state
+            subs)))
+
+      (when (seq @evict-subs)
+        (sg/run-tx! rt-ref
+          {:e ::evict
+           :idents []
+           :queries []
+           :window-keys []
+           :subs @evict-subs}))
+
+      (when (and ready? (seq @to-sub) (:subscribe! transport))
+        ((:subscribe! transport) @to-sub))
+
+      (when (and ready? (seq @to-unsub) (:unsubscribe! transport))
+        ((:unsubscribe! transport) @to-unsub)))))
+
+(defn- on-sub-data [tx-env {:keys [values]}]
+  (let [state-ref (state-ref-of (::sg/runtime-ref tx-env))
+        sid->sub-key (:sid->sub-key @state-ref)]
+    (reduce-kv
+      (fn [tx-env sid val]
+        (if-some [sub-key (get sid->sub-key sid)]
+          (let [next-entry {:state :ready :value val}
+                prev-entry (get-in tx-env [::subs sub-key])]
+            (if (= prev-entry next-entry)
+              tx-env
+              (assoc-in tx-env [::subs sub-key] next-entry)))
+          tx-env))
+      tx-env
+      values)))
+
+(defn- on-sub-error [tx-env {:keys [errors]}]
+  (let [state-ref (state-ref-of (::sg/runtime-ref tx-env))
+        sid->sub-key (:sid->sub-key @state-ref)]
+    (reduce-kv
+      (fn [tx-env sid err]
+        (if-some [sub-key (get sid->sub-key sid)]
+          (let [prev (get-in tx-env [::subs sub-key])]
+            (if (and (map? prev) (= :ready (:state prev)))
+              (assoc-in tx-env [::subs sub-key] (assoc prev :bg-error err))
+              (assoc-in tx-env [::subs sub-key] {:state :error :error err})))
+          tx-env))
+      tx-env
+      errors)))
+
 (defn- on-hello [tx-env {:keys [conn-id epoch cursor]}]
   (let [rt-ref (::sg/runtime-ref tx-env)
         state-ref (state-ref-of rt-ref)
@@ -718,8 +834,18 @@
          prev-cursor :cursor
          prev-conn-id :conn-id} @state-ref
         new-conn? (and (some? prev-conn-id) (some? conn-id) (not= prev-conn-id conn-id))]
-    (swap! state-ref assoc :connected? true :had-connected? true :conn-id conn-id)
+    (swap! state-ref
+      (fn [state]
+        (-> state
+            (assoc :connected? true :had-connected? true :conn-id conn-id)
+            (update :subs
+              (fn [subs]
+                (reduce-kv
+                  (fn [m k v] (assoc m k (assoc v :sent nil)))
+                  {}
+                  subs))))))
     (schedule-flush! rt-ref state-ref)
+    (schedule-sub-flush! rt-ref state-ref)
     (let [tx-env (-> tx-env
                      (sync-status-kv state-ref)
                      (sg/queue-fx ::pump-transacts nil))]
@@ -965,33 +1091,89 @@
 ;; Demand Lifecycle & LRU + Grace + read-index Eviction
 ;; ---------------------------------------------------------------------------
 
+(defn- add-sub-demand [state [_ sub-id params interval mode]]
+  (let [sub-key [sub-id params]
+        reader-key [interval mode]
+        state (if (contains? (:subs state) sub-key)
+                state
+                (let [sid (inc (:sub-seq state))]
+                  (-> state
+                      (assoc :sub-seq sid)
+                      (assoc-in [:subs sub-key]
+                        {:id sid
+                         :sub sub-id
+                         :params params
+                         :readers {}
+                         :refs 0
+                         :released-at nil
+                         :sent nil})
+                      (assoc-in [:sid->sub-key sid] sub-key))))]
+    (update-in state [:subs sub-key]
+      (fn [entry]
+        (-> entry
+            (update :refs inc)
+            (update-in [:readers reader-key] (fnil inc 0))
+            (assoc :released-at nil))))))
+
+(defn- remove-sub-demand [state now [_ sub-id params interval mode]]
+  (let [sub-key [sub-id params]
+        reader-key [interval mode]]
+    (if-not (contains? (:subs state) sub-key)
+      state
+      (update-in state [:subs sub-key]
+        (fn [{:keys [refs readers] :as entry}]
+          (let [next-reader-cnt (dec (get readers reader-key 1))
+                next-readers (if (pos? next-reader-cnt)
+                               (assoc readers reader-key next-reader-cnt)
+                               (dissoc readers reader-key))
+                next-refs (max 0 (dec (or refs 1)))]
+            (-> entry
+                (assoc :refs next-refs :readers next-readers)
+                (cond-> (zero? next-refs)
+                  (assoc :released-at now)))))))))
+
 (defn- handle-demands [rt-ref state-ref prev next-demands]
-  (let [now (js/Date.now)]
+  (let [now (js/Date.now)
+        added (remove #(contains? prev %) next-demands)
+        removed (remove #(contains? next-demands %) prev)
+        sub-changed? (volatile! false)
+        demand-changed? (volatile! false)]
     (swap! state-ref
       (fn [state]
         (as-> state $
           (reduce
             (fn [state demand]
-              (let [state (ensure-demand state demand)
-                    {:keys [stale? status]} (get-in state [:demands demand])]
-                (cond-> (update-in state [:demands demand :refs] inc)
-                  (and stale? (not= :loading status)) (want demand))))
+              (if (= :sub (first demand))
+                (do (vreset! sub-changed? true)
+                    (add-sub-demand state demand))
+                (do (vreset! demand-changed? true)
+                    (let [state (ensure-demand state demand)
+                          {:keys [stale? status]} (get-in state [:demands demand])]
+                      (cond-> (update-in state [:demands demand :refs] inc)
+                        (and stale? (not= :loading status)) (want demand))))))
             $
-            (remove #(contains? prev %) next-demands))
+            added)
           (reduce
             (fn [state demand]
-              (if (contains? (:demands state) demand)
-                (let [next-refs (max 0 (dec (get-in state [:demands demand :refs] 1)))]
-                  (-> state
-                      (assoc-in [:demands demand :refs] next-refs)
-                      (cond-> (zero? next-refs)
-                        (assoc-in [:demands demand :released-at] now))))
-                state))
+              (if (= :sub (first demand))
+                (do (vreset! sub-changed? true)
+                    (remove-sub-demand state now demand))
+                (do (vreset! demand-changed? true)
+                    (if (contains? (:demands state) demand)
+                      (let [next-refs (max 0 (dec (get-in state [:demands demand :refs] 1)))]
+                        (-> state
+                            (assoc-in [:demands demand :refs] next-refs)
+                            (cond-> (zero? next-refs)
+                              (assoc-in [:demands demand :released-at] now))))
+                      state))))
             $
-            (remove #(contains? next-demands %) prev)))))
-    (schedule-flush! rt-ref state-ref)))
+            removed))))
+    (when @demand-changed?
+      (schedule-flush! rt-ref state-ref))
+    (when @sub-changed?
+      (schedule-sub-flush! rt-ref state-ref))))
 
-(defn- on-evict [tx-env {:keys [idents queries window-keys]}]
+(defn- on-evict [tx-env {:keys [idents queries window-keys subs]}]
   (let [tx-env (reduce
                  (fn [tx-env [table id :as ident]]
                    (-> tx-env
@@ -1003,19 +1185,25 @@
                  (fn [tx-env qkey]
                    (update tx-env ::queries dissoc qkey))
                  tx-env
-                 queries)]
+                 queries)
+        tx-env (reduce
+                 (fn [tx-env wkey]
+                   (update tx-env ::window-meta dissoc wkey))
+                 tx-env
+                 window-keys)]
     (reduce
-      (fn [tx-env wkey]
-        (update tx-env ::window-meta dissoc wkey))
+      (fn [tx-env skey]
+        (update tx-env ::subs dissoc skey))
       tx-env
-      window-keys)))
+      subs)))
 
 (defn sweep!
-  "Evicts expired or over-budget inactive demands and any entities no longer pinned
-   by another demand, a pending optimistic tx, or Grove's live KV read-index."
+  "Evicts expired or over-budget inactive demands, expired inactive subscriptions, and
+   any entities no longer pinned by another demand, a pending optimistic tx, or Grove's
+   live KV read-index."
   [rt-ref]
   (let [state-ref (state-ref-of rt-ref)
-        {:keys [demands grace-ms max-cached tables transport pinned-orphans]} @state-ref
+        {:keys [demands subs grace-ms sub-grace-ms max-cached tables transport pinned-orphans]} @state-ref
         now (js/Date.now)
         inactive (->> demands
                       (filter (fn [[_ {:keys [refs status]}]]
@@ -1033,28 +1221,49 @@
                         (when (or (< idx excess)
                                   (<= (or released-at 0) (- now g)))
                           demand))))
-                  inactive)]
+                  inactive)
+        expired-subs (into []
+                       (keep (fn [[sub-key {:keys [refs released-at]}]]
+                               (when (and (zero? (or refs 0))
+                                          (<= (or released-at 0) (- now (or sub-grace-ms 0))))
+                                 sub-key)))
+                       subs)]
 
-    (when (or (seq expired) (seq pinned-orphans))
+    (when (or (seq expired) (seq pinned-orphans) (seq expired-subs))
       (let [cand-idents (into (or pinned-orphans #{}) (mapcat #(get-in demands [% :idents])) expired)
             cand-tags (into (or pinned-orphans #{}) (mapcat #(get-in demands [% :tags])) expired)
             evict-queries (into []
                             (comp (filter #(= :query (first %)))
                                   (map (fn [[_ qid params]] [qid params])))
-                            expired)]
+                            expired)
+            unsub-ids (volatile! [])]
 
-        (when (seq expired)
+        (when (or (seq expired) (seq expired-subs))
           (swap! state-ref
             (fn [state]
-              (reduce
-                (fn [state demand]
-                  (-> state
-                      (set-demand-idents demand #{})
-                      (set-demand-tags demand #{})
-                      (update :demands dissoc demand)
-                      (update :wanted dissoc demand)))
-                state
-                expired))))
+              (let [state (reduce
+                            (fn [state demand]
+                              (-> state
+                                  (set-demand-idents demand #{})
+                                  (set-demand-tags demand #{})
+                                  (update :demands dissoc demand)
+                                  (update :wanted dissoc demand)))
+                            state
+                            expired)]
+                (reduce
+                  (fn [state sub-key]
+                    (if-some [{:keys [id refs sent]} (get-in state [:subs sub-key])]
+                      (if (zero? (or refs 0))
+                        (do
+                          (when (some? sent)
+                            (vswap! unsub-ids conj id))
+                          (-> state
+                              (update :subs dissoc sub-key)
+                              (update :sid->sub-key dissoc id)))
+                        state)
+                      state))
+                  state
+                  expired-subs)))))
 
         (let [{:keys [holders base tag->demands] remaining-demands :demands} @state-ref
               ;; Separate unheld idents that are still pinned via sg/kv-lookup (pinned-orphans)
@@ -1101,15 +1310,19 @@
                         (keys remaining-demands))]
                   (into [] (remove live-window-keys) cand-window-keys)))]
 
-          (when (or (seq evict-idents) (seq evict-queries) (seq evict-window-keys))
+          (when (or (seq evict-idents) (seq evict-queries) (seq evict-window-keys) (seq expired-subs))
             (sg/run-tx! rt-ref
               {:e ::evict
                :idents evict-idents
                :queries evict-queries
-               :window-keys evict-window-keys}))
+               :window-keys evict-window-keys
+               :subs expired-subs}))
 
           (when (and (seq dropped-tags) (:forget! transport))
-            ((:forget! transport) dropped-tags)))))))
+            ((:forget! transport) dropped-tags))
+
+          (when (and (seq @unsub-ids) (:unsubscribe! transport))
+            ((:unsubscribe! transport) @unsub-ids)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public Read API (usable inside sg/query AND directly in defc bind!)
@@ -1326,6 +1539,66 @@
   ([env query-id params opts]
    (query* env query-id params opts)))
 
+(defn- subscribe* [env sub-id params {:keys [interval mode suspend?] :or {suspend? true}}]
+  (let [demand [:sub sub-id params interval mode]
+        entry (get (get env ::subs) [sub-id params] kv/NOT-FOUND)]
+    (sg/demand! env demand)
+    (cond
+      (identical? kv/NOT-FOUND entry)
+      (if suspend?
+        (sg/suspend!)
+        {:state :loading :value nil})
+
+      (= :error (:state entry))
+      (if suspend?
+        {::error (:error entry)}
+        {:state :error :error (:error entry)})
+
+      :else
+      (let [val (:value entry)
+            bg-err (:bg-error entry)]
+        (if suspend?
+          val
+          (cond-> {:state :ready :value val}
+            (some? bg-err) (assoc :error bg-err)))))))
+
+(defn- sub-slot-fn [env sub-id params opts]
+  (subscribe* env sub-id params opts))
+
+(defn subscribe
+  "Subscribes to a server-pushed remote subscription stored in ::subs.
+   Works both inside a sg/query fn (pass env as 1st arg) and directly inside a defc bind (omit env).
+
+   In a query:  (remote/subscribe env :home/summary)
+                (remote/subscribe env :home/summary nil {:interval 10000})
+                (remote/subscribe env :home/summary nil {:interval 10000 :suspend? false})
+   In a bind:   (remote/subscribe :home/summary)
+                (remote/subscribe :home/summary nil {:interval 10000})
+                (remote/subscribe :home/summary nil {:interval 10000 :suspend? false})
+
+   opts:
+   :interval   requested push interval in ms (clamped by server; nil uses server default)
+   :mode       optional :throttle (leading+trailing) or :interval (strict periodic); nil uses server default
+   :suspend?   default true; when false returns {:state :loading|:ready|:error :value v :error err}"
+  {:arglists '([sub-id]
+               [sub-id params]
+               [sub-id params opts]
+               [env sub-id]
+               [env sub-id params]
+               [env sub-id params opts])}
+  ([sub-id]
+   (impl/slot-query [sub-id nil nil] sub-slot-fn))
+  ([env-or-sub-id sub-id-or-params]
+   (if (map? env-or-sub-id)
+     (subscribe* env-or-sub-id sub-id-or-params nil nil)
+     (impl/slot-query [env-or-sub-id sub-id-or-params nil] sub-slot-fn)))
+  ([env-or-sub-id sub-id-or-params params-or-opts]
+   (if (map? env-or-sub-id)
+     (subscribe* env-or-sub-id sub-id-or-params params-or-opts nil)
+     (impl/slot-query [env-or-sub-id sub-id-or-params (normalize-opts params-or-opts)] sub-slot-fn)))
+  ([env sub-id params opts]
+   (subscribe* env sub-id params opts)))
+
 (defn window
   "In a sg/query fn: paged window helper for vlist3.
    Returns {:item-count n :offset n :slice [...] :more? bool} or suspends while
@@ -1422,9 +1695,11 @@
 (defn stats
   "Returns cache statistics for debugging / devtools."
   [rt-ref]
-  (let [{:keys [demands holders pending in-flight connected?]} @(state-ref-of (sg/get-runtime rt-ref))]
+  (let [{:keys [demands subs holders pending in-flight connected?]} @(state-ref-of (sg/get-runtime rt-ref))]
     {:demands (count demands)
      :live (count (filter #(pos? (:refs %)) (vals demands)))
+     :subs (count subs)
+     :live-subs (count (filter #(pos? (:refs %)) (vals subs)))
      :held (count holders)
      :pending (count pending)
      :in-flight in-flight
@@ -1448,7 +1723,7 @@
     :or {format :transit ws-id ::ws reconnect-ms 1000 timeout-ms 30000}}]
   {:pre [(string? url)]}
   (fn [rt-ref callbacks]
-    (let [{:keys [on-hello on-stale on-push on-disconnect]} callbacks
+    (let [{:keys [on-hello on-stale on-push on-sub-data on-sub-error on-disconnect]} callbacks
           inst-id (rt/next-id)
           conn-state (atom {:open? false :attempt 0 :stopped? false :timer nil})
           pending-cbs (atom {})
@@ -1480,6 +1755,8 @@
                             (on-hello msg))
                 ::stale (on-stale msg)
                 ::push (on-push msg)
+                ::sub-data (on-sub-data msg)
+                ::sub-error (on-sub-error msg)
                 nil)))
 
           on-ws-close-ev (keyword "shadow.grove.remote" (str "ws-closed-" inst-id))
@@ -1560,6 +1837,16 @@
            (when (:open? @conn-state)
              (ws/cast! rt-ref ws-id {:op ::forget :tags tags})))
 
+         :subscribe!
+         (fn [subs]
+           (when (:open? @conn-state)
+             (ws/cast! rt-ref ws-id {:op ::subscribe :subs subs})))
+
+         :unsubscribe!
+         (fn [ids]
+           (when (:open? @conn-state)
+             (ws/cast! rt-ref ws-id {:op ::unsubscribe :ids ids})))
+
          :sync-since!
          (fn [since cb]
            (do-call! {:op ::sync :since since} cb))}))))
@@ -1583,7 +1870,7 @@
     :or {format :transit credentials "same-origin" timeout-ms 30000 sse-stale-ms 60000}}]
   {:pre [(string? url)]}
   (fn [rt-ref callbacks]
-    (let [{:keys [on-hello on-stale on-push on-disconnect on-revalidate]} callbacks
+    (let [{:keys [on-hello on-stale on-push on-sub-data on-sub-error on-disconnect on-revalidate]} callbacks
           {:keys [read write content-type]} (format-fns rt-ref format)
           state (atom {:conn-id nil :sse nil :last-event 0 :stopped? false :watchdog nil :listeners [] :had-pre-conn-read? false})
 
@@ -1676,6 +1963,16 @@
                     (when-not (:stopped? @state)
                       (swap! state assoc :last-event (js/Date.now))
                       (on-push (read (.-data e))))))
+                (.addEventListener sse "sub-data"
+                  (fn [^js e]
+                    (when-not (:stopped? @state)
+                      (swap! state assoc :last-event (js/Date.now))
+                      (on-sub-data (read (.-data e))))))
+                (.addEventListener sse "sub-error"
+                  (fn [^js e]
+                    (when-not (:stopped? @state)
+                      (swap! state assoc :last-event (js/Date.now))
+                      (on-sub-error (read (.-data e))))))
                 (.addEventListener sse "ping"
                   (fn [_]
                     (swap! state assoc :last-event (js/Date.now))))
@@ -1726,6 +2023,9 @@
        :ready?
        (fn [] true)
 
+       :sub-ready?
+       (fn [] (boolean (and sse-url (:conn-id @state))))
+
        :read-batch!
        (fn [requests cb]
          (when (and sse-url (nil? (:conn-id @state)))
@@ -1744,6 +2044,16 @@
          (when (and sse-url (:conn-id @state))
            (post! "forget" {:op ::forget :tags tags} nil)))
 
+       :subscribe!
+       (fn [subs]
+         (when (and sse-url (:conn-id @state))
+           (post! "subscribe" {:op ::subscribe :subs subs} nil)))
+
+       :unsubscribe!
+       (fn [ids]
+         (when (and sse-url (:conn-id @state))
+           (post! "unsubscribe" {:op ::unsubscribe :ids ids} nil)))
+
        :sync-since!
        (when sse-url
          (fn [since cb]
@@ -1751,16 +2061,18 @@
 
 (defn local-transport
   "In-process transport for tests or local/embedded backends.
-   handler is (fn [msg reply-fn]) where msg has :op (::read, ::transact, ::forget, ::sync).
+   handler is (fn [msg reply-fn]) where msg has :op (::read, ::transact, ::forget, ::subscribe, ::unsubscribe, ::sync).
    Optional :on-start receives {:push! (fn [msg]) :hello! (fn [msg]) :disconnect! (fn [])}."
   [{:keys [handler on-start]}]
   {:pre [(fn? handler)]}
-  (fn [rt-ref {:keys [on-hello on-stale on-push on-disconnect]}]
+  (fn [rt-ref {:keys [on-hello on-stale on-push on-sub-data on-sub-error on-disconnect]}]
     (let [push! (fn [msg]
                   (case (:op msg)
                     ::hello (on-hello msg)
                     ::stale (on-stale msg)
                     ::push (on-push msg)
+                    ::sub-data (on-sub-data msg)
+                    ::sub-error (on-sub-error msg)
                     nil))]
       {:start!
        (fn []
@@ -1776,6 +2088,8 @@
                                (some? id) (assoc :tx-id id))
                       cb))
        :forget! (fn [tags] (handler {:op ::forget :tags tags} nil))
+       :subscribe! (fn [subs] (handler {:op ::subscribe :subs subs} nil))
+       :unsubscribe! (fn [ids] (handler {:op ::unsubscribe :ids ids} nil))
        :sync-since! (fn [since cb] (handler {:op ::sync :since since} cb))})))
 
 ;; ---------------------------------------------------------------------------
@@ -1794,12 +2108,13 @@
                  tables)]
     (-> tx-env
         (assoc ::queries nil
+               ::subs nil
                ::entity-meta nil
                ::window-meta nil)
         (sync-status-kv state-ref))))
 
 (defn clear!
-  "Clears all cached remote KV tables, query/entity metadata, pending optimistic
+  "Clears all cached remote KV tables, query/entity/subscription metadata, pending optimistic
    state, and server cursor/epoch (e.g. on logout or tenant/account switch).
    By default restarts the transport so the server establishes a fresh connection;
    pass {:reconnect? false} to keep the current transport stopped."
@@ -1826,6 +2141,10 @@
        :wanted {}
        :in-flight 0
        :flush-queued? false
+       :sub-seq 0
+       :subs {}
+       :sid->sub-key {}
+       :sub-flush-queued? false
        :outbox []
        :sending nil
        :pending []
@@ -1856,14 +2175,18 @@
    :transport          transport constructor (ws-transport, http-transport, local-transport)
    :tables             {table-kw {:primary-key :id :views {:detail {:satisfies #{:summary :default}}} :grace-ms n}}
    :grace-ms           ms an inactive demand stays cached before eviction (default 30000; 0 disables auto timer unless :sweep-interval-ms is set)
+   :sub-grace-ms       ms an inactive subscription stays alive before unsubscribing (default min(2000, grace-ms))
    :sweep-interval-ms  optional eviction sweep interval in ms (defaults to clamped grace-ms/2 when grace-ms > 0)
    :max-cached         max inactive demands kept in LRU cache (default 500)
    :max-batches        max concurrent read batches in flight (default 4)
    :batch-limit        max demands per read batch (default 64)"
-  [rt-ref {:keys [transport tables grace-ms sweep-interval-ms max-cached max-batches batch-limit]
+  [rt-ref {:keys [transport tables grace-ms sub-grace-ms sweep-interval-ms max-cached max-batches batch-limit]
            :or {grace-ms 30000 max-cached 500 max-batches 4 batch-limit 64}}]
   {:pre [(fn? transport)]}
-  (let [rt-ref (sg/get-runtime rt-ref)]
+  (let [rt-ref (sg/get-runtime rt-ref)
+        sub-grace-ms (if (some? sub-grace-ms)
+                       sub-grace-ms
+                       (js/Math.min 2000 grace-ms))]
     ;; Clean up previous instance on hot-reload / re-init
     (when (::state @rt-ref)
       (stop! rt-ref))
@@ -1879,6 +2202,8 @@
           {:on-hello (fn [msg] (sg/run-tx! rt-ref (assoc msg :e ::hello)))
            :on-stale (fn [msg] (sg/run-tx! rt-ref (assoc msg :e ::stale)))
            :on-push (fn [msg] (sg/run-tx! rt-ref (assoc msg :e ::push)))
+           :on-sub-data (fn [msg] (sg/run-tx! rt-ref (assoc msg :e ::sub-data)))
+           :on-sub-error (fn [msg] (sg/run-tx! rt-ref (assoc msg :e ::sub-error)))
            :on-disconnect (fn [] (sg/run-tx! rt-ref {:e ::disconnect}))
            :on-revalidate (fn [] (revalidate-active! rt-ref))}
 
@@ -1887,6 +2212,7 @@
           state-ref
           (atom {:tables tables
                  :grace-ms grace-ms
+                 :sub-grace-ms sub-grace-ms
                  :max-cached max-cached
                  :max-batches max-batches
                  :batch-limit batch-limit
@@ -1905,6 +2231,10 @@
                  :wanted {}
                  :in-flight 0
                  :flush-queued? false
+                 :sub-seq 0
+                 :subs {}
+                 :sid->sub-key {}
+                 :sub-flush-queued? false
                  :outbox []
                  :sending nil
                  :pending []
@@ -1919,6 +2249,7 @@
           (sg/add-kv-table rt-ref table (dissoc cfg :views ::view-closure :grace-ms :max-cached) {})))
 
       (sg/add-kv-table rt-ref ::queries {} {})
+      (sg/add-kv-table rt-ref ::subs {} {})
       (sg/add-kv-table rt-ref ::entity-meta {} {})
       (sg/add-kv-table rt-ref ::window-meta {} {})
       (sg/add-kv-table rt-ref ::status {} {:connected? false :in-flight 0 :pending 0})
@@ -1933,6 +2264,8 @@
       (sg/reg-event rt-ref ::hello (fn [tx-env ev] (on-hello tx-env ev)))
       (sg/reg-event rt-ref ::stale (fn [tx-env ev] (on-stale tx-env ev)))
       (sg/reg-event rt-ref ::push (fn [tx-env ev] (on-push tx-env ev)))
+      (sg/reg-event rt-ref ::sub-data (fn [tx-env ev] (on-sub-data tx-env ev)))
+      (sg/reg-event rt-ref ::sub-error (fn [tx-env ev] (on-sub-error tx-env ev)))
       (sg/reg-event rt-ref ::sync-done (fn [tx-env ev] (on-sync-done tx-env ev)))
       (sg/reg-event rt-ref ::disconnect (fn [tx-env ev] (on-disconnect tx-env ev)))
       (sg/reg-event rt-ref ::mark-stale (fn [tx-env ev] (on-mark-stale-ev tx-env ev)))
@@ -1965,9 +2298,14 @@
                 (when (identical? state-ref (::state @rt-ref))
                   (sg/run-tx! rt-ref {:e ::sync-done :response res})))))))
 
-      (let [interval (cond
+      (let [base-grace (cond
+                         (and (pos? grace-ms) (pos? sub-grace-ms)) (js/Math.min grace-ms sub-grace-ms)
+                         (pos? grace-ms) grace-ms
+                         (pos? sub-grace-ms) sub-grace-ms
+                         :else 0)
+            interval (cond
                        (some? sweep-interval-ms) sweep-interval-ms
-                       (pos? grace-ms) (js/Math.max 200 (js/Math.min 5000 (/ grace-ms 2)))
+                       (pos? base-grace) (js/Math.max 200 (js/Math.min 5000 (/ base-grace 2)))
                        :else nil)]
         (when (and (number? interval) (pos? interval))
           (swap! state-ref assoc :sweep-timer

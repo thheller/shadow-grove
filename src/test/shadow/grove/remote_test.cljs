@@ -1116,3 +1116,223 @@
            (is (true? (:connected? (remote/stats rt-ref))))
            (sg/unmount-root root)
            (remote/stop! rt-ref))]))))
+
+;; ---------------------------------------------------------------------------
+;; 11. Live Subscriptions: 1-tx push, interval merging, grace, reconnect, errors
+;; ---------------------------------------------------------------------------
+
+(defc ui-sub-suspend [interval]
+  (bind v (remote/subscribe :home/summary nil {:interval interval}))
+  (render (<< [:span (str "S:" (:power v))])))
+
+(defc ui-sub-inline [sub-id interval mode]
+  (bind res (remote/subscribe sub-id nil {:interval interval :mode mode :suspend? false}))
+  (render (<< [:span (str (name (:state res)) ":" (or (:power (:value res)) (:message (:error res)) "nil")
+                          (when (and (= :ready (:state res)) (:error res))
+                            (str "|err=" (get-in res [:error :message]))))])))
+
+(deftest subscriptions-lifecycle-interval-merge-reconnect-and-errors
+  (let [root (make-dom)
+        rt-ref (sg/get-runtime ::sub-rt)
+        log (atom [])
+        hooks-ref (atom nil)
+        active-ids (atom #{})
+        summary-val (atom {:power 100})]
+
+    (remote/init! rt-ref
+      {:transport
+       (remote/local-transport
+         {:on-start
+          (fn [hooks]
+            (reset! hooks-ref hooks)
+            ((:hello! hooks) {:op ::remote/hello :conn-id "sub-c1" :epoch "ep1" :cursor 1}))
+          :handler
+          (fn [{:keys [op subs ids] :as msg} _reply]
+            (swap! log conj msg)
+            (case op
+              ::remote/subscribe
+              (let [new-subs (remove #(contains? @active-ids (:id %)) subs)
+                    _ (swap! active-ids into (map :id) new-subs)
+                    vals (reduce
+                           (fn [acc {:keys [id sub]}]
+                             (if (= :home/summary sub)
+                               (assoc acc id @summary-val)
+                               acc))
+                           {}
+                           new-subs)
+                    errs (reduce
+                           (fn [acc {:keys [id sub]}]
+                             (if (= :sub/broken sub)
+                               (assoc acc id {:message "sub-failed"})
+                               acc))
+                           {}
+                           new-subs)]
+                (when (seq vals)
+                  ((:push! @hooks-ref) {:op ::remote/sub-data :values vals}))
+                (when (seq errs)
+                  ((:push! @hooks-ref) {:op ::remote/sub-error :errors errs})))
+
+              ::remote/unsubscribe
+              (swap! active-ids #(apply disj % ids))
+
+              nil))})
+       :tables {}
+       :grace-ms 0})
+
+    (async done
+      (run-steps done
+        [(fn []
+           ;; Mount suspending subscriber (10s, :interval) + failing inline subscriber in same frame
+           (sg/render rt-ref root
+             (<< (sg/suspense {:fallback (<< [:em "wait"]) :timeout 0}
+                   (ui-sub-suspend 10000))
+                 (ui-sub-inline :sub/broken 5000 :throttle)))
+           (is (= "waitloading:nil" (.-textContent root))))
+
+         (fn []
+           ;; Both subscriptions batched into ONE ::remote/subscribe message!
+           (let [sub-msgs (filter #(= ::remote/subscribe (:op %)) @log)]
+             (is (= 1 (count sub-msgs)))
+             (is (= 2 (count (:subs (first sub-msgs))))))
+           (is (= "S:100error:sub-failed" (.-textContent root)))
+           (is (= 2 (:live-subs (remote/stats rt-ref)))))
+
+         ;; Server pushes an update -> UI updates in 1 tx, zero ::remote/read messages!
+         (fn []
+           (reset! log [])
+           (let [sid (get-in @(::remote/state @rt-ref) [:subs [:home/summary nil] :id])]
+             ((:push! @hooks-ref) {:op ::remote/sub-data :values {sid {:power 250}}})))
+
+         (fn []
+           (is (= "S:250error:sub-failed" (.-textContent root)))
+           (is (empty? @log)))
+
+         ;; Mount a second reader for :home/summary with shorter interval (2000) & :throttle mode ->
+         ;; Client merges into ONE server subscription and sends updated interval/mode under same id!
+         (fn []
+           (reset! log [])
+           (sg/render rt-ref root
+             (<< (ui-sub-suspend 10000)
+                 (ui-sub-inline :home/summary 2000 :throttle))))
+
+         (fn []
+           (let [sub-msgs (filter #(= ::remote/subscribe (:op %)) @log)
+                 unsub-msgs (filter #(= ::remote/unsubscribe (:op %)) @log)]
+             ;; :sub/broken unsubscribed immediately (sub-grace-ms = 0), :home/summary updated to 2000/:throttle
+             (is (= 1 (count unsub-msgs)))
+             (is (= 1 (count sub-msgs)))
+             (is (= 1 (count (:subs (first sub-msgs)))))
+             (let [s (first (:subs (first sub-msgs)))]
+               (is (= :home/summary (:sub s)))
+               (is (= 2000 (:interval s)))
+               (is (= :throttle (:mode s)))))
+           (is (= "S:250ready:250" (.-textContent root))))
+
+         ;; Background error on ready sub preserves last value and exposes :error!
+         (fn []
+           (let [sid (get-in @(::remote/state @rt-ref) [:subs [:home/summary nil] :id])]
+             ((:push! @hooks-ref) {:op ::remote/sub-error :errors {sid {:message "temp-err"}}})))
+
+         (fn []
+           (is (= "S:250ready:250|err=temp-err" (.-textContent root))))
+
+         ;; Unmount faster reader -> client relaxes interval back to 10000 (mode nil)!
+         (fn []
+           (reset! log [])
+           (sg/render rt-ref root (ui-sub-suspend 10000)))
+
+         (fn []
+           (let [sub-msgs (filter #(= ::remote/subscribe (:op %)) @log)]
+             (is (= 1 (count sub-msgs)))
+             (let [s (first (:subs (first sub-msgs)))]
+               (is (= :home/summary (:sub s)))
+               (is (= 10000 (:interval s)))
+               (is (nil? (:mode s)))))
+           (is (= "S:250" (.-textContent root))))
+
+         ;; Reconnect (::hello) keeps rendered value (no suspense flash!) and re-subscribes automatically
+         (fn []
+           (reset! log [])
+           (reset! active-ids #{})
+           (reset! summary-val {:power 400})
+           ((:hello! @hooks-ref) {:op ::remote/hello :conn-id "sub-c2" :epoch "ep1" :cursor 5})
+           ;; Synchronously still renders last value (no flash to loading/wait)
+           (is (= "S:250" (.-textContent root))))
+
+         (fn []
+           (let [sub-msgs (filter #(= ::remote/subscribe (:op %)) @log)]
+             (is (= 1 (count sub-msgs))))
+           (is (= "S:400" (.-textContent root))))
+
+         ;; Unmount last subscriber -> sends ::remote/unsubscribe and evicts ::subs
+         (fn []
+           (reset! log [])
+           (sg/render rt-ref root (<< [:div "done"])))
+
+         (fn []
+           (let [unsub-msgs (filter #(= ::remote/unsubscribe (:op %)) @log)]
+             (is (= 1 (count unsub-msgs))))
+           (is (zero? (:subs (remote/stats rt-ref))))
+           (is (empty? (get-in @rt-ref [::sg/kv ::remote/subs])))
+           (sg/unmount-root root)
+           (remote/stop! rt-ref))]))))
+
+(deftest subscriptions-grace-period-keeps-sub-alive-across-remount
+  (let [root (make-dom)
+        rt-ref (sg/get-runtime ::sub-grace-rt)
+        log (atom [])
+        hooks-ref (atom nil)]
+
+    (remote/init! rt-ref
+      {:transport
+       (remote/local-transport
+         {:on-start
+          (fn [hooks]
+            (reset! hooks-ref hooks)
+            ((:hello! hooks) {:op ::remote/hello :conn-id "g1" :epoch "ep1" :cursor 1}))
+          :handler
+          (fn [{:keys [op subs] :as msg} _reply]
+            (swap! log conj msg)
+            (when (= ::remote/subscribe op)
+              ((:push! @hooks-ref)
+               {:op ::remote/sub-data
+                :values (into {} (map (fn [{:keys [id]}] [id {:power 77}])) subs)})))})
+       :tables {}
+       :grace-ms 30000
+       :sub-grace-ms 5000
+       :sweep-interval-ms 0})
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root (ui-sub-inline :home/summary 10000 :interval)))
+
+         (fn []
+           (is (= "ready:77" (.-textContent root)))
+           (reset! log [])
+           ;; Unmount -> during grace period, must NOT unsubscribe yet!
+           (sg/render rt-ref root (<< [:div "away"])))
+
+         (fn []
+           (is (empty? @log))
+           (is (= 1 (:subs (remote/stats rt-ref))))
+           (is (= 0 (:live-subs (remote/stats rt-ref))))
+           ;; Remount within grace -> instant cached value, zero subscribe/unsubscribe chatter!
+           (sg/render rt-ref root (ui-sub-inline :home/summary 10000 :interval))
+           (is (= "ready:77" (.-textContent root))))
+
+         (fn []
+           (is (empty? @log))
+           ;; Unmount again, backdate :released-at past sub-grace-ms, run sweep! -> unsubscribes & evicts!
+           (sg/render rt-ref root (<< [:div "away-2"])))
+
+         (fn []
+           (swap! (::remote/state @rt-ref) assoc-in [:subs [:home/summary nil] :released-at] 0)
+           (remote/sweep! rt-ref))
+
+         (fn []
+           (is (= 1 (count (filter #(= ::remote/unsubscribe (:op %)) @log))))
+           (is (zero? (:subs (remote/stats rt-ref))))
+           (is (empty? (get-in @rt-ref [::sg/kv ::remote/subs])))
+           (sg/unmount-root root)
+           (remote/stop! rt-ref))]))))
