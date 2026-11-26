@@ -60,13 +60,14 @@
   [component-name
    min-args
    args-fn
+   ;; array of SlotConfig, one per runnable slot (0 .. R-1)
    slots
+   ;; total entries in slot-values (runnable slots + destructured value cells)
+   value-count
    ;; array of (fn [comp] init-value) or nil, one per (ref ...) in declaration order
    refs
-   slot-init-bits
    opts
    check-args-fn
-   render-deps
    render-fn
    events
    debug-info])

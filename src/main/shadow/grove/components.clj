@@ -166,9 +166,9 @@
 (defn update-affects [{:keys [bindings] :as state} deps slot-idx]
   (reduce
     (fn [state dep-sym]
-      (let [{:keys [type idx] :as binding} (get bindings dep-sym)]
+      (let [{:keys [type idx]} (get bindings dep-sym)]
         (case type
-          :slot (update-in state [:slots idx :affects] set-conj slot-idx)
+          :slot (update-in state [:values idx :affects] set-conj slot-idx)
           :arg (update-in state [:args idx :affects] set-conj slot-idx)
           ;; refs never change, so they never make anything dirty
           :ref state)))
@@ -179,21 +179,22 @@
 ;;
 ;; (bind {:keys [foo baz] :as bar} (something))
 ;;
-;; becomes one slot running (something), whose own value is bar
-;; followed by one value cell for every other symbol bound (foo, baz)
-;; value cells do not run, they only hold the value, its affects and debug info
-;; the check fn generated for the slot (see make-check-fn) does the destructure
-;; and then checks each bound value individually, so only dependents of values
-;; that actually changed get dirty. without :as the full value is never compared.
+;; becomes one runnable slot running (something), whose own value is bar,
+;; plus one value cell in :values for every other symbol bound (foo, baz).
+;; value cells are not runnable slots: they hold values in slot-values and track
+;; which runnable slots depend on them, without taking up dirty bits or work loop
+;; iterations. the check fn generated for the slot (see make-check-fn) does the
+;; destructure and checks each bound value individually, so only dependents of
+;; values that actually changed get dirty. without :as the full value is never compared.
 ;;
-;; the slot always holds the value its run fn produced (or the :as value)
+;; the runnable slot always holds the value its run fn produced (or the :as value)
 ;; so rt/*slot-value* and sg/suspend! keep working as before
 
 (defn add-destructure-slot
-  "adds a slot running run-form whose result is destructured via binding-form.
+  "adds a runnable slot running run-form whose result is destructured via binding-form.
    own-sym if set is bound to the slot value itself.
-   every other symbol bound by binding-form gets a value cell."
-  [{:keys [slot-idx bindings] :as state}
+   every other symbol bound by binding-form gets a value cell in :values."
+  [{:keys [slot-idx val-idx bindings] :as state}
    {:keys [binding-form own-sym run-deps run-form debug-info]}]
 
   (let [{:keys [syms] expr-deps :deps}
@@ -209,23 +210,27 @@
         deps
         (set/union run-deps expr-deps)
 
-        own-idx
+        own-slot-idx
         slot-idx
+
+        own-val-idx
+        val-idx
 
         cells
         (->> cell-syms
-             (map-indexed (fn [i sym] [sym (+ own-idx 1 i)]))
+             (map-indexed (fn [i sym] [sym (+ own-val-idx 1 i)]))
              (vec))
 
         own-name
-        (or own-sym (symbol (str "__slot$" own-idx)))]
+        (or own-sym (symbol (str "__slot$" own-slot-idx)))]
 
     (-> state
         ;; must be done first, otherwise shadowed bindings affect themselves
-        (update-affects deps own-idx)
+        (update-affects deps own-slot-idx)
 
         (update :slots conj
-          {:depends-on (bindings-indexes-of-type state deps :slot)
+          {:slot-idx own-slot-idx
+           :val-idx own-val-idx
            :provides own-name
            :debug-info debug-info
            :run run-form
@@ -234,24 +239,33 @@
             ;; must be generated now, names may be shadowed by later bindings
             :or-let (let-bindings state expr-deps)
             :own-sym own-sym
+            :own-val-idx own-val-idx
             :cells cells}})
+
+        (update :values conj
+          {:val-idx own-val-idx
+           :slot-idx own-slot-idx
+           :depends-on (bindings-indexes-of-type state deps :slot)
+           :provides own-name
+           :debug-info debug-info})
 
         (cond->
           own-sym
           (assoc-in [:bindings own-sym]
             {:type :slot
-             :idx own-idx
+             :idx own-val-idx
              :name own-sym}))
 
         (r->
-          (fn [state [sym idx]]
+          (fn [state [sym cval-idx]]
             (-> state
                 (assoc-in [:bindings sym]
                   {:type :slot
-                   :idx idx
+                   :idx cval-idx
                    :name sym})
-                (update :slots conj
-                  {:depends-on #{own-idx}
+                (update :values conj
+                  {:val-idx cval-idx
+                   :depends-on #{own-val-idx}
                    :provides sym
                    :debug-info {:type :destructure
                                 :name (str sym)
@@ -260,38 +274,39 @@
                                 :line (:line (meta sym))}})))
           cells)
 
-        (update :slot-idx + 1 (count cells)))))
+        (update :slot-idx inc)
+        (update :val-idx + 1 (count cells)))))
 
 (defn make-check-fn
   "generates the fn checking the destructured values of a slot.
    called with the value the slot produced. must be generated after all slots are analyzed,
    since it needs to know who uses which values"
-  [{:keys [comp-sym slots] :as state} render-deps own-idx {:keys [form or-let own-sym cells]}]
+  [{:keys [comp-sym values] :as state} render-deps {:keys [form or-let own-sym own-val-idx cells]}]
   (let [val-sym
         (gensym "val")
 
         ;; nil when nothing depends on the value, otherwise [affects-bits render?]
         consumers
-        (fn [idx]
-          (let [affects (reduce bit-set 0 (get-in slots [idx :affects]))
-                render? (contains? render-deps idx)]
+        (fn [val-idx]
+          (let [affects (reduce bit-set 0 (get-in values [val-idx :affects]))
+                render? (contains? render-deps val-idx)]
             (when (or (pos? affects) render?)
               [affects render?])))
 
         own-consumers
         (when own-sym
-          (consumers own-idx))
+          (consumers own-val-idx))
 
         checks
         (->> cells
-             (map (fn [[sym idx]]
-                    (if-some [[affects render?] (consumers idx)]
-                      {:form `(slot-check! ~comp-sym ~idx ~sym ~affects ~render?)
+             (map (fn [[sym cval-idx]]
+                    (if-some [[affects render?] (consumers cval-idx)]
+                      {:form `(slot-check! ~comp-sym ~cval-idx ~sym ~affects ~render?)
                        ;; only need to remember the result if the :as value can use it
                        :changed (when own-consumers
                                   (gensym (str sym "-changed")))}
                       ;; nothing depends on this, but events may still access it
-                      {:form `(slot-store! ~comp-sym ~idx ~sym)})))
+                      {:form `(slot-store! ~comp-sym ~cval-idx ~sym)})))
              (vec))
 
         changed-syms
@@ -306,10 +321,10 @@
             ;; all other values are derived from this one, so if any of those changed so did this
             ;; no need to compare, which saves comparing the whole :as value most of the time
             `(if (or ~@changed-syms)
-               (slot-force! ~comp-sym ~own-idx ~own-val ~affects ~render?)
-               (slot-check! ~comp-sym ~own-idx ~own-val ~affects ~render?))
-            `(slot-check! ~comp-sym ~own-idx ~own-val ~affects ~render?))
-          `(slot-store! ~comp-sym ~own-idx ~own-val))]
+               (slot-force! ~comp-sym ~own-val-idx ~own-val ~affects ~render?)
+               (slot-check! ~comp-sym ~own-val-idx ~own-val ~affects ~render?))
+            `(slot-check! ~comp-sym ~own-val-idx ~own-val ~affects ~render?))
+          `(slot-store! ~comp-sym ~own-val-idx ~own-val))]
 
     `(fn [~comp-sym ~val-sym]
        (let [~@or-let
@@ -366,7 +381,7 @@
           syms))))
 
 (defn add-data-binding
-  [{:keys [comp-sym slot-idx bindings] :as state}
+  [{:keys [comp-sym slot-idx val-idx bindings] :as state}
    [binding & body]]
 
   (let [deps
@@ -382,29 +397,40 @@
 
     (cond
       (simple-symbol? binding)
-      (-> state
-          ;; must be done first, otherwise shadowed bindings affect themselves
-          ;; must track these here by id since names may be shadowed later
-          (update-affects deps slot-idx)
+      (let [debug-info {:type :bind
+                        :name (str binding)
+                        :column (:column (meta binding))
+                        :line (:line (meta binding))}]
+        (-> state
+            ;; must be done first, otherwise shadowed bindings affect themselves
+            ;; must track these here by id since names may be shadowed later
+            (update-affects deps slot-idx)
 
-          (cond->
-            ;; don't make _ an accessible name when using (bind _ "something")
-            ;; should be convention for unused name, accessing it should be an error
-            (not= '_ binding)
-            (assoc-in [:bindings binding]
-              {:type :slot
-               :idx slot-idx
-               :name binding}))
+            (cond->
+              ;; don't make _ an accessible name when using (bind _ "something")
+              ;; should be convention for unused name, accessing it should be an error
+              (not= '_ binding)
+              (assoc-in [:bindings binding]
+                {:type :slot
+                 :idx val-idx
+                 :name binding}))
 
-          (update :slots conj
-            {:depends-on (bindings-indexes-of-type state deps :slot)
-             :provides binding
-             :debug-info {:type :bind
-                          :name (str binding)
-                          :column (:column (meta binding))
-                          :line (:line (meta binding))}
-             :run run-form})
-          (update :slot-idx inc))
+            (update :slots conj
+              {:slot-idx slot-idx
+               :val-idx val-idx
+               :provides binding
+               :debug-info debug-info
+               :run run-form})
+
+            (update :values conj
+              {:val-idx val-idx
+               :slot-idx slot-idx
+               :depends-on (bindings-indexes-of-type state deps :slot)
+               :provides binding
+               :debug-info debug-info})
+
+            (update :slot-idx inc)
+            (update :val-idx inc)))
 
       (or (map? binding) (vector? binding))
       (let [as (binding-top-level-as binding)]
@@ -625,11 +651,13 @@
              :new-args-sym (with-meta (gensym "new") {:tag 'not-native})
              :args []
              :slots []
+             :values []
              :refs []
              :events {}
              :opts opts
              :effect-idx 0
-             :slot-idx 0}
+             :slot-idx 0
+             :val-idx 0}
             (analyze-args args)
             (r-> analyze-slot slots))
 
@@ -656,10 +684,10 @@
         render-args
         (bindings-indexes-of-type state render-used :arg)]
 
-    ;; assume 30 bits is safe for ints?
-    ;; FIXME: JS numbers are weird, how many bits are actually safe to use?
-    (when (>= (:slot-idx state) 30)
-      (throw (ex-info "too many slots" {})))
+    ;; 30 bits stay an unboxed positive Smi on 64-bit V8; only runnable slots count, not destructured cells
+    (when (> (:slot-idx state) 30)
+      (throw (ex-info (str "too many slots in " comp-name " (" (:slot-idx state) ", max 30)")
+               {:component comp-name :slots (:slot-idx state)})))
 
     (when-not render-fn
       (throw (ex-info "missing render" {})))
@@ -674,23 +702,27 @@
          ~(:args-fn state)
          (cljs.core/array
            ~@(->> (:slots state)
-                  (map-indexed
-                    (fn [idx {:keys [depends-on affects run check debug-info]}]
-                      `(make-slot-config
-                         ~(reduce bit-set 0 depends-on)
-                         ~(reduce bit-set 0 affects)
-                         ~run
-                         ~(when check
-                            (make-check-fn state render-deps idx check))
-                         ~(when include-debug-info?
-                            debug-info))))))
+                  (map
+                    (fn [{:keys [val-idx run check debug-info]}]
+                      (let [affects (if check
+                                      0
+                                      (reduce bit-set 0 (get-in state [:values val-idx :affects])))
+                            affects-render? (if check
+                                              false
+                                              (contains? render-deps val-idx))]
+                        `(make-slot-config
+                           ~val-idx
+                           ~affects
+                           ~affects-render?
+                           ~run
+                           ~(when check
+                              (make-check-fn state render-deps check))
+                           ~(when include-debug-info?
+                              debug-info)))))))
+         ~(:val-idx state)
          ;; ref init fns, in declaration order. nil when there are none
          ~(when (seq (:refs state))
             `(cljs.core/array ~@(map :init (:refs state))))
-         ;; initially all slots that run are dirty, value cells never run
-         ~(->> (:slots state)
-               (keep-indexed (fn [idx {:keys [run]}] (when run idx)))
-               (reduce bit-set 0))
          ~(or opts {})
          ;; fn that checks args and invalidates slots or sets render-required
          ;; args are always produced by args-fn, so their count is correct
@@ -707,16 +739,21 @@
                   ~@(when affects-render?
                       [`(arg-triggers-render! ~comp-sym ~idx)])
                   ~@(when affects-slots?
-                      [`(arg-triggers-slots! ~comp-sym ~idx ~(reduce bit-set 0 affects))])))
+                      [`(arg-triggers-slots! ~comp-sym ~idx ~(reduce bit-set 0 affects) ~(apply min affects))])))
            ;; drops return value in :advanced
            js/undefined)
-         ~(reduce bit-set 0 render-deps)
          ~render-fn
          ~(:events state)
          ~(when include-debug-info?
             (let [m (meta comp-name)]
               {:args (->> (:args state) (map :name) (mapv str))
                :refs (->> (:refs state) (map :name) (mapv str))
+               :values (->> (:values state)
+                            (mapv (fn [{:keys [val-idx depends-on affects debug-info]}]
+                                    (assoc debug-info
+                                      :idx val-idx
+                                      :depends-on (vec (sort depends-on))
+                                      :affects (vec (sort affects))))))
                :file (:file m)
                :line (:line m)
                :column (:column m)}))

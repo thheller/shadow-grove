@@ -190,19 +190,14 @@
          []
          (or names [])))
      :slots
-     (let [slots (-> this .-config .-slots)]
-       (->> (range (alength slots))
-            (map (fn [idx]
-                   (let [config (aget slots idx)
-                         value (aget (.-slot-values this) idx)
-                         value (as-embedded-value ctx value)]
-                     (-> (.-debug-info config)
-                         (assoc
-                           :idx idx
-                           :depends-on (.-depends-on config)
-                           :affects (.-affects config)
-                           :value value)))))
-            (vec)))
+     (let [slot-values (.-slot-values this)
+           values (-> this .-config .-debug-info (:values))]
+       (reduce-kv
+         (fn [v idx info]
+           (let [value (as-embedded-value ctx (aget slot-values idx))]
+             (conj v (assoc info :value value))))
+         []
+         (or values [])))
      ;; FIXME: should this just keep the managedroot in snapshot?
      ;; its always the managed root, so we can skip this in visuals
      :children [(dp/snapshot (-> this .-root .-node) ctx)]})
@@ -924,12 +919,14 @@
 
        :component_run_slot
        (fn component_run_slot [component slot-idx]
-         (let [t (add-trace :component-run-slot (.-instance-id component) slot-idx)]
-           [t (aget (.-slot-values component) slot-idx)]))
+         (let [t (add-trace :component-run-slot (.-instance-id component) slot-idx)
+               val-idx (.-val-idx (aget (.-slots (.-config component)) slot-idx))]
+           [t (aget (.-slot-values component) val-idx)]))
 
        :component_run_slot_done
        (fn component_run_slot_done [component slot-idx [t oval]]
-         (let [nval (aget (.-slot-values component) slot-idx)]
+         (let [val-idx (.-val-idx (aget (.-slots (.-config component)) slot-idx))
+               nval (aget (.-slot-values component) val-idx)]
            (add-trace :component-run-slot-done t (= oval nval) rt/*claimed* rt/*ready*)))
 
        :component_after_render_cleanup

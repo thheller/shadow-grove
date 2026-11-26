@@ -137,15 +137,6 @@
     (-> b (.-component-env) (::depth))
     ))
 
-;; FIXME: there are likely faster ways to do this
-(defn find-first-set-bit-idx [search]
-  {:pre [(not (zero? search))]}
-  (loop [search search
-         idx 0]
-    (if (identical? 1 (bit-and search 1))
-      idx
-      (recur (bit-shift-right search 1) (inc idx)))))
-
 (defn handle-error-state! [component ex]
   (js/console.error "component failed to render" component)
   (js/console.error ex))
@@ -166,7 +157,7 @@
   (field ^not-native after-render-cleanup {})
   (field ^not-native before-render {})
 
-  (field ^array slot-values)
+  (field ^array slot-values nil)
 
   ;; (ref name init) values, created once in constructor, never change
   (field ^array ref-values nil)
@@ -240,9 +231,11 @@
             (.push ref-render val)))))
 
     (set! root (common/managed-root component-env))
-    ;; marking everything dirty to ensure all slots run
-    (set! dirty-slots (.-slot-init-bits config))
-    (set! slot-values (js/Array. (alength (.-slots config)))))
+    ;; all runnable slots start dirty
+    (set! dirty-slots (dec (bit-shift-left 1 (alength (.-slots config)))))
+    (let [value-count (.-value-count config)]
+      (when (pos? value-count)
+        (set! slot-values (js/Array. value-count)))))
 
   cljs.core/IHash
   (-hash [this]
@@ -453,16 +446,15 @@
   (get-slot-value [this idx]
     (aget slot-values idx))
 
-  (mark-slots-dirty! [this dirty-bits]
+  (mark-slots-dirty! [this dirty-bits first-idx]
     (set! dirty-slots (bit-or dirty-slots dirty-bits))
-    (let [first-new (find-first-set-bit-idx dirty-bits)]
-      (when (<= first-new current-idx)
-        (set! current-idx first-new)
-        (set! suspended? false))))
+    (when (<= first-idx current-idx)
+      (set! current-idx first-idx)
+      (set! suspended? false)))
 
-  (mark-dirty-from-args! [this dirty-bits]
+  (mark-dirty-from-args! [this dirty-bits first-idx]
     (set! dirty-from-args (bit-or dirty-from-args dirty-bits))
-    (.mark-slots-dirty! this dirty-bits))
+    (.mark-slots-dirty! this dirty-bits first-idx))
 
   (set-render-required! [this]
     (set! needs-render? true)
@@ -491,7 +483,7 @@
             (-> (.-slots config) (aget idx))
 
             prev-val
-            (aget slot-values idx)
+            (aget slot-values (.-val-idx slot-config))
 
             t
             (trace/component-run-slot this idx)]
@@ -512,7 +504,7 @@
               (do (set! dirty-slots (bit-clear dirty-slots idx))
 
                   ;; stores value(s) and makes others dirty if actually updated
-                  (.check-slot-value! this idx slot-config val)
+                  (.check-slot-value! this slot-config val)
 
                   (set! current-idx (inc current-idx))))
 
@@ -521,44 +513,47 @@
 
     js/undefined)
 
-  (check-slot-value! [this idx slot-config val]
+  (check-slot-value! [this slot-config val]
     (if-some [check (.-check slot-config)]
       ;; destructuring slot, generated fn checks each value individually
       (check this val)
 
-      (let [affects (.-affects slot-config)
-            render? (bit-test (.-render-deps config) idx)]
+      (let [val-idx (.-val-idx slot-config)
+            affects (.-affects slot-config)
+            render? (.-affects-render? slot-config)]
         (if (or render? (pos? affects))
-          (.slot-check! this idx val affects render?)
+          (.slot-check! this val-idx val affects render?)
           ;; nothing depends on this, no need to compare
-          (aset slot-values idx val))))
+          (aset slot-values val-idx val))))
 
     js/undefined)
 
-  (slot-check! [this idx val affects ^boolean render?]
-    (let [prev (aget slot-values idx)]
-      (aset slot-values idx val)
+  (slot-check! [this val-idx val affects ^boolean render?]
+    (let [prev (aget slot-values val-idx)]
+      (aset slot-values val-idx val)
       (if (= prev val)
         false
-        (do (.slot-changed! this idx affects render?)
+        (do (.slot-changed! this affects render?)
             true))))
 
-  (slot-force! [this idx val affects ^boolean render?]
-    (aset slot-values idx val)
-    (.slot-changed! this idx affects render?)
+  (slot-force! [this val-idx val affects ^boolean render?]
+    (aset slot-values val-idx val)
+    (.slot-changed! this affects render?)
     true)
 
-  (slot-changed! [this idx affects ^boolean render?]
-    (set! updated-slots (bit-set updated-slots idx))
+  (slot-changed! [this affects ^boolean render?]
+    (set! updated-slots (bit-set updated-slots current-idx))
     (set! dirty-slots (bit-or dirty-slots affects))
     (when render?
       (set! needs-render? true))
     js/undefined)
 
   (run-next! [^not-native this]
-    (if (identical? current-idx (alength (.-slots config)))
+    (if (or (zero? dirty-slots)
+            (identical? current-idx (alength (.-slots config))))
       ;; all slots done
-      (.component-render! this)
+      (do (set! current-idx (alength (.-slots config)))
+          (.component-render! this))
       (.run-slot! this current-idx))
 
     js/undefined)
@@ -716,18 +711,18 @@
 (defn component-init? [x]
   (instance? ComponentInit x))
 
-;; run is nil for value cells of destructured slots, they never run
 ;; check is nil for regular slots, set for destructuring slots
-(deftype SlotConfig [depends-on affects run check debug-info])
+(deftype SlotConfig [val-idx affects affects-render? run check debug-info])
 
 (defn make-slot-config
   "used by defc macro, do not use directly"
-  [depends-on affects run check debug-info]
-  {:pre [(nat-int? depends-on)
+  [val-idx affects affects-render? run check debug-info]
+  {:pre [(nat-int? val-idx)
          (nat-int? affects)
-         (or (nil? run) (fn? run))
+         (boolean? affects-render?)
+         (fn? run)
          (or (nil? check) (fn? check))]}
-  (SlotConfig. depends-on affects run check debug-info))
+  (SlotConfig. val-idx affects affects-render? run check debug-info))
 
 (defn make-component-config
   "used by defc macro, do not use directly"
@@ -735,11 +730,10 @@
    min-args
    args-fn
    slots
+   value-count
    refs
-   slot-dirty-bits
    opts
    check-args-fn
-   render-deps
    render-fn
    events
    debug-info]
@@ -748,10 +742,10 @@
          (fn? args-fn)
          (array? slots)
          (every? #(instance? SlotConfig %) slots)
+         (nat-int? value-count)
          (or (nil? refs) (and (array? refs) (every? fn? refs)))
          (map? opts)
          (fn? check-args-fn)
-         (nat-int? render-deps)
          (fn? render-fn)
          (map? events)]}
 
@@ -761,11 +755,10 @@
           min-args
           args-fn
           slots
+          value-count
           refs
-          slot-dirty-bits
           opts
           check-args-fn
-          render-deps
           render-fn
           events
           debug-info)]
@@ -781,8 +774,8 @@
 (defn get-arg ^not-native [^ManagedComponent comp idx]
   (-nth ^not-native (.-args comp) idx))
 
-(defn arg-triggers-slots! [^ManagedComponent comp idx dirty-bits]
-  (.mark-dirty-from-args! comp dirty-bits))
+(defn arg-triggers-slots! [^ManagedComponent comp idx dirty-bits first-idx]
+  (.mark-dirty-from-args! comp dirty-bits first-idx))
 
 (defn arg-triggers-render! [^ManagedComponent comp idx]
   (.set-render-required! comp))

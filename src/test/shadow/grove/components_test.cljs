@@ -623,3 +623,155 @@
            (sg/render rt-ref root (ui-dynamic-ev-opts false log-ref))
            (is (false? (dispatch-click)))
            (is (= [] (take-log! log-ref))))]))))
+
+;; destructured value cells do not count against the 30-slot limit
+
+(defc ui-many-destructured [state-a state-b log-ref]
+  ;; 20 keys + :as = 21 values, 1 runnable slot
+  (bind {:keys [k1 k2 k3 k4 k5 k6 k7 k8 k9 k10
+                k11 k12 k13 k14 k15 k16 k17 k18 k19 k20]
+         :as ma}
+    (sg/watch state-a))
+  ;; 20 keys (no :as) = 21 values, 1 runnable slot
+  (bind {:keys [m1 m2 m3 m4 m5 m6 m7 m8 m9 m10
+                m11 m12 m13 m14 m15 m16 m17 m18 m19 m20]}
+    (sg/watch state-b))
+  ;; total values so far: 42 (> 30), runnable slots: 2
+  (bind derived-k1
+    (swap! log-ref conj :k1)
+    (str "k1=" k1))
+  (bind derived-m20
+    (swap! log-ref conj :m20)
+    (str "m20=" m20))
+  (bind derived-count
+    (swap! log-ref conj :count)
+    (count ma))
+  ;; events should still read destructured values that nothing else depends on
+  (event ::read-unused! [env ev e]
+    (swap! log-ref conj [:ev k15 m15]))
+  (render
+    (swap! log-ref conj :render)
+    (<< [:button {:on-click {:e ::read-unused!}}
+         (str derived-k1 " " derived-m20 " " derived-count " " k20)])))
+
+(deftest test-many-destructured-values-past-30
+  (let [{:keys [root rt-ref]} (make-env ::many-destructured)
+        state-a (atom {:k1 "a1" :k15 "a15" :k20 "a20"})
+        state-b (atom {:m15 "b15" :m20 "b20"})
+        log-ref (atom [])]
+
+    ;; only 5 runnable slots, 45 total value entries
+    (is (= 5 (alength (.-slots ui-many-destructured))))
+    (is (= 45 (.-value-count ui-many-destructured)))
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root (ui-many-destructured state-a state-b log-ref))
+           (is (= [:k1 :m20 :count :render] (take-log! log-ref)))
+           (is (= "k1=a1 m20=b20 3 a20" (.-textContent root))))
+
+         ;; changing an unused key on state-b (no :as) must not run anything or render
+         (fn [] (swap! state-b assoc :m15 "b15-new"))
+         (fn []
+           (is (= [] (take-log! log-ref)))
+           (is (= "k1=a1 m20=b20 3 a20" (.-textContent root))))
+
+         ;; event handler still sees the updated destructured cell past index 30
+         (fn [] (.click (.querySelector root "button")))
+         (fn []
+           (is (= [[:ev "a15" "b15-new"]] (take-log! log-ref))))
+
+         ;; changing m20 only re-runs derived-m20 and render
+         (fn [] (swap! state-b assoc :m20 "b20-new"))
+         (fn []
+           (is (= [:m20 :render] (take-log! log-ref)))
+           (is (= "k1=a1 m20=b20-new 3 a20" (.-textContent root))))
+
+         ;; changing k20 (used directly in render, plus :as ma) skips derived-k1 and derived-m20
+         (fn [] (swap! state-a assoc :k20 "a20-new"))
+         (fn []
+           (is (= [:count :render] (take-log! log-ref)))
+           (is (= "k1=a1 m20=b20-new 3 a20-new" (.-textContent root))))]))))
+
+;; exactly 30 runnable slots (indices 0..29) + destructured cells works cleanly
+
+(defc ui-max-30-slots [arg-x state-ref log-ref]
+  (bind {:keys [a b c d]} (sg/watch state-ref)) ;; slot 0 (+ 4 cells)
+  (bind s1 (+ a 1))    ;; 1
+  (bind s2 (+ s1 1))   ;; 2
+  (bind s3 (+ s2 1))   ;; 3
+  (bind s4 (+ s3 1))   ;; 4
+  (bind s5 (+ s4 1))   ;; 5
+  (bind s6 (+ s5 1))   ;; 6
+  (bind s7 (+ s6 1))   ;; 7
+  (bind s8 (+ s7 1))   ;; 8
+  (bind s9 (+ s8 1))   ;; 9
+  (bind s10 (+ s9 1))  ;; 10
+  (bind s11 (+ s10 1)) ;; 11
+  (bind s12 (+ s11 1)) ;; 12
+  (bind s13 (+ s12 1)) ;; 13
+  (bind s14 (+ s13 1)) ;; 14
+  (bind s15 (+ s14 1)) ;; 15
+  (bind s16 (+ s15 1)) ;; 16
+  (bind s17 (+ s16 1)) ;; 17
+  (bind s18 (+ s17 1)) ;; 18
+  (bind s19 (+ s18 1)) ;; 19
+  (bind s20 (+ s19 1)) ;; 20
+  (bind s21 (+ s20 1)) ;; 21
+  (bind s22 (+ s21 1)) ;; 22
+  (bind s23 (+ s22 1)) ;; 23
+  (bind s24 (+ s23 1)) ;; 24
+  (bind s25 (+ s24 1)) ;; 25
+  (bind s26 (+ s25 1)) ;; 26
+  (bind s27 (+ s26 1)) ;; 27
+  (bind s28 (+ s27 1)) ;; 28
+  (bind s29 (do (swap! log-ref conj :s29) (+ s28 arg-x))) ;; 29 (bit 29)
+  (render (str s29 ":" b)))
+
+(deftest test-max-30-runnable-slots
+  (let [{:keys [root rt-ref]} (make-env ::max-30-slots)
+        state-ref (atom {:a 1 :b "x"})
+        log-ref (atom [])]
+
+    (is (= 30 (alength (.-slots ui-max-30-slots))))
+    (is (= 34 (.-value-count ui-max-30-slots)))
+
+    (async done
+      (run-steps done
+        [(fn []
+           (sg/render rt-ref root (ui-max-30-slots 100 state-ref log-ref))
+           (is (= [:s29] (take-log! log-ref)))
+           (is (= "129:x" (.-textContent root))))
+
+         ;; arg-x only affects slot 29 (bit 29)
+         (fn []
+           (sg/render rt-ref root (ui-max-30-slots 200 state-ref log-ref))
+           (is (= [:s29] (take-log! log-ref)))
+           (is (= "229:x" (.-textContent root))))
+
+         ;; changing b only triggers render, not s29
+         (fn [] (swap! state-ref assoc :b "y"))
+         (fn []
+           (is (= [] (take-log! log-ref)))
+           (is (= "229:y" (.-textContent root))))
+
+         ;; changing a cascades through all 30 slots to s29
+         (fn [] (swap! state-ref assoc :a 2))
+         (fn []
+           (is (= [:s29] (take-log! log-ref)))
+           (is (= "230:y" (.-textContent root))))]))))
+
+;; 0-slot component (slot-values nil, dirty-slots 0)
+
+(defc ui-no-slots [x]
+  (render (str "val=" x)))
+
+(deftest test-zero-slots-component
+  (let [{:keys [root rt-ref]} (make-env ::zero-slots)]
+    (is (= 0 (alength (.-slots ui-no-slots))))
+    (is (= 0 (.-value-count ui-no-slots)))
+    (sg/render rt-ref root (ui-no-slots 1))
+    (is (= "val=1" (.-textContent root)))
+    (sg/render rt-ref root (ui-no-slots 2))
+    (is (= "val=2" (.-textContent root)))))
