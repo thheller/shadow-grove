@@ -475,41 +475,36 @@
     this)
 
   (run-slot! [^not-native this idx]
-    ;; when marked dirty run fn, otherwise just skip slot
-    (if-not (bit-test dirty-slots idx)
-      (set! current-idx (inc current-idx))
+    (let [slot-config
+          (-> (.-slots config) (aget idx))
 
-      (let [slot-config
-            (-> (.-slots config) (aget idx))
+          prev-val
+          (aget slot-values (.-val-idx slot-config))
 
-            prev-val
-            (aget slot-values (.-val-idx slot-config))
+          t
+          (trace/component-run-slot this idx)]
 
-            t
-            (trace/component-run-slot this idx)]
+      (binding [rt/*slot-provider* this
+                rt/*env* component-env
+                rt/*slot-idx* idx
+                rt/*slot-value* prev-val
+                rt/*claimed* false
+                rt/*ready* true]
 
-        (binding [rt/*slot-provider* this
-                  rt/*env* component-env
-                  rt/*slot-idx* idx
-                  rt/*slot-value* prev-val
-                  rt/*claimed* false
-                  rt/*ready* true]
+        (let [val (.run slot-config this)]
 
-          (let [val (.run slot-config this)]
+          (if-not rt/*ready*
+            ;; values are kept as they were, so they match what dependents last saw
+            (.suspend! this idx)
+            ;; clear dirty bit
+            (do (set! dirty-slots (bit-clear dirty-slots idx))
 
-            (if-not rt/*ready*
-              ;; values are kept as they were, so they match what dependents last saw
-              (.suspend! this idx)
-              ;; clear dirty bit
-              (do (set! dirty-slots (bit-clear dirty-slots idx))
+                ;; stores value(s) and makes others dirty if actually updated
+                (.check-slot-value! this slot-config val)
 
-                  ;; stores value(s) and makes others dirty if actually updated
-                  (.check-slot-value! this slot-config val)
+                (set! current-idx (inc current-idx))))
 
-                  (set! current-idx (inc current-idx))))
-
-            (trace/component-run-slot-done this idx t)
-            ))))
+          (trace/component-run-slot-done this idx t))))
 
     js/undefined)
 
@@ -549,12 +544,17 @@
     js/undefined)
 
   (run-next! [^not-native this]
-    (if (or (zero? dirty-slots)
-            (identical? current-idx (alength (.-slots config))))
-      ;; all slots done
-      (do (set! current-idx (alength (.-slots config)))
-          (.component-render! this))
-      (.run-slot! this current-idx))
+    (let [slot-count (alength (.-slots config))
+          remaining (if (< current-idx slot-count)
+                      (bit-and dirty-slots (bit-shift-left -1 current-idx))
+                      0)]
+      (if (zero? remaining)
+        ;; all slots done
+        (do (set! current-idx slot-count)
+            (.component-render! this))
+        (let [next-idx (- 31 (js/Math.clz32 (bit-and remaining (- remaining))))]
+          (set! current-idx next-idx)
+          (.run-slot! this next-idx))))
 
     js/undefined)
 
